@@ -44,7 +44,7 @@ Current local development values are `VITE_SELF_HOSTED_PUBLISH=true` and `VITE_A
 
 ## Current Work
 
-The sync branch fast-forwarded from `origin/main` to upstream commit `b3ed3d9` (`fix: rotated elements alignment icon fix`). No merge conflicts or manual source resolutions occurred. The only overlap with the feature is `src/editor/header/RightHeader.tsx`, where upstream added publish preflight validation. A read-only merge-tree application of the feature onto this sync branch also found no textual conflicts. Any future feature integration should preserve both that upstream preflight and the `PUBLISH_ENABLED` capability seam.
+The sync branch fast-forwarded from `origin/main` to upstream commit `b3ed3d9` (`fix: rotated elements alignment icon fix`). No merge conflicts or manual source resolutions occurred. The only source overlap with the feature is `src/editor/header/RightHeader.tsx`, where upstream added publish preflight validation. A read-only merge-tree application of the source changes is clean: `RightHeader.tsx` auto-merges. A full branch merge reports an expected add/add conflict only in `codex_handoff.md`, because both branches carry independent handoff revisions. Any future feature integration should preserve both that upstream preflight and the `PUBLISH_ENABLED` capability seam.
 
 The sync branch contains one intentional 11-line lockfile correction, committed as `b8f851a`: nested `@swc/helpers@0.5.23`, still required because upstream's `next-intl` dependency resolves `@swc/core@1.15.33` with an optional `@swc/helpers>=0.5.17` peer. `npm ci` is clean with that correction. The updated handoff is committed separately as `ecf5856`.
 
@@ -122,7 +122,7 @@ Each individual website repository owns generated Next.js website source and its
 
 - The upstream `package-lock.json` was missing `@swc/helpers@0.5.23`; the fork carries only the minimal nested lockfile correction.
 - Full-repository lint currently contains unrelated existing failures. Do not call these regressions from Orange & Gray changes unless changed files introduce new failures.
-- The current upstream sync overlap is `src/editor/header/RightHeader.tsx`; upstream added a publish preflight before autosave/publish. The read-only feature application is clean.
+- The current upstream sync overlap is `src/editor/header/RightHeader.tsx`; upstream added a publish preflight before autosave/publish. The source-level read-only feature application is clean; only the independently maintained handoff file has an add/add documentation conflict.
 
 ## Validation Checklist
 
