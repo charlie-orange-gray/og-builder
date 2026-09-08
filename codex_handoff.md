@@ -46,7 +46,7 @@ Current local development values are `VITE_SELF_HOSTED_PUBLISH=true` and `VITE_A
 
 The sync branch fast-forwarded from `origin/main` to upstream commit `b3ed3d9` (`fix: rotated elements alignment icon fix`). No merge conflicts or manual source resolutions occurred. The only overlap with the feature is `src/editor/header/RightHeader.tsx`, where upstream added publish preflight validation. A read-only merge-tree application of the feature onto this sync branch also found no textual conflicts. Any future feature integration should preserve both that upstream preflight and the `PUBLISH_ENABLED` capability seam.
 
-The sync branch currently has one intentional uncommitted lockfile correction: nested `@swc/helpers@0.5.23`, still required because upstream's `next-intl` dependency resolves `@swc/core@1.15.33` with an optional `@swc/helpers>=0.5.17` peer. `npm ci` is clean with that correction.
+The sync branch contains one intentional 11-line lockfile correction, committed as `b8f851a`: nested `@swc/helpers@0.5.23`, still required because upstream's `next-intl` dependency resolves `@swc/core@1.15.33` with an optional `@swc/helpers>=0.5.17` peer. `npm ci` is clean with that correction. The updated handoff is committed separately as `ecf5856`.
 
 Next recommended action: review this sync branch and approve or reject integrating it into the feature branch. Do not push, merge into `origin/main`, rebase, or merge the feature until approval.
 
