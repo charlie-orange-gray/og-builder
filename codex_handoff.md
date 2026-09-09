@@ -36,7 +36,7 @@ The feature branch's local development values are `VITE_SELF_HOSTED_PUBLISH=true
 
 ## Current Branch
 
-`chore/sync-upstream-2026-09-09`. Upstream through `e7b5b9f` is integrated in merge commit `874eb39`; architecture documentation is committed as `0635787`. The Publish feature remains at `7a2ccae` pending integration.
+`feature/self-hosted-publish-ui`, integrating synchronized `origin/main` (`11e43f6`) without rebasing.
 
 ## Completed Work
 
@@ -48,17 +48,13 @@ The feature branch's local development values are `VITE_SELF_HOSTED_PUBLISH=true
 
 ## Current Work
 
-Phase 0 is validated locally and awaiting remote merge approval. A fresh fetch on 2026-09-09 found upstream commit `e7b5b9f`, covering transformed drag/resize behavior across 23 files. It merged cleanly on the dedicated sync branch without Orange & Gray source changes. `origin/main` remains `a3ed7b5`.
+PR #1 merged with a normal merge commit as `11e43f6` after explicit user approval and exact-head verification. `origin/main` contains upstream `e7b5b9f`, the required lockfile correction, and both architecture documents. A fresh upstream fetch found no newer commit.
 
-The sync branch is pushed and [PR #1](https://github.com/charlie-orange-gray/og-builder/pull/1) is open and mergeable. Automatic approval review rejected merging this specific PR into the remote default branch, citing the earlier explicit approval requirement even after the latest implementation request was supplied. No remote main merge, feature merge, or rebase occurred. Resume only after approval naming PR #1; use a merge commit and verify the PR head before merging.
+The synchronized main is merged into the Publish feature. Only `codex_handoff.md` had an add/add conflict; this latest handoff is preserved. `RightHeader.tsx` auto-merged and retains the capability guard, mutation flush, upstream preflight and blocking feedback, autosave flush, then publish request.
 
-The only fork source divergence from `upstream/main` on the sync branch is the existing 11-line nested `@swc/helpers@0.5.23` lockfile correction (`b8f851a`). Documentation is also present. Fresh `npm ci` succeeds with that correction.
+Feature validation passed fresh `npm ci`, TypeScript, all three builds, diff checks against `origin/main`, and scoped ESLint (zero errors; 29 existing warnings across RightHeader and Vite). The initial full test run had one failure in the unchanged 30 ms mounting test in `sandbox-code-host.test.ts`; isolated rerun passed all 17 tests. A complete confirmation run with `--maxWorkers=4` passed all 654 files: 10,307 passed, 1 skipped, 3 todo. No test or runtime code was changed for that failure. Logs: `/private/tmp/og-phase0-tests.log`, `/private/tmp/og-phase0-confirm-tests.log`, and `/private/tmp/og-phase0-build.log`.
 
-A renewed read-only merge-tree check confirms `RightHeader.tsx` combines the upstream publish preflight with `PUBLISH_ENABLED` without a textual conflict. Only `codex_handoff.md` has an expected add/add documentation conflict. Preserve the newer handoff and update its branch/state during integration. Required publish order remains: capability guard, `flushNow()`, preflight and blocking feedback, `flushSaveNow()`, publish request.
-
-No control-plane repository, database, persistence API, asset pipeline, Git site publisher, Docker worker, or Debian deployment has been implemented. Local Docker CLI exists but its daemon socket is absent; PostgreSQL executables were not found on PATH. No credentials or host configuration were changed.
-
-Next action: merge PR #1 after specific approval, fetch `origin`, merge updated `origin/main` into the Publish feature, resolve the documentation conflict, rerun the required validations, and integrate the feature through a second PR. The implementation request explicitly prohibits beginning Phase 1 until Phase 0 is clean.
+Next action: finish feature validation, create PR #2, and merge it if clean and mergeable as explicitly authorized. Then begin the separate control-plane persistence repository and editor adapter. No persistence, site Git publishing, Docker worker, or Debian deployment is implemented yet.
 
 ## Next Planned Milestones
 

@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { CLOUD_ENABLED } from '@/shared/cloud-flag';
+import { PUBLISH_ENABLED } from '@/shared/publish-flag';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { exportDropdownOpenAtom } from '@/code/stores/editor-store';
 import { PlayIcon } from '@/shared/icons';
@@ -87,7 +88,7 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
   // custom_domain, etc.). Fire-and-forget — failures just leave `meta`
   // null and the dropdown shows "Not published yet".
   const fetchMeta = useCallback(async () => {
-    if (!CLOUD_ENABLED) return;
+    if (!PUBLISH_ENABLED) return;
     try {
       const id = (await import('@/backend/project-id')).getProjectId();
       const res = await fetch(`/api/websites/${id}`);
@@ -173,7 +174,7 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
 
   // ─── Publish ─────────────────────────────────────────────────────────
   const handlePublish = useCallback(async () => {
-    if (!CLOUD_ENABLED || publishing) return;
+    if (!PUBLISH_ENABLED || publishing) return;
     const id = (await import('@/backend/project-id')).getProjectId();
     setPublishing(true);
     setPublishSuccess(false);
@@ -237,7 +238,7 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
   // The dropdown's outside-click handler skips clicks on
   // `[data-live-trigger]` so this toggle wins cleanly.
   const handleLiveClick = useCallback(() => {
-    if (!CLOUD_ENABLED) return;
+    if (!PUBLISH_ENABLED) return;
     setOpen((prev) => !prev);
     trace.action('header:live-toggle');
   }, []);
@@ -353,7 +354,7 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
             // the dropdown's own UI handles the feedback, so the button
             // stays plain.
             onClick={handleLiveClick}
-            disabled={isViewer}
+            disabled={!PUBLISH_ENABLED || isViewer}
             className="w-full relative overflow-hidden cut-corners"
             style={primaryBg}
             // Tag for the dropdown's outside-click filter.
