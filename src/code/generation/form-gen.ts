@@ -63,6 +63,8 @@ export async function POST(req) {
         formId: body && body.formId,
         fields: (body && body.fields) || {},
         _hp: body && body._hp,
+        ua: req.headers.get("user-agent") || "",
+        referer: req.headers.get("referer") || "",
       }),
     });
     const data = await res.json().catch(() => ({ ok: res.ok }));

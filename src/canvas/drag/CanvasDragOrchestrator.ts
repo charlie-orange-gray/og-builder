@@ -17,6 +17,7 @@
 //    `opts.getActiveFilePath()`, `jotaiStore.xxx` → `opts.jotaiStore.xxx`.
 
 import type { useStore } from 'jotai';
+import { deferredDropSelection } from './strategies/ToolbarDragStrategy';
 import { DragCoordinator } from './DragCoordinator';
 import {
   attachAutoPan,
@@ -1088,7 +1089,10 @@ export class CanvasDragOrchestrator {
         // After flushNow, codeAtom has the new file, nodesAtom has been
         // re-derived, and `nodes.get(newId)` returns the canonical node.
         this.opts.renderer.setStructuralPending(false);
-        this.opts.setSelectedIds([newId]);
+        // An auto-sized absolute drop is hidden + re-centred after paint;
+        // its strategy selects it on reveal so the overlay never draws at
+        // the ghost placement (deferredDropSelection).
+        if (!deferredDropSelection.has(newId)) this.opts.setSelectedIds([newId]);
       } else if (update.type === 'duplicateCollectionToCanvas') {
         // Replica drag-out clone of a CMS collection list — COPY the literal
         // `.map()` subtree into `canvasNodes` (map + `item.*` bindings preserved,

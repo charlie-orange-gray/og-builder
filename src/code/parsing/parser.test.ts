@@ -1069,230 +1069,13 @@ const items = [1, 2, 3];
   });
 });
 
-describe('Inline .map() parsing (const array)', () => {
-  test('detects const array with object elements', () => {
-    const code = `
-export default function Page() {
-  const faqData = [
-    { question: 'How?', answer: 'Like this.' },
-    { question: 'Why?', answer: 'Because.' },
-  ];
-  return (
-    <div data-id="root" style={{position: 'relative', width: '100%'}}>
-      <div data-id="faq-list" style={{display: 'flex', flexDirection: 'column'}}>
-        {faqData.map((item, idx) => (
-          <div data-id="faq-item" key={idx} style={{padding: '24px'}}>
-            <h3 data-id="faq-q">{item.question}</h3>
-            <p data-id="faq-a">{item.answer}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-
-    // Parent should have collectionList with __inline: prefix
-    const faqList = nodes.get('faq-list')!;
-    expect(faqList.collectionList).toBeDefined();
-    expect(faqList.collectionList!.source).toBe('__inline:faqData');
-    expect(faqList.collectionList!.itemVar).toBe('item');
-    expect(faqList.collectionList!.templateIds).toEqual({ default: 'faq-item' });
-
-    // Parent should have inlineMapData with the actual data
-    expect(faqList.inlineMapData).toBeDefined();
-    expect(faqList.inlineMapData).toHaveLength(2);
-    expect(faqList.inlineMapData![0]).toEqual({ question: 'How?', answer: 'Like this.' });
-    expect(faqList.inlineMapData![1]).toEqual({ question: 'Why?', answer: 'Because.' });
-  });
-
-  test('sets isCollectionTemplate on template children', () => {
-    const code = `
-export default function Page() {
-  const items = [
-    { title: 'A', desc: 'First' },
-    { title: 'B', desc: 'Second' },
-  ];
-  return (
-    <div data-id="wrapper" style={{}}>
-      {items.map((item) => (
-        <div data-id="card" style={{}}>
-          <h2 data-id="card-title">{item.title}</h2>
-          <p data-id="card-desc">{item.desc}</p>
-        </div>
-      ))}
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    expect(nodes.get('card')!.isCollectionTemplate).toBe(true);
-    expect(nodes.get('card-title')!.isCollectionTemplate).toBe(true);
-    expect(nodes.get('card-desc')!.isCollectionTemplate).toBe(true);
-    // The wrapper is NOT inside the .map() callback
-    expect(nodes.get('wrapper')!.isCollectionTemplate).toBeUndefined();
-  });
-
-  test('detects text bindings inside inline .map()', () => {
-    const code = `
-export default function Page() {
-  const people = [
-    { name: 'Alice', role: 'Dev' },
-  ];
-  return (
-    <div data-id="list" style={{}}>
-      {people.map((person) => (
-        <div data-id="person-card" style={{}}>
-          <p data-id="person-name">{person.name}</p>
-          <p data-id="person-role">{person.role}</p>
-        </div>
-      ))}
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    const nameNode = nodes.get('person-name')!;
-    expect(nameNode.binding).toBeDefined();
-    expect(nameNode.binding!.field).toBe('name');
-    expect(nameNode.binding!.property).toBe('text');
-
-    const roleNode = nodes.get('person-role')!;
-    expect(roleNode.binding).toBeDefined();
-    expect(roleNode.binding!.field).toBe('role');
-    expect(roleNode.binding!.property).toBe('text');
-  });
-
-  test('detects attribute bindings inside inline .map()', () => {
-    const code = `
-export default function Page() {
-  const gallery = [
-    { src: '/img/a.jpg', link: '/a' },
-  ];
-  return (
-    <div data-id="gallery" style={{}}>
-      {gallery.map((item) => (
-        <div data-id="gallery-item" style={{}}>
-          <img data-id="gallery-img" src={item.src} style={{}} />
-          <a data-id="gallery-link" href={item.link} style={{}}>View</a>
-        </div>
-      ))}
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    const img = nodes.get('gallery-img')!;
-    expect(img.binding).toBeDefined();
-    expect(img.binding!.field).toBe('src');
-    expect(img.binding!.property).toBe('src');
-
-    const link = nodes.get('gallery-link')!;
-    expect(link.binding).toBeDefined();
-    expect(link.binding!.field).toBe('link');
-    expect(link.binding!.property).toBe('href');
-  });
-
-  test('handles numeric values in const array objects', () => {
-    const code = `
-export default function Page() {
-  const stats = [
-    { label: 'Users', count: 500 },
-    { label: 'Revenue', count: 1200 },
-  ];
-  return (
-    <div data-id="stats-list" style={{}}>
-      {stats.map((item) => (
-        <div data-id="stat-card" style={{}}>{item.label}</div>
-      ))}
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    const statsList = nodes.get('stats-list')!;
-    expect(statsList.inlineMapData).toBeDefined();
-    expect(statsList.inlineMapData![0]).toEqual({ label: 'Users', count: '500' });
-    expect(statsList.inlineMapData![1]).toEqual({ label: 'Revenue', count: '1200' });
-  });
-
-  test('does not match unknown variables (no false positives)', () => {
-    const code = `
-export default function Page() {
-  return (
-    <div data-id="root" style={{}}>
-      {unknownVar.map((item) => (
-        <div data-id="item" style={{}}>{item.name}</div>
-      ))}
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    expect(nodes.get('root')!.collectionList).toBeUndefined();
-    expect(nodes.get('item')!.isCollectionTemplate).toBeUndefined();
-    expect(nodes.get('item')!.binding).toBeUndefined();
-  });
-
-  test('CMS imports still work alongside inline arrays', () => {
-    const code = `
-import team from '@/cms/team.json';
-export default function Page() {
-  const faqData = [
-    { question: 'Q1', answer: 'A1' },
-  ];
-  return (
-    <div data-id="root" style={{}}>
-      <div data-id="team-list" style={{}}>
-        {team.map(member => (
-          <div data-id="member-card" style={{}}>{member.name}</div>
-        ))}
-      </div>
-      <div data-id="faq-list" style={{}}>
-        {faqData.map(item => (
-          <div data-id="faq-card" style={{}}>{item.question}</div>
-        ))}
-      </div>
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-
-    // CMS import should still work
-    const teamList = nodes.get('team-list')!;
-    expect(teamList.collectionList).toBeDefined();
-    expect(teamList.collectionList!.source).toBe('team');
-    expect(teamList.inlineMapData).toBeUndefined();
-
-    // Inline array should also work
-    const faqList = nodes.get('faq-list')!;
-    expect(faqList.collectionList).toBeDefined();
-    expect(faqList.collectionList!.source).toBe('__inline:faqData');
-    expect(faqList.inlineMapData).toBeDefined();
-    expect(faqList.inlineMapData).toHaveLength(1);
-  });
-
-  test('handles top-level const array (not inside export default)', () => {
-    const code = `
-const features = [
-  { title: 'Fast', desc: 'Blazing speed' },
-  { title: 'Simple', desc: 'Easy to use' },
-];
-<div data-id="root" style={{}}>
-  {features.map(item => (
-    <div data-id="feature" style={{}}>{item.title}</div>
-  ))}
-</div>`;
-    const nodes = parseJSXToNodes(code);
-    const root = nodes.get('root')!;
-    expect(root.collectionList).toBeDefined();
-    expect(root.collectionList!.source).toBe('__inline:features');
-    expect(root.inlineMapData).toHaveLength(2);
-  });
-});
-
-// ─── Map system: styleBindings, text bindings, inlineMapData, isCollectionTemplate ──
+// ─── Map system: styleBindings, text bindings, isCollectionTemplate (CMS lists) ──
 
 describe('Map system — styleBindings in .map() template', () => {
   test('detects single styleBinding (backgroundColor: item.bgColor)', () => {
     const code = `
+import cardData from '@/cms/cardData.json';
 export default function Page() {
-  const cardData = [{"bgColor":"#80aa53"}];
   return (
     <div data-id="root" style={{}}>
       {cardData.map((item, idx) => (
@@ -1313,8 +1096,8 @@ export default function Page() {
 
   test('detects multiple styleBindings on same element', () => {
     const code = `
+import cardData from '@/cms/cardData.json';
 export default function Page() {
-  const cardData = [{"bg":"red","radius":"8px","pad":"16px"}];
   return (
     <div data-id="root" style={{}}>
       {cardData.map((item, idx) => (
@@ -1339,8 +1122,8 @@ export default function Page() {
 
   test('does not detect styleBindings for static style values', () => {
     const code = `
+import cardData from '@/cms/cardData.json';
 export default function Page() {
-  const cardData = [{"title":"A"}];
   return (
     <div data-id="root" style={{}}>
       {cardData.map((item, idx) => (
@@ -1359,8 +1142,8 @@ export default function Page() {
 
   test('uses correct custom iterator var for styleBindings', () => {
     const code = `
+import planData from '@/cms/planData.json';
 export default function Page() {
-  const planData = [{"bg":"blue"}];
   return (
     <div data-id="root" style={{}}>
       {planData.map((plan, idx) => (
@@ -1383,8 +1166,8 @@ export default function Page() {
 describe('Map system — text binding in .map() template', () => {
   test('detects {item.title} text binding on child element', () => {
     const code = `
+import cardData from '@/cms/cardData.json';
 export default function Page() {
-  const cardData = [{"title":"Hello","subtitle":"World"}];
   return (
     <div data-id="root" style={{}}>
       {cardData.map((item, idx) => (
@@ -1410,8 +1193,8 @@ export default function Page() {
 
   test('text binding with custom iterator name (plan.name)', () => {
     const code = `
+import plans from '@/cms/plans.json';
 export default function Page() {
-  const plans = [{"name":"Free","price":"$0"}];
   return (
     <div data-id="root" style={{}}>
       {plans.map((plan, idx) => (
@@ -1436,101 +1219,11 @@ export default function Page() {
   });
 });
 
-describe('Map system — inlineMapData extraction from const array', () => {
-  test('extracts inlineMapData with string fields', () => {
-    const code = `
-export default function Page() {
-  const data = [
-    {"name":"Alice","role":"Engineer"},
-    {"name":"Bob","role":"Designer"},
-  ];
-  return (
-    <div data-id="root" style={{}}>
-      {data.map((item, idx) => (
-        <div data-id="person" key={idx} style={{}}>{item.name}</div>
-      ))}
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    const root = nodes.get('root')!;
-    expect(root.inlineMapData).toBeDefined();
-    expect(root.inlineMapData!.length).toBe(2);
-    expect(root.inlineMapData![0]).toEqual({ name: 'Alice', role: 'Engineer' });
-    expect(root.inlineMapData![1]).toEqual({ name: 'Bob', role: 'Designer' });
-  });
-
-  test('extracts inlineMapData with mixed value types (string + number)', () => {
-    const code = `
-export default function Page() {
-  const metrics = [
-    { label: 'Users', count: 1500 },
-    { label: 'Revenue', count: 50000 },
-  ];
-  return (
-    <div data-id="root" style={{}}>
-      {metrics.map((item, idx) => (
-        <div data-id="metric" key={idx} style={{}}>{item.label}</div>
-      ))}
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    const root = nodes.get('root')!;
-    expect(root.inlineMapData).toBeDefined();
-    expect(root.inlineMapData!.length).toBe(2);
-    // Numeric values should be coerced to strings
-    expect(root.inlineMapData![0]).toEqual({ label: 'Users', count: '1500' });
-    expect(root.inlineMapData![1]).toEqual({ label: 'Revenue', count: '50000' });
-  });
-
-  test('inlineMapData is undefined for non-.map() parents', () => {
-    const code = `
-export default function Page() {
-  return (
-    <div data-id="root" style={{}}>
-      <div data-id="child" style={{}}>Hello</div>
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    const root = nodes.get('root')!;
-    expect(root.inlineMapData).toBeUndefined();
-    expect(root.collectionList).toBeUndefined();
-  });
-
-  test('inlineMapData only appears on the direct parent of .map(), not grandparent', () => {
-    const code = `
-export default function Page() {
-  const items = [{"label":"A"},{"label":"B"}];
-  return (
-    <div data-id="root" style={{}}>
-      <div data-id="list-wrapper" style={{}}>
-        {items.map((item, idx) => (
-          <div data-id="list-item" key={idx} style={{}}>{item.label}</div>
-        ))}
-      </div>
-    </div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    // list-wrapper is the direct parent — should have inlineMapData
-    const wrapper = nodes.get('list-wrapper')!;
-    expect(wrapper.inlineMapData).toBeDefined();
-    expect(wrapper.inlineMapData!.length).toBe(2);
-    expect(wrapper.collectionList).toBeDefined();
-    // root is the grandparent — should NOT have inlineMapData
-    const root = nodes.get('root')!;
-    expect(root.inlineMapData).toBeUndefined();
-    expect(root.collectionList).toBeUndefined();
-  });
-});
-
 describe('Map system — isCollectionTemplate on children inside .map()', () => {
   test('all descendants inside .map() get isCollectionTemplate=true', () => {
     const code = `
+import items from '@/cms/items.json';
 export default function Page() {
-  const items = [{"title":"A","desc":"B"}];
   return (
     <div data-id="root" style={{}}>
       {items.map((item, idx) => (
@@ -1556,8 +1249,8 @@ export default function Page() {
 
   test('siblings outside .map() are NOT flagged as isCollectionTemplate', () => {
     const code = `
+import items from '@/cms/items.json';
 export default function Page() {
-  const items = [{"label":"X"}];
   return (
     <div data-id="root" style={{}}>
       <h1 data-id="heading" style={{}}>Title</h1>

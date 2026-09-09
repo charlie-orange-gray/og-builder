@@ -7,7 +7,7 @@
 // that was duplicated across every tool in PropertiesPanel.
 
 import { createContext, useContext, useCallback, useMemo, useRef, type ReactNode } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 // Live nodes — the panel must show the current parent (for parentLayout /
 // parentFlexDirection / parent-relative child controls) the moment a
 // reparent commits mid-drag. The freeze fix lives at the parser-atom level.
@@ -15,7 +15,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 // whole-map `useAtomValue(nodesAtom)` read: same live data, but the provider
 // only re-renders when a node/result it actually uses changes. Callbacks read
 // fresh via `getNodesSnapshot()`.
-import { selectedNodeAtom, selectedIdsAtom, mapItemIndexAtom, mapContextAtom, isComponentInstanceInCache, getNodesSnapshot } from '@/code/stores/store';
+import { selectedNodeAtom, selectedIdsAtom, isComponentInstanceInCache, getNodesSnapshot } from '@/code/stores/store';
 import { useNode, useLiveNode, useNodesComputed } from '@/code/stores/node-family';
 import { isReplicaViewportAtom, interactingViewportWidthAtom, interactingViewportIdAtom, isComponentVariantViewportAtom, activeComponentVariantAtom } from '@/code/stores/viewport-store';
 import { resolveParentVariantStyle } from './parent-variant-style';
@@ -23,10 +23,8 @@ import { containerOverridesAtom, getOverrideBreakpoints, hasOverrideAtWidth, get
 import { isDefaultLocaleAtom, localeOverridesAtom } from '@/code/stores/locale-store';
 import { queueMutation, flushNow } from '@/code/mutation/mutation-queue';
 import { removeComponentPropProjectWide } from '@/code/features/remove-component-prop';
-import { propagateToGhosts } from '@/code/generation/map-ghost-propagate';
 import { updateNodeStyles, getContentRoot, getViewportPrefix, forceCanvasRender, parseRectCacheKey, vpIdFromPrefix } from '@/canvas/node-ops';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
-import { makeGhostId } from '@/shared/ghost-id';
 import { detectValueSource, BORDER_LONGHANDS, type ValueSource } from '@/code/features/variable-ops';
 import { isComponentFileAtom } from '@/code/stores/store';
 import { pageVariablesAtom } from '@/code/stores/page-variables-store';
@@ -103,15 +101,6 @@ export interface ControlContextValue {
    *  also drops the prop from the component signature; the controls-panel × keeps it. */
   removeVariable: (property: string, propName: string, defaultValue: string, deleteProp?: boolean) => void;
 
-  /** Map item override context (null when not editing a ghost) */
-  mapOverride: {
-    itemIndex: number;
-    itemCount: number;
-    isOverridden: (property: string) => boolean;
-    resetOverride: (property: string) => void;
-    goToItem: (index: number | null) => void;
-  } | null;
-
   /**
    * CMS-collection-template context. Non-null when the selected node is
    * inside a `.map()` over a CMS collection. Drives the "Bind to Field"
@@ -177,10 +166,6 @@ export function ControlProvider({ children }: { children: ReactNode }) {
   const isDefaultLocale = useAtomValue(isDefaultLocaleAtom);
   const localeOverrides = useAtomValue(localeOverridesAtom);
 
-  const mapItemIndex = useAtomValue(mapItemIndexAtom);
-  const mapContext = useAtomValue(mapContextAtom);
-  const setMapItemIndex = useSetAtom(mapItemIndexAtom);
-
   const isComponentFile = useAtomValue(isComponentFileAtom);
   const pageVariables = useAtomValue(pageVariablesAtom);
 
@@ -214,10 +199,10 @@ export function ControlProvider({ children }: { children: ReactNode }) {
   // wrapper's `width: '100%'`, so the Size tool showed an uneditable "auto"
   // for every FIT text (live find 2026-07-13).
   // MEMOISED — the identity of this object is load-bearing, not just its
-  // contents. It feeds the `styles` memo below, whose result feeds
-  // `effectiveStyles`' useNodesComputed DEPS; a fresh object here rebuilds that
-  // selectAtom every render, and jotai's useAtomValue re-subscribes + calls its
-  // own rerender() whenever the atom identity changes → unbounded render loop.
+  // contents. It feeds the `styles` memo below, which every control reads; a
+  // fresh object here re-ran that memo every render, and jotai's useAtomValue
+  // re-subscribed + called its own rerender() whenever a derived atom identity
+  // changed → unbounded render loop.
   // Both branches used to allocate: `{ ...inner, ...node }` on every FIT-wrapper
   // render, and `{}` on every render with NO resolvable node — which is exactly
   // the state a component-variant drag-out lands in (the exit clone's
@@ -329,31 +314,6 @@ export function ControlProvider({ children }: { children: ReactNode }) {
 
     return result;
   }, [baseStyles, isDefaultLocale, selectedId, localeOverrides, isReplica, vpWidth, overrides, isComponentVariantViewport, activeComponentVariant, node]);
-
-  // Map-aware effective styles: overlay map data overrides onto base styles
-  // (bounded template-subtree scan → useNodesComputed so it stays live per
-  // commit but only re-renders when the merged result differs).
-  const effectiveStyles = useNodesComputed((nodes) => {
-    if (mapItemIndex == null || !mapContext) return styles;
-    const itemData = mapContext.mapData[mapItemIndex];
-    if (!itemData) return styles;
-
-    const overrides: Record<string, string> = {};
-    const queue = [mapContext.templateId];
-    while (queue.length > 0) {
-      const nid = queue.shift()!;
-      const n = nodes.get(nid);
-      if (!n) continue;
-      for (const sb of (n.styleBindings || [])) {
-        if (itemData[sb.field] !== undefined) {
-          overrides[sb.styleProp] = itemData[sb.field];
-        }
-      }
-      for (const childId of n.children) queue.push(childId);
-    }
-
-    return { ...styles, ...overrides };
-  }, [styles, mapItemIndex, mapContext]);
 
   // Derive parent layout type for grid/flex child controls. EFFECTIVE for the
   // INTERACTING viewport: a replica @media can flip the parent's
@@ -522,140 +482,8 @@ export function ControlProvider({ children }: { children: ReactNode }) {
     }
   }, [selectedIds, isComponentVariantViewport, isReplica, vpId, isComponentFile]);
 
-  // Map-aware style update: routes writes to map data when editing a ghost item
-  // Track which properties we've already auto-bound during this session
-  // (parser re-parse is async, so styleBindings may be stale during continuous editing)
-  const boundFieldsRef = useRef(new Map<string, string>());
-
-  // Keep selectedId in a ref so mapAwareUpdateStyle always reads the latest value
-  const selectedIdRef = useRef(selectedId);
-  selectedIdRef.current = selectedId;
-
-  const mapAwareUpdateStyle = useCallback((keyOrStyles: string | Record<string, string>, value?: string) => {
-    if (mapItemIndex == null || !mapContext) {
-      updateStyle(keyOrStyles, value);
-      return;
-    }
-
-    const allEntries = typeof keyOrStyles === 'string' ? { [keyOrStyles]: value! } : keyOrStyles;
-
-    // `display` (the Hide toggle) is a TEMPLATE-level structural prop, NEVER a
-    // per-item CMS field. The map-aware path below AUTO-BINDS each style key to a
-    // CMS field (`item.<key>`) — meaningless for `display`, so Hide on a CMS row
-    // silently no-op'd (it tried to bind a non-existent `display` field). Route it
-    // through the normal style write so it reaches node-ops/replica-context: inline
-    // `display:none` on the primary, a per-variant `display: variant === 'x' ?
-    // 'none' : '<base>'` ternary on a variant — both hide the row's rendered rows.
-    const entries: Record<string, string> = {};
-    const structural: Record<string, string> = {};
-    for (const [k, v] of Object.entries(allEntries)) {
-      if (k === 'display') structural[k] = v;
-      else entries[k] = v;
-    }
-    if (Object.keys(structural).length > 0) {
-      updateStyle(structural);
-      // A CMS-row `display:none` must RE-SYNC the collection ghosts: the panel write
-      // patches the template + queues the mutation, but the ghost copies (and the
-      // resolved template) only re-render on a full Renderer cycle — so the rows
-      // stay visible until a drag forces one. Flush + force a render now (same
-      // pattern pagination uses), so Hide takes effect immediately. Deferred a tick
-      // so the queued mutation is in code before the Renderer re-reads it.
-      flushNow();
-      requestAnimationFrame(() => forceCanvasRender());
-    }
-    if (Object.keys(entries).length === 0) return;
-
-    const itemData = { ...(mapContext.mapData[mapItemIndex] || {}) };
-
-    for (const [key, val] of Object.entries(entries)) {
-      // Check parsed bindings first, then local cache
-      let fieldName: string | null = boundFieldsRef.current.get(key) || null;
-      if (!fieldName) {
-        const currentNodes = getNodesSnapshot();
-        const queue = [mapContext.templateId];
-        while (queue.length > 0) {
-          const nid = queue.shift()!;
-          const n = currentNodes.get(nid);
-          if (!n) continue;
-          for (const sb of (n.styleBindings || [])) {
-            if (sb.styleProp === key) { fieldName = sb.field; break; }
-          }
-          if (fieldName) break;
-          for (const childId of n.children) queue.push(childId);
-        }
-      }
-
-      if (fieldName) {
-        if (mapItemIndex === 0) {
-          const oldVal = itemData[fieldName];
-          itemData[fieldName] = val;
-          queueMutation({ type: 'updateMapItem', varName: mapContext.varName, index: 0, item: itemData });
-          propagateToGhosts(mapContext.varName, fieldName, oldVal, val, mapContext.mapData);
-        } else {
-          itemData[fieldName] = val;
-          queueMutation({ type: 'updateMapItem', varName: mapContext.varName, index: mapItemIndex, item: itemData });
-        }
-      } else {
-        // Auto-bind: convert static style to per-item field (only once per property)
-        const sid = selectedIdRef.current;
-        trace.action('control:map-auto-bind', { key, sid, varName: mapContext.varName, currentValue: styles[key] || '' });
-        if (sid) {
-          flushNow();
-          queueMutation({
-            type: 'bindStyleToMap',
-            nodeId: sid,
-            varName: mapContext.varName,
-            styleProp: key,
-            fieldName: key,
-            currentValue: styles[key] || '',
-          });
-          // Cache the binding so subsequent edits use updateMapItem directly
-          boundFieldsRef.current.set(key, key);
-          itemData[key] = val;
-          queueMutation({ type: 'updateMapItem', varName: mapContext.varName, index: mapItemIndex, item: itemData });
-          if (mapItemIndex === 0) {
-            propagateToGhosts(mapContext.varName, key, styles[key] || '', val, mapContext.mapData);
-          }
-        }
-      }
-
-      trace.action('control:map-update-style', { key, value: val, mapItemIndex, fieldName });
-    }
-
-    // Imperative DOM update via the canvas bridge so the change is visible
-    // instantly without waiting for the mutation queue to flush + re-parse.
-    // For .map() ghost edits the data binding only changes ONE item in the
-    // array, so the patch must target the specific ghost (not all of them).
-    // The bridge's patchStyles selector matches data-node-id exactly — pass
-    // the ghost-suffixed id to hit just that ghost. For mapItemIndex===0 we
-    // target the template AND mirror to all ghosts because that path either
-    // edits the shared style (canonical write, no field binding) or
-    // propagates a field default to ghosts (handled above by
-    // propagateToGhosts).
-    const sid = selectedIdRef.current;
-    if (sid) {
-      const targetNodeId = makeGhostId(sid, mapItemIndex ?? 0);
-      const bridge = getCanvasBridge();
-      // Patch primary viewport
-      bridge.patchStyles(targetNodeId, '', entries);
-      // Replica viewports: enumerate viewport prefixes from the bridge cache
-      // (the rectCache holds keys `${vpPrefix}:${nodeId}`). Patch each replica
-      // viewport's matching ghost too.
-      const rectCache = (bridge as any).rectCache as Map<string, DOMRect> | undefined;
-      if (rectCache) {
-        const seenPrefixes = new Set<string>();
-        for (const key of rectCache.keys()) {
-          const vpPrefix = parseRectCacheKey(key)?.vpPrefix;
-          if (!vpPrefix || seenPrefixes.has(vpPrefix)) continue;
-          seenPrefixes.add(vpPrefix);
-          bridge.patchStyles(targetNodeId, vpPrefix, entries);
-        }
-      }
-    }
-  }, [mapItemIndex, mapContext, updateStyle, styles]);
-
   // Backward compat alias — tools that call updateMultipleStyles still work
-  const updateMultipleStyles = mapAwareUpdateStyle as (styles: Record<string, string>) => void;
+  const updateMultipleStyles = updateStyle as (styles: Record<string, string>) => void;
 
   const hasOverride = useCallback((property: string) => {
     if (!selectedId) return false;
@@ -1258,52 +1086,6 @@ export function ControlProvider({ children }: { children: ReactNode }) {
     queueMutation({ type: 'removeVariable', nodeId: selectedId, styleProperty: property, propName, defaultValue, deleteProp });
   }, [selectedId, isComponentFile, isComponentVariantViewport, activeComponentVariant, styles, pageVariables, node, isReplica, vpWidth, updateStyle]);
 
-  // Map override context for ghost item editing
-  const mapOverrideCtx = useMemo(() => {
-    if (mapItemIndex == null || !mapContext) return null;
-    const itemData = mapContext.mapData[mapItemIndex] || {};
-    const item0 = mapContext.mapData[0] || {};
-
-    return {
-      itemIndex: mapItemIndex,
-      itemCount: mapContext.mapData.length,
-      isOverridden: (property: string) => {
-        const currentNodes = getNodesSnapshot();
-        const queue = [mapContext.templateId];
-        while (queue.length > 0) {
-          const nid = queue.shift()!;
-          const n = currentNodes.get(nid);
-          if (!n) continue;
-          for (const sb of (n.styleBindings || [])) {
-            if (sb.styleProp === property && itemData[sb.field] !== undefined && itemData[sb.field] !== item0[sb.field]) {
-              return true;
-            }
-          }
-          for (const childId of n.children) queue.push(childId);
-        }
-        return false;
-      },
-      resetOverride: (property: string) => {
-        const currentNodes = getNodesSnapshot();
-        const queue = [mapContext.templateId];
-        while (queue.length > 0) {
-          const nid = queue.shift()!;
-          const n = currentNodes.get(nid);
-          if (!n) continue;
-          for (const sb of (n.styleBindings || [])) {
-            if (sb.styleProp === property) {
-              const updated = { ...itemData, [sb.field]: item0[sb.field] || '' };
-              queueMutation({ type: 'updateMapItem', varName: mapContext.varName, index: mapItemIndex, item: updated });
-              return;
-            }
-          }
-          for (const childId of n.children) queue.push(childId);
-        }
-      },
-      goToItem: (index: number | null) => setMapItemIndex(index),
-    };
-  }, [mapItemIndex, mapContext, setMapItemIndex]);
-
   // CMS-collection-template context. Two sources surface this:
   //
   //   1. Selected node is inside a `.map()` over CMS data — the .map()
@@ -1547,13 +1329,13 @@ export function ControlProvider({ children }: { children: ReactNode }) {
   const value: ControlContextValue = {
     nodeId: selectedId,
     node,
-    styles: effectiveStyles,
+    styles,
     vpId,
     isReplica,
     vpWidth,
     parentLayout,
     parentFlexDirection,
-    updateStyle: mapAwareUpdateStyle,
+    updateStyle,
     updateMultipleStyles,
     updateStyleLive,
     hasOverride,
@@ -1561,7 +1343,6 @@ export function ControlProvider({ children }: { children: ReactNode }) {
     getValueSource,
     createVariable,
     removeVariable,
-    mapOverride: mapOverrideCtx,
     cmsBinding: cmsBindingCtx,
   };
 
@@ -1598,7 +1379,6 @@ const FALLBACK_CONTEXT: ControlContextValue = {
   getValueSource: () => ({ source: 'inline' as ValueSource, ref: null }),
   createVariable: () => {},
   removeVariable: () => {},
-  mapOverride: null,
   cmsBinding: null,
 };
 

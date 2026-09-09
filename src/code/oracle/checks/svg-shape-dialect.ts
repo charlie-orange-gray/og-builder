@@ -164,3 +164,37 @@ function checkSvgShapeDialect(ast: t.File, v: OracleViolation[]): void {
 }
 
 export { checkSvgShapeDialect };
+
+/**
+ * SHAPE_VARIANT_D_CSS_FORM — a per-variant geometry entry written as the CSS
+ * `path("…")` form. framer-motion sets the `d` ATTRIBUTE verbatim, so the
+ * canonical per-variant value is the RAW path data (`d: 'M0 0 L10 10 Z'`); the
+ * `path("…")` wrapper is valid ONLY inside the page's @media block (`d:
+ * path("…") !important`). The canvas Renderer tolerates the wrong form (the
+ * shape draws), the live site renders it BLANK in that variant — bug-hunt 20,
+ * AI-only after the builder door was checked (the shape editor writes raw data).
+ */
+export function checkShapeVariantDForm(code: string, v: OracleViolation[]): void {
+  const lineOf = (i: number) => code.slice(0, i).split('\n').length;
+  const objRe = /const\s+(\w+Variants)\s*=\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = objRe.exec(code)) !== null) {
+    // brace-balanced span of the variants object
+    let depth = 0, i = m.index + m[0].length - 1, end = -1;
+    for (; i < code.length; i++) {
+      if (code[i] === '{') depth++;
+      else if (code[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end === -1) continue;
+    const body = code.slice(m.index, end);
+    const dRe = /\bd\s*:\s*(['"`])\s*path\(/g;
+    let d: RegExpExecArray | null;
+    while ((d = dRe.exec(body)) !== null) {
+      const abs = m.index + d.index;
+      v.push({
+        code: 'SHAPE_VARIANT_D_CSS_FORM', tier: 2, line: lineOf(abs),
+        message: `${m[1]} (line ${lineOf(abs)}) sets d: 'path("…")' — motion writes the d ATTRIBUTE verbatim, and an attribute does not accept the CSS path() function, so the shape draws on the canvas but is BLANK on the published site in that variant. Per-variant geometry is the RAW path data: d: 'M0 0 L10 10 Z'. (The path("…") form belongs only to the page <style> @media rule: d: path("…") !important.)`,
+      });
+    }
+  }
+}

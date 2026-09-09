@@ -328,3 +328,59 @@ describe('overlay copy/paste — CROSS-FILE', () => {
     expect(parseOverlayTriggerCalls(out).length).toBe(1);
   });
 });
+
+// ─── Framer parity (2026-09-07): paste an OVERLAY onto another node ─────────
+// Copy the overlay ALONE, paste with a different node selected → that node gets
+// its own copy of the overlay (content, side/align/offset and trigger kind kept).
+describe('overlay paste onto a selected node', () => {
+  const BASE2 = BASE.replace(
+    '</div>\n  );',
+    `  <div data-id="other" style={{ position: 'absolute', width: '120px', height: '60px', left: '500px', top: '100px' }}></div>\n    </div>\n  );`,
+  );
+  it('attaches a copy of the overlay to the selected node', () => {
+    const ovCfg: OverlayConfig = { type: 'relative', triggerId: 'trig', side: 'right', align: 'start', offsetX: 4, offsetY: 8 };
+    const trCfg: OverlayTriggerConfig = { targetId: 'ovl', trigger: 'hover', dismiss: 'outside' };
+    let seeded = createOverlayInCode(BASE2, 'trig', 'ovl', ovCfg, trCfg);
+    seeded = seeded.replace(/(<motion\.div key="ovl"[\s\S]*?>)(\s*<\/motion\.div>)/, `$1<p data-id="ovl-text" style={{ position: 'relative' }}>Tooltip</p>$2`);
+    projectFS.writeFile(FILE, seeded);
+    setActiveFilePath(FILE);
+    setBumpVersion(() => {});
+    initMutationQueue(seeded, code => projectFS.writeFile(FILE, code));
+    const nodes = parseJSXToNodes(seeded);
+    copyNodes(['ovl'], nodes);                       // the OVERLAY alone
+    const res = executePaste({ selectedIds: ['other'], nodes, activeFilePath: FILE });
+    flushNow();
+    const out = projectFS.readFile(FILE)!;
+    expectParses(out);
+    expect(res.success).toBe(true);
+    const triggers = parseOverlayTriggerCalls(out);
+    const overlays = parseOverlayCalls(out);
+    expect(triggers.map(t => t.triggerId).sort()).toEqual(['other', 'trig']);
+    expect(overlays.length).toBe(2);
+    const otherTrig = triggers.find(t => t.triggerId === 'other')!;
+    expect(otherTrig.config.trigger).toBe('hover');         // trigger kind copied
+    const newOv = overlays.find(o => o.overlayId === otherTrig.config.targetId)!;
+    expect(newOv).toBeTruthy();
+    expect(newOv.overlayId).not.toBe('ovl');
+    expect(newOv.config.triggerId).toBe('other');
+    expect(newOv.config.side).toBe('right');
+    expect(newOv.config.offsetY).toBe(8);
+    // Content travelled, and the original pair is intact.
+    expect((out.match(/Tooltip/g) ?? []).length).toBe(2);
+    expect(parseOverlayCalls(out).find(o => o.overlayId === 'ovl')!.config.triggerId).toBe('trig');
+  });
+  it('refuses when the selected node already has an overlay', () => {
+    const ovCfg: OverlayConfig = { type: 'relative', triggerId: 'trig', side: 'bottom', align: 'center', offsetX: 0, offsetY: 0 };
+    const seeded = createOverlayInCode(BASE, 'trig', 'ovl', ovCfg, { targetId: 'ovl', trigger: 'click', dismiss: 'outside' });
+    projectFS.writeFile(FILE, seeded);
+    setActiveFilePath(FILE);
+    setBumpVersion(() => {});
+    initMutationQueue(seeded, code => projectFS.writeFile(FILE, code));
+    const nodes = parseJSXToNodes(seeded);
+    copyNodes(['ovl'], nodes);
+    const res = executePaste({ selectedIds: ['trig'], nodes, activeFilePath: FILE });
+    flushNow();
+    expect(res.success).toBe(false);
+    expect(parseOverlayCalls(projectFS.readFile(FILE)!).length).toBe(1);
+  });
+});

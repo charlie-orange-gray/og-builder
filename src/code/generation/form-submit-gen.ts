@@ -18,6 +18,7 @@
  */
 
 import * as t from '@babel/types';
+import { ensureTextNodeNowrap } from './label-nowrap';
 import { insertAfterLastImportLine } from './generator-utils';
 import { trace } from '@/shared/debug-trace';
 import { projectFS } from '../project/project-fs';
@@ -170,6 +171,7 @@ function ${FORMSUBMIT_COMPONENT_NAME}({ style, label = 'Submit', initialVariant 
       variants={labelVariants} initial={['default', initialVariant]} animate={['default', variant]} style={{
         display: 'block',
         fontSize: '14px',
+        whiteSpace: 'nowrap',
         color: '#ffffff',
         fontFamily: 'Inter, sans-serif',
         fontWeight: '600',
@@ -185,6 +187,7 @@ function ${FORMSUBMIT_COMPONENT_NAME}({ style, label = 'Submit', initialVariant 
       variants={successTextVariants} initial={['default', initialVariant]} animate={['default', variant]} style={{
         display: 'none',
         fontSize: '14px',
+        whiteSpace: 'nowrap',
         color: '#ffffff',
         fontFamily: 'Inter, sans-serif',
         fontWeight: '600',
@@ -199,6 +202,7 @@ function ${FORMSUBMIT_COMPONENT_NAME}({ style, label = 'Submit', initialVariant 
       variants={errorTextVariants} initial={['default', initialVariant]} animate={['default', variant]} style={{
         display: 'none',
         fontSize: '14px',
+        whiteSpace: 'nowrap',
         color: '#ffffff',
         fontFamily: 'Inter, sans-serif',
         fontWeight: '600',
@@ -263,10 +267,16 @@ export function upgradeFormSubmitDisplayTransitions(code: string): string {
  * No-op when the project has no Form Submit master, and identity-preserving when
  * it is already correct, so an untouched project is never marked dirty.
  */
+const FORMSUBMIT_LABEL_IDS = ['formsubmit-label', 'formsubmit-success', 'formsubmit-error'];
+/** The three state labels never wrap (one-line button text; Fit parent). */
+export function ensureFormSubmitLabelsNowrap(code: string): string {
+  return FORMSUBMIT_LABEL_IDS.reduce((acc, id) => ensureTextNodeNowrap(acc, id), code);
+}
+
 export function migrateFormSubmitDisplayTransitions(): void {
   const existing = projectFS.readFile(FORMSUBMIT_COMPONENT_PATH);
   if (existing == null) return;
-  const healed = upgradeFormSubmitDisplayTransitions(existing);
+  const healed = ensureFormSubmitLabelsNowrap(upgradeFormSubmitDisplayTransitions(existing));
   if (healed === existing) return;
   projectFS.writeFile(FORMSUBMIT_COMPONENT_PATH, healed);
   trace.action('form-submit-gen:migrated-display-transitions', { path: FORMSUBMIT_COMPONENT_PATH });
@@ -284,7 +294,7 @@ export function ensureFormSubmitComponentFile(): void {
   if (existing != null && !isOldAutoGen) {
     // Current-token master: keep the user's styling, but heal the display
     // transitions if it predates them.
-    const healed = upgradeFormSubmitDisplayTransitions(existing);
+    const healed = ensureFormSubmitLabelsNowrap(upgradeFormSubmitDisplayTransitions(existing));
     if (healed !== existing) {
       projectFS.writeFile(FORMSUBMIT_COMPONENT_PATH, healed);
       trace.action('form-submit-gen:healed-display-transitions', { path: FORMSUBMIT_COMPONENT_PATH });

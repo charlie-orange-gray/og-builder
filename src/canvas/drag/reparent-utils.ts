@@ -18,6 +18,7 @@ import { getNodeFromCache } from '@/code/stores/store';
 import { detectParentLayoutById, getFlexDirectionById } from './types';
 import { trace } from '@/shared/debug-trace';
 import { calculateGridDrop } from './grid-drop';
+import { getLayoutLocalFrame, findVisibleChildLocalRects } from './layout-local-frame';
 import { findNodeComputedStyle } from '@/canvas/node-ops';
 import { getOverridesAtWidth, type ContainerOverrideMap } from '@/code/stores/container-query-store';
 import { isPrimaryViewport } from '@/shared/constants';
@@ -346,7 +347,14 @@ export function calculateLayoutInsertIndexById(
 
   // `findVisibleChildRects` already drops hidden / zero-area children; we
   // only need to subtract the dragged set on top.
-  const visibleRects = findVisibleChildRects(parentId, vpId);
+  // Rotated / skewed parent: the midpoint walk runs in the PARENT'S OWN
+  // frame (children as local rects, mouse as a local point) — screen AABBs
+  // of rotated children overlap and their midpoints don't follow the flex
+  // axis. Identity frame for an axis-aligned parent = previous behaviour.
+  const frame = getLayoutLocalFrame(parentId, vpId, findNodeRect(parentId, vpId));
+  const visibleRects = frame
+    ? findVisibleChildLocalRects(parentId, vpId, frame)
+    : findVisibleChildRects(parentId, vpId);
   if (visibleRects.length === 0) return 0;
 
   const unsorted = visibleRects.filter(c => !excludeIds.has(c.id));
@@ -357,7 +365,8 @@ export function calculateLayoutInsertIndexById(
   // invert when a negative-margin sibling overlaps its neighbour.
   const filtered = sortChildRectsByFlow(unsorted);
 
-  const mousePos = direction === 'row' ? mouseScreen.x : mouseScreen.y;
+  const mouseLocal = frame ? frame.toLocal(mouseScreen) : mouseScreen;
+  const mousePos = direction === 'row' ? mouseLocal.x : mouseLocal.y;
 
   // For each child, check if mouse is before or after its midpoint.
   // Midpoints are clamped MONOTONIC along the walk: an overlapping

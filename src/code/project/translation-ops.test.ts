@@ -112,14 +112,16 @@ describe('rich-text run rows + commits', () => {
     fsStore.set(FILE, RICH_PAGE);
   });
 
-  test('listTranslatableTexts lists runs as plain text, never raw JSX', () => {
+  test('listTranslatableTexts lists a marked node as ONE rich row (HTML, never raw JSX)', () => {
+    // 2026-09-07: the per-run split is gone — Framer parity, one editor per
+    // node with the marks kept as sanitized inline HTML.
     const rows = listTranslatableTexts('en').filter(r => r.nodeId.startsWith('rich'));
-    expect(rows.map(r => [r.nodeId, r.source])).toEqual([
-      ['rich__r0', "I'm"],
-      ['rich__r1', 'Jenny,'],
-      ['rich__r2', 'Product Designer'],
-    ]);
-    expect(rows.every(r => !r.source.includes('<span'))).toBe(true);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.nodeId).toBe('rich');
+    expect(rows[0]!.rich).toBe(true);
+    expect(rows[0]!.source).not.toContain('style={{');
+    expect(rows[0]!.source).toMatch(/^I'm <span style="[^"]+">Jenny,<\/span>/);
+    expect(rows[0]!.source).toContain('Product Designer');
   });
 
   test('non-default run commit transforms ONLY that run + seeds + writes', () => {
@@ -150,11 +152,12 @@ describe('rich-text run rows + commits', () => {
     expect(readTranslationText({ filePath: FILE, key: 'rich__r1', locale: 'en' })).toBe('Janie,');
   });
 
-  test('transformed runs keep their persisted key in later listings', () => {
+  test('a legacy transformed run still lists as ONE rich row with the run resolved', () => {
     commitTranslationText({ filePath: FILE, nodeId: 'rich__r1', locale: 'fr', defaultLocale: 'en', text: 'Jenny !' });
     const rows = listTranslatableTexts('en').filter(r => r.nodeId.startsWith('rich'));
-    expect(rows.map(r => r.nodeId)).toEqual(['rich__r0', 'rich__r1', 'rich__r2']);
-    expect(rows[1].source).toBe('Jenny,');          // from the seeded default message
+    expect(rows.map(r => r.nodeId)).toEqual(['rich']);
+    expect(rows[0]!.source).toContain('Jenny,');    // resolved from the seeded default message
+    expect(rows[0]!.source).not.toContain("t('");
   });
 });
 
@@ -324,5 +327,87 @@ export default function Page() {
     const fr = JSON.parse(fsStore.get('messages/fr.json')!);
     expect(fr.home['original-key']).toBe('X');
     expect(fr.home.card).toBeUndefined();
+  });
+});
+
+// ─── RICH text: one HTML message per node (2026-09-07) ───────────────────────
+const RICH_MARKS_PAGE = `'use client';
+export default function Page() {
+  return (
+    <div data-id="root" style={{ width: '100%' }}>
+      <p data-id="greet" data-name="Text" style={{ position: 'relative' }}>
+        <strong>hello</strong> my <span style={{
+          color: 'rgb(4, 79, 253)'
+        }}>friend</span>
+      </p>
+    </div>
+  );
+}
+`;
+
+describe('rich text translation', () => {
+  beforeEach(() => {
+    fsStore.set(FILE, RICH_MARKS_PAGE);
+    fsStore.set('i18n/config.json', JSON.stringify({ defaultLocale: 'en', locales: [{ code: 'en' }, { code: 'fr' }] }));
+  });
+
+  test('lists ONE rich row for a marked node, with the content as HTML', () => {
+    const rows = listTranslatableTexts('en').filter((r) => r.nodeId.startsWith('greet'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.rich).toBe(true);
+    expect(rows[0]!.source).toBe('<strong>hello</strong> my <span style="color: rgb(4, 79, 253)">friend</span>');
+  });
+
+  test('non-default commit transforms the node, seeds the default HTML, writes the locale HTML', () => {
+    commitTranslationText({ filePath: FILE, nodeId: 'greet', locale: 'fr', defaultLocale: 'en', text: '<p><strong>bonjour</strong> mon ami</p>', rich: true });
+    const code = fsStore.get(FILE)!;
+    expect(code).toMatch(/dangerouslySetInnerHTML=\{\{\s*__html: t\.raw\("greet"\)\s*\}\}/);
+    expect(code).not.toContain('<strong>hello</strong>');
+    expect(readTranslationText({ filePath: FILE, key: 'greet', locale: 'en' })).toBe('<strong>hello</strong> my <span style="color: rgb(4, 79, 253)">friend</span>');
+    expect(readTranslationText({ filePath: FILE, key: 'greet', locale: 'fr' })).toBe('<strong>bonjour</strong> mon ami');
+    // Listing now reads the message and stays ONE row.
+    const rows = listTranslatableTexts('en').filter((r) => r.nodeId === 'greet');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.rich).toBe(true);
+    // Default-locale edit of the transformed node writes the message, not the JSX.
+    commitTranslationText({ filePath: FILE, nodeId: 'greet', locale: 'en', defaultLocale: 'en', text: '<em>hi</em> friend', rich: true });
+    expect(readTranslationText({ filePath: FILE, key: 'greet', locale: 'en' })).toBe('<em>hi</em> friend');
+    expect(fsStore.get(FILE)).toBe(code);
+  });
+
+  test('default-locale commit on an untransformed rich node rewrites the JSX', () => {
+    commitTranslationText({ filePath: FILE, nodeId: 'greet', locale: 'en', defaultLocale: 'en', text: '<strong>hey</strong> there', rich: true });
+    const code = fsStore.get(FILE)!;
+    expect(code).toContain('<strong>hey</strong> there');
+    expect(code).not.toContain('dangerouslySetInnerHTML');
+  });
+
+  test('legacy per-run keys are folded into the rich message and deleted', () => {
+    fsStore.set(FILE, RICH_MARKS_PAGE.replace('<strong>hello</strong> my', "<strong>{t('greet__r0')}</strong> my").replace("'use client';", "'use client';\nimport { useTranslations } from 'next-intl';").replace('export default function Page() {', "export default function Page() {\n  const t = useTranslations('home');"));
+    fsStore.set('messages/en.json', JSON.stringify({ home: { greet__r0: 'hello' } }));
+    fsStore.set('messages/fr.json', JSON.stringify({ home: { greet__r0: 'bonjour' } }));
+    fsStore.set('messages/es.json', '{}');
+    fsStore.set('i18n/config.json', JSON.stringify({ defaultLocale: 'en', locales: [{ code: 'en' }, { code: 'fr' }, { code: 'es' }] }));
+    commitTranslationText({ filePath: FILE, nodeId: 'greet', locale: 'es', defaultLocale: 'en', text: '<strong>hola</strong> amigo', rich: true });
+    expect(readTranslationText({ filePath: FILE, key: 'greet', locale: 'en' })).toBe('<strong>hello</strong> my <span style="color: rgb(4, 79, 253)">friend</span>');
+    expect(readTranslationText({ filePath: FILE, key: 'greet', locale: 'fr' })).toBe('<strong>bonjour</strong> my <span style="color: rgb(4, 79, 253)">friend</span>');
+    expect(readTranslationText({ filePath: FILE, key: 'greet', locale: 'es' })).toBe('<strong>hola</strong> amigo');
+    expect(readTranslationText({ filePath: FILE, key: 'greet__r0', locale: 'en' })).toBeNull();
+    expect(readTranslationText({ filePath: FILE, key: 'greet__r0', locale: 'fr' })).toBeNull();
+  });
+});
+
+describe('rich text — the default owns the run styles', () => {
+  beforeEach(() => {
+    fsStore.set(FILE, RICH_MARKS_PAGE);
+    fsStore.set('i18n/config.json', JSON.stringify({ defaultLocale: 'en', locales: [{ code: 'en' }, { code: 'fr' }] }));
+  });
+  test('a translation commit inherits the default run styles; a default restyle re-bakes it', () => {
+    // fr commit: translator kept the span but its style must come from the default.
+    commitTranslationText({ filePath: FILE, nodeId: 'greet', locale: 'fr', defaultLocale: 'en', text: '<strong>bonjour</strong> mon <span style="color: blue; font-size: 9px">ami</span>', rich: true });
+    expect(readTranslationText({ filePath: FILE, key: 'greet', locale: 'fr' })).toBe('<strong>bonjour</strong> mon <span style="color: rgb(4, 79, 253)">ami</span>');
+    // Default restyle (canvas edit): the fr span follows.
+    commitTranslationText({ filePath: FILE, nodeId: 'greet', locale: 'en', defaultLocale: 'en', text: '<strong>hello</strong> my <span style="color: rgb(4, 79, 253); font-size: 58px">friend</span>', rich: true });
+    expect(readTranslationText({ filePath: FILE, key: 'greet', locale: 'fr' })).toBe('<strong>bonjour</strong> mon <span style="color: rgb(4, 79, 253); font-size: 58px">ami</span>');
   });
 });

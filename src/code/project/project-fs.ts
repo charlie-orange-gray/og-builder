@@ -9,11 +9,42 @@ import { trace } from '@/shared/debug-trace';
 import { parseJSX } from '@/code/parsing/ast-utils';
 import { findVariantRootId, insertAtRootRestSpread, stampRootDataVariantAttr } from '@/shared/variant-root';
 import { nodeIdToVarName } from '@/shared/id-utils';
+import { healStyleBlockImportant } from '@/shared/media-important';
 import { ensureLayoutFile } from '@/code/generation/metadata-gen';
 import {
   ANIMATED_COUNTER_COMPONENT,
   TYPING_EFFECT_COMPONENT,
   AURORA_BACKGROUND_COMPONENT,
+  SILK_RIBBONS_COMPONENT,
+  LIGHT_PILLAR_COMPONENT,
+  IRIDESCENT_FILM_COMPONENT,
+  GOD_RAYS_COMPONENT,
+  GRAIN_FIELD_COMPONENT,
+  NEBULA_FIELD_COMPONENT,
+  DOT_WAVE_COMPONENT,
+  CONTOUR_MAP_COMPONENT,
+  FLUID_GRADIENT_COMPONENT,
+  CYBER_GRID_COMPONENT,
+  RIPPLE_GRID_COMPONENT,
+  VORONOI_CELLS_COMPONENT,
+  METABALL_FIELD_COMPONENT,
+  HALFTONE_SCREEN_COMPONENT,
+  SCANLINE_C_R_T_COMPONENT,
+  SMOKE_COMPONENT,
+  MARBLE_COMPONENT,
+  WARP_TUNNEL_COMPONENT,
+  STAR_WARP_COMPONENT,
+  HEX_GRID_COMPONENT,
+  LIGHTNING_COMPONENT,
+  LIQUID_CHROME_COMPONENT,
+  BOKEH_COMPONENT,
+  RAIN_GLASS_COMPONENT,
+  FIREFLIES_COMPONENT,
+  VORTEX_COMPONENT,
+  SUNSET_COMPONENT,
+  DUNES_COMPONENT,
+  OIL_SLICK_COMPONENT,
+  WAVE_STACK_COMPONENT,
   MATRIX_RAIN_COMPONENT,
   WAVE_DISTORTION_COMPONENT,
   GLITCH_TEXT_COMPONENT,
@@ -298,6 +329,22 @@ export class InMemoryProjectFS implements ProjectFS {
         this.files.set(path, healed);
         trace.action('project-fs:migrated-variant-root-insets', { path });
       }
+    }
+    // Banded `!important` heal: base styles are inline, so a `@media` band or
+    // `:lang()` declaration without `!important` paints on the canvas (band
+    // values are baked onto the tiles) but NEVER on the live site. Every
+    // builder generator writes it; AI/hand-written pages did not (2026-09-07:
+    // a user's responsive headings, paddings and column flips all dead on
+    // publish). Append it to every scoped declaration that lacks it —
+    // idempotent, parse-gated, style-literal only.
+    for (const [path, src] of this.files) {
+      if (!path.endsWith('.tsx') || !(path.startsWith('app/') || path.startsWith('components/'))) continue;
+      if (!src.includes('<style>')) continue;
+      const healed = healStyleBlockImportant(src);
+      if (healed === src) continue;
+      try { parseJSX(healed); } catch { trace.error('project-fs:media-important-heal-unparseable', path); continue; }
+      this.files.set(path, healed);
+      trace.action('project-fs:migrated-media-important', { path });
     }
     // Restore a WIPED reset: addPresetTokenToCSS used to REPLACE globals.css
     // wholesale when it had no :root block yet (fixed 2026-08-31), erasing the
@@ -1674,6 +1721,36 @@ const BUILT_IN_COMPONENTS: [string, string][] = [
   // Effects / animations
   ['components/AnimatedCounter.tsx', ANIMATED_COUNTER_COMPONENT],
   ['components/AuroraBackground.tsx', AURORA_BACKGROUND_COMPONENT],
+  ['components/SilkRibbons.tsx', SILK_RIBBONS_COMPONENT],
+  ['components/LightPillar.tsx', LIGHT_PILLAR_COMPONENT],
+  ['components/IridescentFilm.tsx', IRIDESCENT_FILM_COMPONENT],
+  ['components/GodRays.tsx', GOD_RAYS_COMPONENT],
+  ['components/GrainField.tsx', GRAIN_FIELD_COMPONENT],
+  ['components/NebulaField.tsx', NEBULA_FIELD_COMPONENT],
+  ['components/DotWave.tsx', DOT_WAVE_COMPONENT],
+  ['components/ContourMap.tsx', CONTOUR_MAP_COMPONENT],
+  ['components/FluidGradient.tsx', FLUID_GRADIENT_COMPONENT],
+  ['components/CyberGrid.tsx', CYBER_GRID_COMPONENT],
+  ['components/RippleGrid.tsx', RIPPLE_GRID_COMPONENT],
+  ['components/VoronoiCells.tsx', VORONOI_CELLS_COMPONENT],
+  ['components/MetaballField.tsx', METABALL_FIELD_COMPONENT],
+  ['components/HalftoneScreen.tsx', HALFTONE_SCREEN_COMPONENT],
+  ['components/ScanlineCRT.tsx', SCANLINE_C_R_T_COMPONENT],
+  ['components/Smoke.tsx', SMOKE_COMPONENT],
+  ['components/Marble.tsx', MARBLE_COMPONENT],
+  ['components/WarpTunnel.tsx', WARP_TUNNEL_COMPONENT],
+  ['components/StarWarp.tsx', STAR_WARP_COMPONENT],
+  ['components/HexGrid.tsx', HEX_GRID_COMPONENT],
+  ['components/Lightning.tsx', LIGHTNING_COMPONENT],
+  ['components/LiquidChrome.tsx', LIQUID_CHROME_COMPONENT],
+  ['components/Bokeh.tsx', BOKEH_COMPONENT],
+  ['components/RainGlass.tsx', RAIN_GLASS_COMPONENT],
+  ['components/Fireflies.tsx', FIREFLIES_COMPONENT],
+  ['components/Vortex.tsx', VORTEX_COMPONENT],
+  ['components/Sunset.tsx', SUNSET_COMPONENT],
+  ['components/Dunes.tsx', DUNES_COMPONENT],
+  ['components/OilSlick.tsx', OIL_SLICK_COMPONENT],
+  ['components/WaveStack.tsx', WAVE_STACK_COMPONENT],
   ['components/MatrixRain.tsx', MATRIX_RAIN_COMPONENT],
   ['components/WaveDistortion.tsx', WAVE_DISTORTION_COMPONENT],
   ['components/GlitchText.tsx', GLITCH_TEXT_COMPONENT],

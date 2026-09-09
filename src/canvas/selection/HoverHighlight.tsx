@@ -4,7 +4,7 @@
 
 import { usePolledValue } from '@/canvas/hooks/usePolledValue';
 import { useAtomValue } from 'jotai';
-import { SELECTION_COLOR, COMPONENT_COLOR, MAP_TEMPLATE_COLOR } from '@/shared/constants';
+import { SELECTION_COLOR, COMPONENT_COLOR } from '@/shared/constants';
 import { hoveredViewportIdAtom, hoveredNodeIdAtom, isComponentFileAtom } from '@/code/stores/store';
 import { useNodesComputed } from '@/code/stores/node-family';
 import { getScreenCornersById, cornersEqual, type ScreenCorners } from '@/canvas/resize/geometry-utils';
@@ -28,25 +28,11 @@ export default function HoverHighlight({ nodeId, color: colorOverride }: Props) 
   // Per-computation subscription (NOT the whole map): the ancestor walk
   // re-runs per commit but only notifies when these two flags flip — so a
   // drag commit elsewhere on the page no longer re-renders the hover outline.
-  const { isComponentInstance, isMapNode } = useNodesComputed((nodes) => {
+  const { isComponentInstance } = useNodesComputed((nodes) => {
     const hoveredNode = nodes.get(canonicalId);
-    // Detect if hovered node is inside an inline .map() template
-    let isMap = false;
-    if (hoveredNode) {
-      let current = hoveredNode;
-      while (current) {
-        if (current.isCollectionTemplate) {
-          const parent = current.parentId ? nodes.get(current.parentId) : null;
-          if (parent?.collectionList?.source?.startsWith('__inline:')) { isMap = true; break; }
-        }
-        const p = current.parentId ? nodes.get(current.parentId) : undefined;
-        if (!p) break;
-        current = p;
-      }
-    }
-    return { isComponentInstance: hoveredNode?.componentFile != null, isMapNode: isMap };
+    return { isComponentInstance: hoveredNode?.componentFile != null };
   }, [canonicalId]);
-  const color = colorOverride ?? (isMapNode ? MAP_TEMPLATE_COLOR : (isInsideComponent || isComponentInstance) ? COMPONENT_COLOR : SELECTION_COLOR);
+  const color = colorOverride ?? ((isInsideComponent || isComponentInstance) ? COMPONENT_COLOR : SELECTION_COLOR);
 
   const corners = usePolledValue<ScreenCorners>(
     true,

@@ -3,6 +3,7 @@
 // Follows imperative-first pattern: DOM updates instantly, code catches up.
 
 import type { Direction } from './geometry-utils';
+import { liveInsetWrites } from './live-inset-writes';
 import { isComponentFilePath, isIconSetFilePath, isVectorSetComponentFile } from '@/code/project/active-file-store';
 import { parseIconSetConfig, iconConfigPx } from '@/code/icons/icon-set-config';
 import { updateIconPosition, updateIconSize } from '@/code/icons/icon-set-ops';
@@ -429,6 +430,19 @@ export function formatResizeDimension(
   if (unit === '%') return parentCss > 0 ? `${Math.round((newPx / parentCss) * 100)}%` : pxFormat(newPx);
   if (unit !== 'px' && pxPerUnit > 0) return `${Math.round(newPx / pxPerUnit)}${unit}`;
   return pxFormat(newPx);
+}
+
+/** The px size the browser will actually resolve from `formatResizeDimension`'s
+ *  string — i.e. `newPx` snapped to the unit's grid (whole %, whole vh/rem…;
+ *  px unchanged). The transform compensation must be computed from THIS
+ *  value, not the raw drag px: pinning the opposite corner against an
+ *  unquantised width while the DOM gets the rounded one left the corner
+ *  oscillating ±(half a unit step) on a rotated %-wide element, while the
+ *  Dimensions input — which writes exact values — was rock steady (2026-09-09). */
+export function quantizeResizeDimension(newPx: number, unit: string, pxPerUnit: number, parentCss: number): number {
+  if (unit === '%') return parentCss > 0 ? (Math.round((newPx / parentCss) * 100) / 100) * parentCss : newPx;
+  if (unit !== 'px' && pxPerUnit > 0) return Math.round(newPx / pxPerUnit) * pxPerUnit;
+  return newPx;
 }
 
 /**
@@ -2309,6 +2323,15 @@ export function startResize(
       callbacks.onSnapGuidesChange?.([]);
     }
 
+    // Snap the size to what the unit can EXPRESS before pinning the corner:
+    // a %/vh width is written as a whole number, so the DOM box is the
+    // rounded size — the compensation below must pin against that box, or
+    // the fixed corner wobbles by up to half a unit step every tick (the
+    // rotated %-wide frame "oscillating 1–2px", 2026-09-09). Only for
+    // non-inset axes (inset axes derive their size from the pins).
+    if (hasTransform && !inset.horizontalInset) newWidth = quantizeResizeDimension(newWidth, origWidthUnit, widthPxPerUnit, parentCssWidth);
+    if (hasTransform && !inset.verticalInset) newHeight = quantizeResizeDimension(newHeight, origHeightUnit, heightPxPerUnit, parentCssHeight);
+
     // ─── Transform compensation: pin opposite corner ─────────────────
     // Skipped during a symmetric (Alt) resize — that pins the centre,
     // not a corner, and re-doing the local box around a fixed centre
@@ -2559,73 +2582,22 @@ export function startResize(
       // pinned sides from the compensated rect.
       // Same approach as old builder's create-resize-handler.tsx.
 
-      const pinnedCount = [inset.pins.left, inset.pins.right, inset.pins.top, inset.pins.bottom].filter(Boolean).length;
       const pW = parentWidth;
       const pH = parentHeight;
-
-      if (pinnedCount >= 2) {
-        // Multi-pin: recalculate ALL pinned sides from compensated rect
-        const pinStyles: Record<string, string> = {};
-        if (inset.pins.left) pinStyles.left = posPx(newLeft);
-        if (inset.pins.right) pinStyles.right = posPx(pW - newLeft - newWidth);
-        if (inset.pins.top) pinStyles.top = posPx(newTop);
-        if (inset.pins.bottom) pinStyles.bottom = posPx(pH - newTop - newHeight);
-        patchNodeStyles(contentEl, nodeId, vpPrefix, pinStyles);
-        Object.assign(liveStyles, pinStyles);
-      } else if (inset.pins.right) {
-        const rightVal = posPx(pW - newLeft - newWidth);
-        patchNodeStyles(contentEl, nodeId, vpPrefix, { right: rightVal });
-        liveStyles.right = rightVal;
-      } else if (inset.pins.bottom) {
-        const bottomVal = posPx(pH - newTop - newHeight);
-        patchNodeStyles(contentEl, nodeId, vpPrefix, { bottom: bottomVal });
-        liveStyles.bottom = bottomVal;
-      } else if (isFixedLeft) {
-        const leftVal = posPx(newLeft);
-        patchNodeStyles(contentEl, nodeId, vpPrefix, { left: leftVal });
-        liveStyles.left = leftVal;
-      } else if (isCenteredX && (handleAffectsX || hasTransform) && !symmetricResize && pW > 0) {
-        // Centered x (left:% + translateX(-50%)): reuse the transform-
-        // compensated `newLeft` (it already carries the FULL matrix coupling
-        // — a rotated element's height resize moves x too, which a
-        // handle-axis-only formula missed → per-resize drift, user report
-        // 2026-07-29 round 3) and correct for the one thing the compensation
-        // gets wrong: it pins against the CONSTANT start matrix (translate
-        // baked as −startWidth/2 px) while the browser re-derives −50% of
-        // the NEW width. The discrepancy is exactly (newWidth−startWidth)/2,
-        // rotation-independent (translation adds after rotation), so:
-        // cssLeft = newLeft + (newWidth−startWidth)/2. Continuous through
-        // zero-crossing. (Alt/symmetric pins the center — skip; the % stays.)
-        const leftVal = `${(((newLeft + (newWidth - startWidth) / 2) / pW) * 100).toFixed(4)}%`;
-        patchNodeStyles(contentEl, nodeId, vpPrefix, { left: leftVal });
-        liveStyles.left = leftVal;
-        wrotePctLeft = true;
-      } else if (isPercentX && (handleAffectsX || hasTransform) && pW > 0) {
-        // Plain-% left: `newLeft` maps 1:1 to the css value (no size-derived
-        // translate) — re-express as %. Also written on transform'd vertical
-        // drags: rotation couples height changes into x.
-        const leftVal = `${((newLeft / pW) * 100).toFixed(4)}%`;
-        patchNodeStyles(contentEl, nodeId, vpPrefix, { left: leftVal });
-        liveStyles.left = leftVal;
-        wrotePctLeft = true;
+      // Axis rules live in live-inset-writes.ts (pure, tested). X and Y are
+      // independent: a single bottom pin no longer swallows the X-axis write.
+      const w = liveInsetWrites({
+        pins: inset.pins, isFixedLeft: !!isFixedLeft, isFixedTop: !!isFixedTop,
+        isCenteredX, isCenteredY, isPercentX, isPercentY,
+        handleAffectsX, handleAffectsY, hasTransform, symmetricResize,
+        pW, pH, newLeft, newTop, newWidth, newHeight, startWidth, startHeight, posPx,
+      });
+      if (Object.keys(w.styles).length > 0) {
+        patchNodeStyles(contentEl, nodeId, vpPrefix, w.styles);
+        Object.assign(liveStyles, w.styles);
       }
-      if (!inset.pins.bottom && isFixedTop) {
-        const topVal = posPx(newTop);
-        patchNodeStyles(contentEl, nodeId, vpPrefix, { top: topVal });
-        liveStyles.top = topVal;
-      } else if (!inset.pins.bottom && isCenteredY && (handleAffectsY || hasTransform) && !symmetricResize && pH > 0) {
-        // Same correction form for a centered y axis (top:% + translateY(-50%)).
-        const topVal = `${(((newTop + (newHeight - startHeight) / 2) / pH) * 100).toFixed(4)}%`;
-        patchNodeStyles(contentEl, nodeId, vpPrefix, { top: topVal });
-        liveStyles.top = topVal;
-        wrotePctTop = true;
-      } else if (!inset.pins.bottom && isPercentY && (handleAffectsY || hasTransform) && pH > 0) {
-        // Plain-% top: same 1:1 re-expression for the vertical axis.
-        const topVal = `${((newTop / pH) * 100).toFixed(4)}%`;
-        patchNodeStyles(contentEl, nodeId, vpPrefix, { top: topVal });
-        liveStyles.top = topVal;
-        wrotePctTop = true;
-      }
+      if (w.wrotePctLeft) wrotePctLeft = true;
+      if (w.wrotePctTop) wrotePctTop = true;
     }
 
     // Synced sibling variant tiles follow the primary's live position delta.

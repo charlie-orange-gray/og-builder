@@ -1182,6 +1182,28 @@ export function isFitTextSvgWrapper(
   return node.children.some((cid) => (nodes.get(cid)?.type || '').replace('motion.', '') === 'foreignObject');
 }
 
+/** The editable text node inside a FIT wrapper (`<svg -svg> → <foreignObject> → <p>`),
+ *  or null when the wrapper has no text child. Double-click on a FIT wrapper must
+ *  open THIS node in text edit — the wrapper is an <svg>, and the generic svg
+ *  path would enter SHAPE edit on it (no geometry child → crashed the app,
+ *  bug-hunt #12 side-find 2026-09-07). */
+export function findFitInnerTextId(
+  node: import('@/code/parsing/parser').CanvasNode | null | undefined,
+  nodes: Map<string, import('@/code/parsing/parser').CanvasNode>,
+): string | null {
+  if (!isFitTextSvgWrapper(node, nodes)) return null;
+  for (const cid of node!.children ?? []) {
+    const child = nodes.get(cid);
+    if (!child) continue;
+    if ((child.type || '').replace('motion.', '') === 'foreignObject') {
+      for (const gid of child.children ?? []) if (nodes.get(gid)) return gid;
+      continue;
+    }
+    if (child.type !== 'svg') return cid; // legacy wrapper: text is the direct child
+  }
+  return null;
+}
+
 export function findSvgShapeChild(
   node: import('@/code/parsing/parser').CanvasNode | null | undefined,
   nodes: Map<string, import('@/code/parsing/parser').CanvasNode>,

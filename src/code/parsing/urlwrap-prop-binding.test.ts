@@ -9,11 +9,8 @@ import { parseJSXToNodes } from './parser';
 // substitution via expandComponent/CodeComponentHost) with `urlWrap` so consumers
 // that pass the RAW field value re-apply the wrap.
 describe('parser: whole-value url-wrapped instance prop → propBindings', () => {
-  const CODE = `export default function Page() {
-  const works = [
-    {"coverImage":"https://pic/1.jpg","title2":"Neon"},
-    {"coverImage":"https://pic/2.jpg","title2":"Dusk"},
-  ];
+  const CODE = `import works from '@/cms/works.json';
+export default function Page() {
   return (
     <div data-id="root">
       {works.map((item, index) => (

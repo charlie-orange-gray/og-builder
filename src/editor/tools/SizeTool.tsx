@@ -25,6 +25,8 @@ import { beginViewportWidthScrub, type ViewportWidthScrub } from '@/canvas/resiz
 import { canUseFill, isMainAxis, isFillMode, getFillMultiplier, makeFillFlex, parseFlex, formatFlex, crossAxisFillPatch } from '@/shared/flex-helpers';
 import { convertPxToDimUnit, estimatedVpHeight, pickLiveDim, fitSizeRedirectTarget, exitFillFlexPatch, isAutoDim, resolveUnitChangePx } from './size-helpers';
 import { resizeLiveOps } from '@/canvas/resize/resize-live-store';
+import { captureVisualRect } from '@/canvas/visual-rect';
+import { needsSizeCompensation, sizeInputWrite } from '@/canvas/resize/size-input-compensation';
 import { trace } from '@/shared/debug-trace';
 
 // ─── Unit parsing ───────────────────────────────────────────────────────────
@@ -69,8 +71,10 @@ const UNIT_OPTIONS: { value: string; label: string }[] = [
 
 // ─── Dimension Row ──────────────────────────────────────────────────────────
 
-function DimensionRow({ label, property, value, onChange, onChangeLive, onUnitChange, computedSize, parentSize, unitOptions, currentUnit, chevronLabel, disabled, overridden, onResetOverride, hideResetStyle }: {
+function DimensionRow({ label, property, value, onChange, onChangeLive, onUnitChange, computedSize, parentSize, unitOptions, currentUnit, chevronLabel, disabled, overridden, onResetOverride, hideResetStyle, mirrorNegative }: {
   label: string;
+  /** Zero-crossing display for the chevron scrub — see ToolInput.mirrorNegative. */
+  mirrorNegative?: boolean;
   /** CSS property name. When provided, the row uses ControlLabel — gets accent color
    *  on responsive override and a click-to-reset menu. Pass `undefined` for non-style
    *  rows (e.g. the FIT pseudo-row). */
@@ -197,6 +201,7 @@ function DimensionRow({ label, property, value, onChange, onChangeLive, onUnitCh
             className={isAuto || disabled ? 'opacity-50' : ''}
             chevronLabel={isFill ? 'fr' : chevronLabel}
             disabled={disabled}
+            mirrorNegative={mirrorNegative}
           />
         </div>
         <div className="flex-1">
@@ -248,6 +253,13 @@ export function axisFillActive(
   fillFromOverride: boolean,
 ): boolean {
   return canFill && isMain && isFillMode(flexVal) && (!sizeVal || isFitSize(sizeVal) || fillFromOverride);
+}
+
+/** A size can't be negative: a chevron scrub past 0 on a node that can't
+ *  mirror (a layout child) clamps at 0 instead of writing `-34px`. */
+function clampNonNegative(v: string): string {
+  const m = /^\s*-([\d.]+)(px|%|vh|vw|rem|em)?\s*$/.exec(v || '');
+  return m ? `0${m[2] ?? 'px'}` : v;
 }
 
 export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId, onUpdate: onUpdateProp, onUpdateMultiple: onUpdateMultipleProp, pxOnly }: Props) {
@@ -845,6 +857,54 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
   }, [isAspectRatioLocked, computed.width, computed.height, styles.width, styles.height, nodeId, onUpdateMultiple]);
 
   // ─── Width change handler ─────────────────────────────────────────────
+  // TRANSFORMED absolute element: a typed px size behaves like the resize
+  // handle — the element's own top-left corner stays visually fixed (the
+  // ResizeManager's opposite-corner compensation). Without it a rotated bar
+  // slid along its axis on every value change (2026-09-08). Returns the
+  // combined size + inset write, or null when the plain write is right.
+  const transformedSizeWrite = useCallback((axis: 'width' | 'height', v: string): Record<string, string> | null => {
+    const trimmed = (v || '').trim();
+    if (parentLayout !== 'none') return null;
+    const pos = styles.position;
+    if (pos !== 'absolute' && pos !== 'fixed') return null;
+    // px or % (the Dimensions unit toggle); anything else keeps the plain write.
+    const m = /^(-?[\d.]+)(px|%)?$/.exec(trimmed);
+    if (!m) return null;
+    const matrixStr = findNodeComputedStyles(nodeId, vpId, ['transform']).transform || '';
+    // Rotated → corner compensation; a NEGATIVE value (chevron past 0) → zero
+    // crossing (mirror across the anchored edge), rotated or not.
+    if (!needsSizeCompensation(matrixStr) && parseFloat(m[1]) >= 0) return null;
+    // Parent size from the bridge; the ORIGINAL box comes from the SOURCE
+    // styles (the live scrub has already changed the DOM by commit time).
+    const parent = findNodeParentInnerSize(nodeId, vpId);
+    const fallback = captureVisualRect(nodeId, vpId);
+    const parentWidth = parent.width || fallback?.parentWidth || 0;
+    const parentHeight = parent.height || fallback?.parentHeight || 0;
+    const parentSize = axis === 'width' ? parentWidth : parentHeight;
+    const isPctValue = m[2] === '%';
+    if (isPctValue && !(parentSize > 0)) return null;
+    const newValue = isPctValue ? (parseFloat(m[1]) / 100) * parentSize : parseFloat(m[1]);
+    const out = sizeInputWrite({
+      styles, parentWidth, parentHeight,
+      matrixStr, axis, newValue, writeValue: isPctValue ? `${m[1]}%` : undefined,
+      fallbackBox: fallback ? { left: fallback.left, top: fallback.top, width: fallback.width, height: fallback.height } : undefined,
+    });
+    if (out) trace.action('size:transformed-input-compensation', { nodeId, axis, value: newValue, write: out });
+    return out;
+  }, [parentLayout, styles, nodeId, vpId]);
+
+  // The box can mirror through zero (absolute/fixed outside a layout) — the
+  // field then shows the magnitude while scrubbing past 0.
+  const canMirrorThroughZero = parentLayout === 'none' && (styles.position === 'absolute' || styles.position === 'fixed');
+
+  // Live scrub twin: patch every key of the compensated write DOM-only so the
+  // element stays anchored WHILE the chevron drags, not only on release.
+  const liveSizeScrub = useCallback((axis: 'width' | 'height', v: string) => {
+    const w = transformedSizeWrite(axis, v);
+    if (!w) { updateStyleLive(axis, clampNonNegative(v)); return; }
+    for (const [k, val] of Object.entries(w)) updateStyleLive(k, val);
+  }, [transformedSizeWrite, updateStyleLive]);
+
   const handleWidthChange = useCallback((v: string) => {
     // Currently in fill mode — changing the multiplier (preserve shrink + basis)
     if (isWidthFill) {
@@ -896,9 +956,11 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
       const newStyles = computeDimensionInsetStyles(inset, styles, 'width', newWidth, computed.parentWidth);
       onUpdateMultiple(newStyles);
     } else {
-      onUpdate('width', v);
+      const compensated = transformedSizeWrite('width', v);
+      if (compensated) onUpdateMultiple(compensated);
+      else onUpdate('width', clampNonNegative(v));
     }
-  }, [isWidthFill, inset, styles, nodeId, computed.parentWidth, computed.width, aspectRatioNum, onUpdate, onUpdateMultiple]);
+  }, [isWidthFill, inset, styles, nodeId, computed.parentWidth, computed.width, aspectRatioNum, onUpdate, onUpdateMultiple, transformedSizeWrite]);
 
   // Shared trigger for the "switch to auto on a no-layout frame" case.
   // Called from both width AND height unit-change handlers BEFORE writing
@@ -1093,9 +1155,11 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
       const newStyles = computeDimensionInsetStyles(inset, styles, 'height', newHeight, computed.parentHeight);
       onUpdateMultiple(newStyles);
     } else {
-      onUpdate('height', v);
+      const compensated = transformedSizeWrite('height', v);
+      if (compensated) onUpdateMultiple(compensated);
+      else onUpdate('height', clampNonNegative(v));
     }
-  }, [isHeightFill, inset, styles, nodeId, computed.parentHeight, computed.height, computed.width, computed.parentWidth, aspectRatioNum, onUpdate, onUpdateMultiple]);
+  }, [isHeightFill, inset, styles, nodeId, computed.parentHeight, computed.height, computed.width, computed.parentWidth, aspectRatioNum, onUpdate, onUpdateMultiple, transformedSizeWrite]);
 
   const handleHeightUnitChange = useCallback((fromUnit: DimUnit, toUnit: DimUnit, typedNum?: number) => {
     // Switching TO fill
@@ -1287,7 +1351,8 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
           // smooth", live find 2026-07-19). DOM-only patch per tick; the
           // release commits once via onCommit → handleWidthChange. Fill
           // multipliers and inset-derived widths keep the legacy path.
-          onChangeLive={isWidthFill || inset.horizontalInset ? undefined : (v) => updateStyleLive('width', v)}
+          onChangeLive={isWidthFill || inset.horizontalInset ? undefined : (v) => liveSizeScrub('width', v)}
+          mirrorNegative={canMirrorThroughZero && !isWidthFill && !inset.horizontalInset}
           onUnitChange={handleWidthUnitChange}
           computedSize={computed.width}
           parentSize={computed.parentWidth}
@@ -1453,7 +1518,8 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
           value={heightHug ? 'auto' : isFitSvgWrapper ? `${Math.round(computed.height) || 0}px` : isHeightFillMain ? String(fillMultiplier) : isHeightFillCross ? String(Math.round(computed.height)) : (inset.verticalInset ? `${Math.round(computed.height)}px` : (roundPxDisplay(pickLiveDim(styles.height, liveSize?.h) || styles.height) || 'auto'))}
           onChange={isFitSvgWrapper ? () => {} : handleHeightChange}
           // LIVE scrub — same as the Width row above.
-          onChangeLive={isFitSvgWrapper || isHeightFill || inset.verticalInset ? undefined : (v) => updateStyleLive('height', v)}
+          onChangeLive={isFitSvgWrapper || isHeightFill || inset.verticalInset ? undefined : (v) => liveSizeScrub('height', v)}
+          mirrorNegative={canMirrorThroughZero && !isFitSvgWrapper && !isHeightFill && !inset.verticalInset}
           onUnitChange={isFitSvgWrapper ? () => {} : handleHeightUnitChange}
           computedSize={computed.height}
           parentSize={computed.parentHeight}

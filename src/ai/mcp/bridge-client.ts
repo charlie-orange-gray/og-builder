@@ -256,7 +256,7 @@ export const bridgeHandlers: Record<string, BridgeHandler> = {
       trace.action('mcp-bridge:typography-preset-set', { name, tokens: family.length });
       return {
         written: family.map((tok) => ({ name: tok.name, value: tok.value })),
-        applyGuide: `Apply on a text element: inline style refs fontFamily: 'var(--typo-${name}-font)', fontWeight: 'var(--typo-${name}-weight)', color: 'var(--typo-${name}-color)', textTransform/textDecoration/textShadow likewise, fontSize: 'var(--typo-${name}-size)', letterSpacing: 'var(--typo-${name}-spacing)', lineHeight: 'var(--typo-${name}-line-height)'. Responsive tiers (only when -md/-sm tokens exist) go in the page's @media block: @media (max-width: ${'{min-default − 1}'}px) { [data-id="x"] { font-size: var(--typo-${name}-size-md); } } and the sm tier at (min-md − 1)px.`,
+        applyGuide: `Apply on a text element: inline style refs fontFamily: 'var(--typo-${name}-font)', fontWeight: 'var(--typo-${name}-weight)', color: 'var(--typo-${name}-color)', textTransform/textDecoration/textShadow likewise, fontSize: 'var(--typo-${name}-size)', letterSpacing: 'var(--typo-${name}-spacing)', lineHeight: 'var(--typo-${name}-line-height)'. Responsive tiers (only when -md/-sm tokens exist) go in the page's @media block: @media (max-width: ${'{min-default − 1}'}px) { [data-id="x"] { font-size: var(--typo-${name}-size-md) !important; } } and the sm tier at (min-md − 1)px. Every banded declaration needs !important — the inline fontSize beats a plain rule on the published site.`,
       };
     }
 

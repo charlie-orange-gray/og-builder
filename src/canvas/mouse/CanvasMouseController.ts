@@ -134,7 +134,7 @@ import { suppressSelectionBox } from '../selection/SelectionBox';
 import { enterComponentFile } from '../component-navigation';
 import { getPageTemplate, listTemplates } from '@/code/project/template-ops';
 import { generateNodeId } from '@/shared/id-utils';
-import { createNode, getContentRoot, findNodeRect, clearBridgeReadCaches } from '../node-ops';
+import { createNode, getContentRoot, findNodeRect, clearBridgeReadCaches, findFitInnerTextId } from '../node-ops';
 import { zoomToFit, zoomToFitSelection, zoomToFitCanvasBounds, transformManager, cameraStash } from '@/canvas/transform';
 import { parseCanvasConfig } from '@/code/project/canvas-config';
 import { queueMutation, flushNow } from '@/code/mutation/mutation-queue';
@@ -915,6 +915,20 @@ export class CanvasMouseController {
         this.lastClick = null;
         return;
       }
+      // FIT text wrapper: an <svg> whose only content is the text inside a
+      // <foreignObject>. Double-click must edit that TEXT, never enter shape
+      // edit on the wrapper (no geometry child → the shape editor crashed).
+      // The click redirect already moved the hit from the <p> to the wrapper
+      // (redirectToFitTextWrapper), so resolve back down to the inner text.
+      if (redirectedNode2 && redirectedNode2.type === 'svg') {
+        const fitInnerId = findFitInnerTextId(redirectedNode2, this.store.get(nodesAtom));
+        if (fitInnerId) {
+          trace.action('canvas:text-edit-from-dblclick-fit', { wrapperId: redirectedId, nodeId: fitInnerId, vpId });
+          this.opts.startTextEdit(fitInnerId + ghostSuffix, null, '', vpId);
+          this.lastClick = null;
+          return;
+        }
+      }
       if (redirectedNode2 && redirectedNode2.type === 'svg') {
         // Group SVG (has SVG children) → enter group-edit isolation. RECURSIVE:
         // drill in whenever the resolved target is a group that ISN'T already
@@ -1099,7 +1113,7 @@ export class CanvasMouseController {
         let cursor: typeof cmsNode | undefined = cmsNode;
         let cmsSlug: string | null = null;
         while (cursor) {
-          if (cursor.collectionList && !cursor.collectionList.source.startsWith('__inline:')) {
+          if (cursor.collectionList) {
             cmsSlug = cursor.collectionList.source;
             break;
           }

@@ -52,7 +52,7 @@ import {
 import { emitAllMeasures, invalidateComputedCache } from './sandbox/measure';
 import { noteSandboxRender } from './sandbox/rect-emit';
 import {
-  setCollectionGhostsHidden, patchStyles, patchMultipleStyles, injectCSS, removeCSS,
+  setCollectionGhostsHidden, setNodeHidden, patchStyles, patchMultipleStyles, injectCSS, removeCSS,
   setCanvasTokenVar, loadFontInIframe, setCanvasTokensCSS, setInnerHTML, setAttribute,
   setChildShapeAttribute, patchAttrsAndStyles, previewPatchStyles, previewRestoreStyles,
 } from './sandbox/style-handlers';
@@ -394,6 +394,7 @@ const api: SandboxApi = {
 
   // ─── Style / attr / CSS patching — sandbox/style-handlers.ts ───────────
   setCollectionGhostsHidden,
+  setNodeHidden,
   patchStyles,
   patchMultipleStyles,
   previewPatchStyles,

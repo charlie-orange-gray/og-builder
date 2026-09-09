@@ -182,7 +182,10 @@ function formatTransitionJSX(t: Record<string, string>): string {
 function buildPositionStyles(config: OverlayConfig): Record<string, string> {
   if (config.type === 'fixed') {
     // Full-viewport modal backdrop. Config-driven: `fill` (scrim) + `zIndex`.
-    // Flex-centers its content (the reference modal default). On the canvas the Renderer
+    // NO layout: a fixed overlay is a free-positioning surface (like the page),
+    // so its direct children are placed absolutely by drag — the earlier flex
+    // centering made every child drag a layout reorder (user request 2026-09-07).
+    // Relative overlays keep their own defaults. On the canvas the Renderer
     // re-sizes height to the tile; `100vh` covers the browser viewport on publish.
     return {
       position: 'fixed',
@@ -192,9 +195,6 @@ function buildPositionStyles(config: OverlayConfig): Record<string, string> {
       height: '100vh',
       zIndex: String(config.zIndex ?? 100),
       backgroundColor: config.fill ?? 'rgba(0, 0, 0, 0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
     };
   }
 

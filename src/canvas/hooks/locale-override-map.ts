@@ -66,7 +66,9 @@ function parseMessagesRoot(raw: string | null | undefined): Record<string, Messa
   }
 }
 
-const RUN_CALL_RE = /\{\s*\w+\('([^']+)'\)\s*\}/g;
+// Either quote style: the AST generator emits `t("key")`, hand-written and
+// older files `t('key')` (live find 2026-09-07: double-quoted runs never resolved).
+const RUN_CALL_RE = /\{\s*\w+\((['"])([^'"]+)\1\)\s*\}/g;
 
 /** Does a mixed node's raw inner JSX carry `{t('key')}` run calls? */
 export function richTextHasRunCalls(innerJsx: string): boolean {
@@ -78,7 +80,7 @@ export function richTextHasRunCalls(innerJsx: string): boolean {
  *  resolved message text (entity-escaped so pasted `<`/`{` can't inject
  *  markup — the renderer paints the result via innerHTML). */
 export function substituteRichTextRuns(innerJsx: string, resolve: (key: string) => string): string {
-  return innerJsx.replace(RUN_CALL_RE, (_, k: string) =>
+  return innerJsx.replace(RUN_CALL_RE, (_, _q: string, k: string) =>
     resolve(k)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/\{/g, '&#123;').replace(/\}/g, '&#125;'));
@@ -149,6 +151,16 @@ export function buildTranslationTextOverrides(opts: {
     // A live t() node resolves to '' when no message exists — its JSX carries
     // no text either way. A DORMANT node does: its baked literal is the only
     // copy left, so blanking it would delete words off the canvas.
+    // RICH translation: the message IS the node's inner HTML (sanitized on
+    // write). Paint it through the innerHTML path — `text` would flatten
+    // the marks.
+    if (node.richTranslation) {
+      const html = active[key] ?? fallback[key] ?? '';
+      const richEntry: NodeOverride = { innerJsx: html };
+      if (props) richEntry.props = props;
+      out.set(nodeId, richEntry);
+      continue;
+    }
     const text = active[key] ?? fallback[key] ?? (isDormant ? (node.textContent ?? '') : '');
 
     // Replica buckets: `key__<vpWidth>` suffixed entries. Active locale wins

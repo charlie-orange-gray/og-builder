@@ -9,7 +9,11 @@ import type { PendingUpdate, Point } from '@/shared/types';
 import type { CanvasNode } from '@/code/parsing/parser';
 import { generateNodeId } from '@/shared/id-utils';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
-import { vpIdFromPrefix, getNodeHitsAtPoint, findNodeRect, isPrimaryViewport, getActiveFilePath, parseRectCacheKey } from '@/canvas/node-ops';
+import { vpIdFromPrefix, getNodeHitsAtPoint, findNodeRect, isPrimaryViewport, getActiveFilePath, parseRectCacheKey, getViewportPrefix, patchNodeStyles } from '@/canvas/node-ops';
+import { queueMutation } from '@/code/mutation/mutation-queue';
+import { recenteredPosition } from './drop-recenter';
+import { getDefaultStore } from 'jotai';
+import { selectedIdsAtom } from '@/code/stores/store';
 import { calculateLayoutInsertIndexById, applyLayoutEdgeMagnet, computeLayoutInsertOrderUpdates } from '../reparent-utils';
 import { commitOrderAssignments } from './order-commit';
 import { detectParentLayoutById, getFlexDirectionById } from '../types';
@@ -120,6 +124,12 @@ function isOverEditorPanel(x: number, y: number): boolean {
   return el.closest('[data-editor-panel]') !== null;
 }
 
+/** Drops whose selection is DEFERRED until the re-centre has painted: the
+ *  orchestrator selects a dropped node synchronously, so the selection
+ *  overlay drew at the ghost placement and jumped with the correction
+ *  (2026-09-08). The strategy selects these itself from `reveal()`. */
+export const deferredDropSelection = new Set<string>();
+
 export class ToolbarDragStrategy implements DragStrategy {
   readonly name = 'toolbar';
 
@@ -129,6 +139,10 @@ export class ToolbarDragStrategy implements DragStrategy {
   private dropIndex: number | undefined = undefined;
   private isOverCanvas = false;
   private lastMouseScreen: Point = { x: 0, y: 0 };
+  /** An ABSOLUTE drop whose width or height is not px was centred on the
+   *  GHOST size; once the node has painted, its real box is measured and
+   *  left/top corrected so the element sits under the cursor (drop-recenter.ts). */
+  private pendingRecenter: { nodeId: string; vpPrefix: string; left: number; top: number; mouseScreen: Point; scale: number; contentEl: HTMLElement } | null = null;
 
   setToolbarItem(item: ToolbarItem): void {
     this.item = item;
@@ -413,6 +427,9 @@ export class ToolbarDragStrategy implements DragStrategy {
       styles.position = 'absolute';
       styles.left = `${Math.round(canvasPos.x - w / 2)}px`;
       styles.top = `${Math.round(canvasPos.y - h / 2)}px`;
+      this.pendingRecenter = (parsePxValue(styles.width) == null || parsePxValue(styles.height) == null)
+        ? { nodeId, vpPrefix: '', left: Math.round(canvasPos.x - w / 2), top: Math.round(canvasPos.y - h / 2), mouseScreen: { ...this.lastMouseScreen }, scale: context.transform.scale || 1, contentEl: context.contentEl }
+        : null;
       // Percentage / viewport sizes have nothing to resolve against on the
       // bare canvas (a free node's `width: 100%` spans the whole workspace)
       // — materialise the ghost-footprint px instead. Section blueprints
@@ -444,6 +461,12 @@ export class ToolbarDragStrategy implements DragStrategy {
         styles.position = 'absolute';
         styles.left = `${Math.round(localX - w / 2)}px`;
         styles.top = `${Math.round(localY - h / 2)}px`;
+        // Only primary / canvas-node parents: a replica drop routes through
+        // @media overrides, which the plain correction write must not touch.
+        const primaryish = this.currentVpId == null || isPrimaryViewport(this.currentVpId);
+        this.pendingRecenter = primaryish && (parsePxValue(styles.width) == null || parsePxValue(styles.height) == null)
+          ? { nodeId, vpPrefix: getViewportPrefix(this.currentVpId ?? ''), left: Math.round(localX - w / 2), top: Math.round(localY - h / 2), mouseScreen: { ...this.lastMouseScreen }, scale, contentEl: context.contentEl }
+          : null;
         // Clear `flex: '0 0 auto'` (carried by some toolbar defaults for
         // layout-friendly insertion) — irrelevant for absolute children
         // and would only confuse the SizeTool's display.
@@ -666,7 +689,99 @@ export class ToolbarDragStrategy implements DragStrategy {
     }
 
     this.reset();
+    // The orchestrator flushes + renders the add synchronously after this
+    // returns; the correction measures on the next ticks (see the method).
+    if (this.pendingRecenter) {
+      // Hide the node with a HEAD stylesheet rule sent before the add flushes —
+      // postMessage order guarantees it is in place when the element first
+      // paints, so the user never sees the ghost-sized placement. Not an
+      // inline `visibility` (a source key written then deleted left the DOM's
+      // imperative style behind — the node vanished), and not `injectCSS`
+      // (that sheet is rewritten by every render — the rule vanished and the
+      // node flashed at the ghost spot before jumping). Removed once the
+      // corrected position has painted (scheduleRecenter).
+      const b = getCanvasBridge() as { setNodeHidden?: (id: string, vp: string, hidden: boolean) => void };
+      b.setNodeHidden?.(this.pendingRecenter.nodeId, this.pendingRecenter.vpPrefix, true);
+      deferredDropSelection.add(this.pendingRecenter.nodeId);
+      this.scheduleRecenter(this.pendingRecenter);
+    }
+    this.pendingRecenter = null;
     return updates;
+  }
+
+  /** Measure the freshly painted node and re-centre it on the drop cursor.
+   *  Polls the bridge a few frames (the sandbox paints asynchronously);
+   *  writes ONE left/top mutation only when the box is off by ≥ 1px. */
+  private scheduleRecenter(p: NonNullable<typeof this.pendingRecenter>): void {
+    const bridge = getCanvasBridge() as { getRectAsync?: (id: string, vp: string) => Promise<DOMRect | null> };
+    if (typeof bridge.getRectAsync !== 'function') return;
+    // The first paint after the flush can be a transient layout (the node at
+    // the origin before its inline position lands, a structural render still
+    // pending): measuring it once and correcting sent a button 386px away.
+    // Require two CONSECUTIVE identical reads, and reject any correction
+    // larger than the ghost box (the most the ghost assumption can be off).
+    const ghost = this.item?.ghostSize;
+    const maxShift = Math.max(ghost?.width ?? 200, ghost?.height ?? 200);
+    let tries = 0;
+    let prev: DOMRect | null = null;
+    const same = (a: DOMRect, b: DOMRect) => Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
+    const attempt = async () => {
+      tries++;
+      let rect: DOMRect | null = null;
+      try { rect = await bridge.getRectAsync!(p.nodeId, p.vpPrefix); } catch { rect = null; }
+      const usable = rect != null && rect.width > 0 && rect.height > 0;
+      const stable = usable && prev != null && same(rect as DOMRect, prev);
+      prev = usable ? rect : null;
+      if (!stable || rect == null) {
+        if (tries < 12) { setTimeout(attempt, 50); return; }
+        trace.action('toolbar-drag:recenter-gave-up', { nodeId: p.nodeId, tries });
+        reveal();
+        return;
+      }
+      const next = recenteredPosition({ rect, mouseScreen: p.mouseScreen, scale: p.scale, writtenLeft: p.left, writtenTop: p.top, maxShift });
+      trace.action('toolbar-drag:recenter', {
+        nodeId: p.nodeId, tries, scale: p.scale, maxShift,
+        painted: { l: Math.round(rect.left), t: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) },
+        mouse: { x: Math.round(p.mouseScreen.x), y: Math.round(p.mouseScreen.y) }, written: { left: p.left, top: p.top }, next,
+      });
+      if (!next) { reveal(); return; }
+      const corrected = { left: `${next.left}px`, top: `${next.top}px` };
+      // DOM first (the same bridge patch every gesture uses — the render
+      // that follows the code write did NOT move a canvas-node instance
+      // wrapper by itself: the reveal poll timed out with the box still at
+      // the ghost placement, 2026-09-08), then the source.
+      patchNodeStyles(p.contentEl, p.nodeId, p.vpPrefix, corrected);
+      queueMutation({ type: 'updateStyles', nodeId: p.nodeId, styles: corrected });
+      // Reveal only once the CORRECTED position has painted: poll until the
+      // box's left/top moved by the expected screen delta (else after a
+      // bounded wait), so the element never shows at the old spot.
+      const expectLeft = rect.left + (next.left - p.left) * p.scale;
+      const expectTop = rect.top + (next.top - p.top) * p.scale;
+      let waits = 0;
+      const waitPainted = async () => {
+        waits++;
+        let r: DOMRect | null = null;
+        try { r = await bridge.getRectAsync!(p.nodeId, p.vpPrefix); } catch { r = null; }
+        const painted = !!r && Math.abs(r.left - expectLeft) < 1.5 && Math.abs(r.top - expectTop) < 1.5;
+        if (painted || waits >= 20) {
+          trace.action('toolbar-drag:recenter-revealed', { nodeId: p.nodeId, waits, painted });
+          reveal();
+          return;
+        }
+        setTimeout(waitPainted, 30);
+      };
+      setTimeout(waitPainted, 0);
+    };
+    const reveal = async () => {
+      const b = getCanvasBridge() as { setNodeHidden?: (id: string, vp: string, hidden: boolean) => void; prefetchRect?: (id: string, vp: string) => Promise<DOMRect | null> };
+      // Rect cache first (the selection overlay reads it — awaited, so the
+      // entry holds the corrected box), then show, then select: the
+      // overlay's first paint is already at the final position.
+      try { await b.prefetchRect?.(p.nodeId, p.vpPrefix); } catch { /* cache stays as-is */ }
+      b.setNodeHidden?.(p.nodeId, p.vpPrefix, false);
+      if (deferredDropSelection.delete(p.nodeId)) getDefaultStore().set(selectedIdsAtom, [p.nodeId]);
+    };
+    setTimeout(attempt, 50);
   }
 
   onCancel(): void {

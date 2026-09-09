@@ -31,12 +31,58 @@ const SPACING_PX_KEYS = new Set([
   'borderBottomLeftRadius', 'borderBottomRightRadius',
 ]);
 
+// Shorthand ⟷ longhand families that must never share one style object. React
+// applies the keys in object order, so the LATER key silently wins — a panel
+// reading the shorthand shows one value while the site paints another (the
+// Wisp pill, 2026-08-16; bug-hunt 21). Every builder writer emits ONE form and
+// deletes the other; only hand/AI-written objects mix them.
+const SHORTHAND_FAMILIES: Array<[string, string[]]> = [
+  ['padding', ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'paddingBlock', 'paddingInline']],
+  ['margin', ['marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'marginBlock', 'marginInline']],
+  ['borderRadius', ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius']],
+  ['border', ['borderWidth', 'borderStyle', 'borderColor', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft',
+    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+    'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+    'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor']],
+  ['borderWidth', ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth']],
+  ['borderColor', ['borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor']],
+  ['borderStyle', ['borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle']],
+  ['gap', ['rowGap', 'columnGap']],
+  ['overflow', ['overflowX', 'overflowY']],
+];
+
+function checkShorthandLonghandMix(obj: t.ObjectExpression, dataId: string | undefined, v: OracleViolation[]): void {
+  const keys: Array<{ key: string; line: number | undefined }> = [];
+  for (const p of obj.properties) {
+    if (!t.isObjectProperty(p)) continue;
+    const k = t.isIdentifier(p.key) ? p.key.name : t.isStringLiteral(p.key) ? p.key.value : null;
+    if (k) keys.push({ key: k, line: p.loc?.start.line });
+  }
+  for (const [short, longs] of SHORTHAND_FAMILIES) {
+    const si = keys.findIndex((k) => k.key === short);
+    if (si === -1) continue;
+    // Only a longhand BEFORE the shorthand is flagged: the later shorthand
+    // resets every side, so that longhand is dead code that the panel still
+    // displays (the panel reads keys in order too, so shorthand-first +
+    // longhand-after — the builder's own `margin: 0, marginTop: 'Npx'` reset
+    // idiom in texts and the sections blueprints — is a deterministic,
+    // editable override and must pass).
+    const dead = keys.filter((k) => longs.includes(k.key) && keys.indexOf(k) < si).map((k) => k.key);
+    if (dead.length === 0) continue;
+    v.push({
+      code: 'STYLE_SHORTHAND_LONGHAND_MIX', tier: 2, line: keys[si].line, elementId: dataId,
+      message: `${dead.join(', ')} ${dead.length > 1 ? 'are' : 'is'} written BEFORE "${short}" in the same style object (line ${keys[si].line}) — React applies style keys in object order, so the later "${short}" resets every side and ${dead.join(', ')} ${dead.length > 1 ? 'are' : 'is'} dead, while a panel that shows the longhand disagrees with the live site. Write ONE form: fold the side into "${short}" (e.g. ${short}: '8px 16px 8px 16px'), or delete "${short}" and keep only longhands. (A shorthand FOLLOWED by a longhand override is fine.)`,
+    });
+  }
+}
+
 function checkStyleObject(
   obj: t.ObjectExpression,
   dataId: string | undefined,
   v: OracleViolation[],
   ctx: { fixedAllowed: boolean; builderOwned?: boolean } = { fixedAllowed: true },
 ): void {
+  checkShorthandLonghandMix(obj, dataId, v);
   // BG_COLOR_WITH_IMAGE — the builder's Fill control is single-color OR
   // multi-layer, never both. An element carrying BOTH backgroundColor and
   // backgroundImage is an un-editable state (the control can't represent both),

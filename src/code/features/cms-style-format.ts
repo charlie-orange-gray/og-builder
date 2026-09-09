@@ -5,7 +5,7 @@
 // — so we wrap on the apply side and keep the parser shape simple.
 //
 // Used by:
-//   - Renderer (.map() ghost rendering, inline-map per-item rendering)
+//   - Renderer (CMS collection-list ghost rendering)
 //   - applyDetailPageBindings (canvas substitution for `@cmsPage` detail
 //     pages — same parser shape as a .map() template, same formatting
 //     needs at apply time)

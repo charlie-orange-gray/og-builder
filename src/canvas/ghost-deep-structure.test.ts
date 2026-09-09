@@ -6,9 +6,18 @@
 // page switch — the mismatch check only counted DIRECT children.
 import { describe, it, expect, vi } from 'vitest';
 
+// Collection lists are CMS-backed only (inline `.map()` repeaters were retired
+// 2026-09-07): the fixture imports `@/cms/rows.json` and the mocked projectFS
+// serves its three items to the Renderer's ghost pass (`getCollectionData`).
+const ROWS = JSON.stringify([
+  { _id: 'r1', _slug: 'alpha', title: 'Alpha', desc: 'First row' },
+  { _id: 'r2', _slug: 'beta', title: 'Beta', desc: 'Second row' },
+  { _id: 'r3', _slug: 'gamma', title: 'Gamma', desc: 'Third row' },
+]);
 vi.mock('@/code/project/project-fs', () => ({
   projectFS: {
-    readFile: () => '', listFiles: () => [], exists: () => false,
+    readFile: (path: string) => (path === 'cms/rows.json' ? ROWS : ''),
+    listFiles: () => ['cms/rows.json'], exists: (path: string) => path === 'cms/rows.json',
     writeFile: () => {}, deleteFile: () => {},
   },
 }));
@@ -17,12 +26,8 @@ import { parseJSXToNodes } from '@/code/parsing/parser';
 import { renderNodes } from '@/canvas/Renderer';
 
 const page = (deepExtra: string) => `
+import rows from '@/cms/rows.json';
 export default function Page() {
-  const rows = [
-    { title: 'Alpha', desc: 'First row' },
-    { title: 'Beta', desc: 'Second row' },
-    { title: 'Gamma', desc: 'Third row' },
-  ];
   return (
     <div data-id="root" style={{ position: 'relative', width: '100%' }}>
       <div data-id="list" style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: '10px' }}>

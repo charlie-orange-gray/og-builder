@@ -105,9 +105,8 @@ export function shouldClearEmptiedText(
 // but completely inert — no clicks, no hover, no text selection, nothing
 // reaches them. Without this rule any descendant whose template specifies
 // `pointer-events: auto` or `user-select: text` would punch through the
-// imperative ghost-root flags. The `data-cms-ghost` attribute is set only
-// on CMS-backed ghosts (NOT inline-map ghosts, which need to stay
-// selectable so the user can edit per-item data).
+// imperative ghost-root flags. The `data-cms-ghost` attribute is set on every
+// collection ghost (items 1+ of a CMS collection list).
 let _cmsGhostCSSInjected = false;
 function injectCmsGhostCSS() {
   if (_cmsGhostCSSInjected) return;
@@ -674,7 +673,7 @@ function nodeSigEntry(
   if (cached) return cached;
   let childSigs = '';
   let dynamic = Boolean(
-    node.collectionList || node.inlineMapData || node.isCodeComponent ||
+    node.collectionList || node.isCodeComponent ||
     node.binding || node.attrBindings?.length || node.styleBindings?.length ||
     node.propBindings?.length || node.isCollectionTemplate,
   );
@@ -1958,9 +1957,15 @@ const GHOST_OWN_ATTRS = new Set(['data-node-id', 'data-collection-ghost', 'style
  * Bound values are unaffected — `applyBindingDataToTree` runs immediately after
  * this and rewrites them per row.
  */
-function syncInlineStyles(templateEl: HTMLElement, ghostEl: HTMLElement): void {
+export function syncInlineStyles(templateEl: HTMLElement, ghostEl: HTMLElement): void {
   const copyPair = (tEl: HTMLElement, gEl: HTMLElement) => {
-    gEl.style.cssText = tEl.style.cssText;
+    // A drag-locked template node carries the LIFT geometry (position/left/
+    // top/zIndex at the cursor) as inline style. Copying that onto the ghost
+    // would fling every ghost's copy of the node to the lifted spot; the
+    // ghost keeps its own last-synced styles until the drop.
+    if (!_dragLockedNodeIds.has(tEl.getAttribute('data-id') ?? '')) {
+      gEl.style.cssText = tEl.style.cssText;
+    }
     for (const attr of Array.from(tEl.attributes)) {
       if (GHOST_OWN_ATTRS.has(attr.name)) continue;
       if (gEl.getAttribute(attr.name) !== attr.value) gEl.setAttribute(attr.name, attr.value);
@@ -2699,10 +2704,7 @@ function patchElement(
   // handle them so that adding/removing items in the data array is reflected.
   if (node.collectionList) {
     const { source, templateIds } = node.collectionList;
-    const isInlineMap = source.startsWith('__inline:');
-    const rawData = isInlineMap
-      ? (node.inlineMapData || [])
-      : getCollectionData(source);
+    const rawData = getCollectionData(source);
     // Resolve the active variant the SAME way as applyNodeCmsBindings: artboard
     // variantName → instance per-viewport variant → baked componentVariant. Then
     // applyChainConfig merges base ← per-viewport ← per-variant config overrides.
@@ -2743,35 +2745,6 @@ function patchElement(
         tplEl0.removeAttribute('data-collection-empty-hidden');
         trace.action('renderer:collection-template-unhidden', { nodeId: node.id, templateId: __tplId });
       }
-    }
-
-    // Ensure ghost-select event delegation is attached on the collection parent.
-    // This runs on every patch (not just rebuild) so even preserved ghosts get the handler.
-    if (isInlineMap && !el.hasAttribute('data-ghost-delegated')) {
-      el.setAttribute('data-ghost-delegated', 'true');
-      el.addEventListener('mousedown', (e) => {
-        // Walk up from target to find a ghost root
-        let target = e.target as HTMLElement | null;
-        while (target && target !== el) {
-          if (target.hasAttribute('data-collection-ghost')) {
-            // Extract ghost index from data-node-id suffix
-            const nodeId = target.getAttribute('data-node-id') || '';
-            const match = nodeId.match(/__(\d+)$/);
-            if (match) {
-              const ghostIndex = parseInt(match[1], 10);
-              const tplId = target.getAttribute('data-id') || '';
-              const ghostEvent = new CustomEvent('revyme:ghost-select', {
-                detail: { ghostIndex, templateId: tplId },
-                bubbles: true,
-              });
-              document.dispatchEvent(ghostEvent);
-              trace.action('renderer:ghost-select-delegated', { ghostIndex, templateId: tplId });
-            }
-            return;
-          }
-          target = target.parentElement;
-        }
-      }, true); // capture phase
     }
 
     // If ghost count matches, patch template + update ghost styles from binding data
@@ -2916,21 +2889,9 @@ function patchElement(
         const ghostEl = buildNodeElement(
           templateNode, allNodes, onNodeMouseDown, idPrefix, variantName, bindingItem, ghostSuffix, localeOverrides, vpWidth,
         );
-        if (isInlineMap) {
-          const ghostIdx = i;
-          ghostEl.addEventListener('mousedown', (e) => {
-            const ghostEvent = new CustomEvent('revyme:ghost-select', {
-              detail: { ghostIndex: ghostIdx, templateId: templateNode.id },
-              bubbles: true,
-            });
-            ghostEl.dispatchEvent(ghostEvent);
-            trace.action('renderer:ghost-select', { ghostIndex: ghostIdx, templateId: templateNode.id });
-          }, true);
-        } else {
-          // CMS-backed ghost — see the buildNodeElement path; same rule.
-          injectCmsGhostCSS();
-          ghostEl.setAttribute('data-cms-ghost', 'true');
-        }
+        // CMS-backed ghost — see the buildNodeElement path; same rule.
+        injectCmsGhostCSS();
+        ghostEl.setAttribute('data-cms-ghost', 'true');
         ghostEl.setAttribute('data-collection-ghost', 'true');
         // Insert after previous ghost (or template for first ghost)
         if (insertAfterEl?.nextSibling) {
@@ -2963,9 +2924,7 @@ function patchElement(
       placeholder.style.color = '#888';
       placeholder.style.fontSize = '13px';
       placeholder.style.fontFamily = 'system-ui, sans-serif';
-      placeholder.textContent = isInlineMap
-        ? `No items in ${source.replace('__inline:', '')}`
-        : `No items in ${source}`;
+      placeholder.textContent = `No items in ${source}`;
       el.appendChild(placeholder);
     }
   }
@@ -3758,11 +3717,7 @@ function buildNodeElement(
   // (already built above as a normal child), items 1+ = ghost copies.
   if (node.collectionList) {
     const { source, templateIds } = node.collectionList;
-    // Inline maps (from const arrays) use '__inline:varName' as source
-    const isInlineMap = source.startsWith('__inline:');
-    const rawData = isInlineMap
-      ? (node.inlineMapData || [])
-      : getCollectionData(source);
+    const rawData = getCollectionData(source);
     // Resolve the active variant the SAME way as applyNodeCmsBindings: artboard
     // variantName → instance per-viewport variant → baked componentVariant. Then
     // applyChainConfig merges base ← per-viewport ← per-variant config overrides.
@@ -3770,7 +3725,7 @@ function buildNodeElement(
     // (`__listVariant ?? undefined` below normalizes the null fallback exactly as the old `?? undefined`.)
     const __listVariant = resolveActiveVariant(node, { vpWidth, variant: variantName });
     const data = applyChainConfig(rawData as CollectionItem[], node.collectionList, vpWidth, __listVariant ?? undefined);
-    const schema = isInlineMap ? null : getCollectionSchema(source);
+    const schema = getCollectionSchema(source);
     const hasLayouts = !!(schema?.layouts && schema.layouts.length > 1);
 
     trace.action('renderer:collection-list', {
@@ -3797,9 +3752,7 @@ function buildNodeElement(
       placeholder.style.color = '#888';
       placeholder.style.fontSize = '13px';
       placeholder.style.fontFamily = 'system-ui, sans-serif';
-      placeholder.textContent = isInlineMap
-        ? `No items in ${source.replace('__inline:', '')}`
-        : `No items in ${schema?.name || source}`;
+      placeholder.textContent = `No items in ${schema?.name || source}`;
       el.appendChild(placeholder);
       trace.action('renderer:collection-empty-placeholder', { nodeId: node.id, source });
     } else {
@@ -3809,8 +3762,6 @@ function buildNodeElement(
       for (let i = 0; i < data.length; i++) {
         const item = data[i];
         const isTemplate = i === 0;
-        // Cast inline map items to CollectionItem for binding resolution
-        // (they lack _id/_slug but the binding resolver only reads field keys)
         const bindingItem = item as CollectionItem;
 
         // Resolve which template to use for this item (supports per-item layouts)
@@ -3822,7 +3773,7 @@ function buildNodeElement(
 
         if (!templateNode) {
           trace.error('renderer:collection-template-not-found', {
-            nodeId: node.id, source, index: i, itemId: isInlineMap ? `inline-${i}` : item._id,
+            nodeId: node.id, source, index: i, itemId: item._id,
           });
           continue;
         }
@@ -3843,7 +3794,7 @@ function buildNodeElement(
           }
           lastInsertedEl = templateEl;
           trace.action('renderer:collection-template-rendered', {
-            nodeId: templateNode.id, source, itemId: isInlineMap ? `inline-0` : item._id, index: 0,
+            nodeId: templateNode.id, source, itemId: item._id, index: 0,
           });
         } else {
           // Ghost copies — insert right after template/previous ghost
@@ -3851,23 +3802,11 @@ function buildNodeElement(
           const ghostEl = buildNodeElement(
             templateNode, nodes, onNodeMouseDown, idPrefix, variantName, bindingItem, ghostSuffix, localeOverrides, vpWidth,
           );
-          if (isInlineMap) {
-            const ghostIdx = i;
-            ghostEl.addEventListener('mousedown', (e) => {
-              const ghostEvent = new CustomEvent('revyme:ghost-select', {
-                detail: { ghostIndex: ghostIdx, templateId: templateNode.id },
-                bubbles: true,
-              });
-              ghostEl.dispatchEvent(ghostEvent);
-              trace.action('renderer:ghost-select', { ghostIndex: ghostIdx, templateId: templateNode.id });
-            }, true);
-          } else {
-            // CMS-backed ghost — locked out via the data-cms-ghost CSS rule
-            // (covers descendants too, survives patch cycles, no opacity fade).
-            // Setting the attribute is enough; no inline style writes here.
-            injectCmsGhostCSS();
-            ghostEl.setAttribute('data-cms-ghost', 'true');
-          }
+          // CMS-backed ghost — locked out via the data-cms-ghost CSS rule
+          // (covers descendants too, survives patch cycles, no opacity fade).
+          // Setting the attribute is enough; no inline style writes here.
+          injectCmsGhostCSS();
+          ghostEl.setAttribute('data-cms-ghost', 'true');
           ghostEl.setAttribute('data-collection-ghost', 'true');
           if (lastInsertedEl?.nextSibling) {
             el.insertBefore(ghostEl, lastInsertedEl.nextSibling);
@@ -3876,7 +3815,7 @@ function buildNodeElement(
           }
           lastInsertedEl = ghostEl;
           trace.action('renderer:collection-ghost-rendered', {
-            nodeId: templateNode.id, source, itemId: isInlineMap ? `inline-${i}` : item._id, index: i,
+            nodeId: templateNode.id, source, itemId: item._id, index: i,
             ghostId: templateNode.id + ghostSuffix,
           });
         }

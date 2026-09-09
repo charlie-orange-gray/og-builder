@@ -17,7 +17,7 @@ import { parse } from '@babel/parser';
 import type { NodePath } from '@babel/traverse';
 import * as t from '@babel/types';
 import { trace } from '@/shared/debug-trace';
-import { isSvgTag } from '@/shared/constants';
+import { isSvgTag, isTextTag } from '@/shared/constants';
 import { parseJSXToNodes } from '@/code/parsing/parser';
 import { parseComponentCursorCalls } from '@/code/parsing/cursor-parser';
 import { parseCodeComponentDefaultSize } from '@/code/components/controls-parser';
@@ -32,14 +32,14 @@ import { checkPageVariableTypes, checkEventVariables, checkComponentFluidWidth }
 import { checkSlotComponentInlineChildren, checkUnresolvableTernary, checkGridNeedsTemplate, checkGridChildSpan, checkCanvasFillFeedback, checkPaddingNeedsLayout, checkFlexChildOrder, checkOrderIsString, checkFlexChildShrink, checkFlexRowChildFullWidth, checkImageBackgroundFrame, checkNoLayoutParentRelativeChild, checkMediaColumnFlipRebase } from './checks/layout-rules';
 import { checkCanvasConfig } from './checks/canvas-config';
 import { checkOverlayDialect } from './checks/overlay-dialect';
-import { checkSvgShapeDialect } from './checks/svg-shape-dialect';
+import { checkSvgShapeDialect, checkShapeVariantDForm } from './checks/svg-shape-dialect';
 import { checkMotionAppearHidden, checkMotionTransformDrift } from './checks/motion-appear';
 import { checkMotionPropsNeedMotionTag } from './checks/motion-tag';
 import { checkTranslationDialect } from './checks/translation-dialect';
 import { checkMediaBandDialect, checkDuplicateBreakpointStack } from './checks/media-band-dialect';
 import { checkComponentLinks, checkPageLinks } from './checks/link-rules';
 import { checkCmsRowNavMarker, checkCmsCollectionDialect, checkCmsNavDialect } from './checks/cms-dialect';
-import { checkCmsLocaleFilter, checkCmsI18nDirectAccess, checkCmsMapResolves, checkCmsStyleBindingsResolve } from './checks/cms-locale-dialect';
+import { checkCmsLocaleFilter, checkCmsI18nDirectAccess, checkCmsMapResolves, checkCmsStyleBindingsResolve, checkInlineMapUnsupported } from './checks/cms-locale-dialect';
 import { checkResolutionFidelity } from './checks/fidelity';
 import { checkStyleSurface, checkTextStyleOnFrame, checkElementSurface, checkLoopCarrier, checkPageExports, checkExpressionDataAttrs } from './checks/surface-dialect';
 import { checkConditionalRenderDialect, checkHandWrittenMediaQuery, checkUnreadableHandlers, checkPageHooks, checkHandlerBodies } from './checks/conditional-render-dialect';
@@ -762,7 +762,24 @@ export function checkFile(
       // when a CMS detail page used dangerouslySetInnerHTML for the body and it
       // showed blank in the builder.
       const dangerHtmlAttr = attrs.find((a) => a.name.name === 'dangerouslySetInnerHTML');
-      if (dangerHtmlAttr) {
+      // EXCEPTION — the builder's RICH translation shape on a TEXT tag:
+      // `dangerouslySetInnerHTML={{ __html: t.raw('key') }}` with no children.
+      // The message is sanitized inline HTML the panel's editor produced; the
+      // parser resolves it (richTranslation) and the canvas paints it.
+      const isRichTranslationShape = (() => {
+        if (!dangerHtmlAttr || !isTextTag(tag)) return false;
+        const val: any = dangerHtmlAttr.value;
+        const obj = val?.type === 'JSXExpressionContainer' ? val.expression : null;
+        if (!obj || obj.type !== 'ObjectExpression' || obj.properties.length !== 1) return false;
+        const pr: any = obj.properties[0];
+        const isHtmlKey = pr.type === 'ObjectProperty' && ((pr.key.type === 'Identifier' && pr.key.name === '__html') || (pr.key.type === 'StringLiteral' && pr.key.value === '__html'));
+        const call = pr?.value;
+        return isHtmlKey && call?.type === 'CallExpression' && call.callee?.type === 'MemberExpression'
+          && call.callee.property?.type === 'Identifier' && call.callee.property.name === 'raw'
+          && call.callee.object?.type === 'Identifier' && call.arguments?.length === 1 && call.arguments[0]?.type === 'StringLiteral'
+          && path.node.children.every((c: any) => c.type === 'JSXText' && !c.value.trim());
+      })();
+      if (dangerHtmlAttr && !isRichTranslationShape) {
         const idForMsg = dataId ?? 'field-body';
         v.push({
           code: 'DANGEROUS_INNER_HTML', tier: 2, line, elementId: dataId,
@@ -1251,6 +1268,7 @@ export function checkFile(
   //    RESOLVE (panel shows nothing, gestures mis-route). ────────────────────
   if ((kind === 'page' || kind === 'component') && /<(?:motion\.)?svg[\s/>]/.test(code)) {
     checkSvgShapeDialect(ast, v);
+    checkShapeVariantDForm(code, v);
   }
 
   // ── OVERLAY DIALECT (dropdowns / popovers / modals) — the overlay panel,
@@ -1357,6 +1375,10 @@ export function checkFile(
       // caught here rather than shipping as a section that is live on the site
       // and dead in the editor.
       checkCmsMapResolves(code, ast, nodes, v, kind);
+      // The inline repeater (a local array mapped to JSX) was retired — only
+      // CMS collection lists repeat. Anything else rendered via .map() is dead
+      // in the editor.
+      checkInlineMapUnsupported(code, ast, v, kind);
       // A CMS field inside a style value must come back as a styleBinding, or
       // the CMS panel shows no binding and the value becomes uneditable.
       checkCmsStyleBindingsResolve(code, ast, nodes, v, kind);

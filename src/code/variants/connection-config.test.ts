@@ -1368,3 +1368,55 @@ function FeKaWo({ style, initialVariant = 'default', ...rest }) {
     expect(healDriftedConnectionHandlersInCode(plain)).toBe(plain);
   });
 });
+
+// A master carrying the MotionLink wrapper declares `<Link data-id="Link-…">`
+// at MODULE scope before the component. The root-connection handler used to
+// land on the FIRST motion/Uppercase tag in the file — that Link — where
+// `variant`/`setVariant` don't exist, so every variant write on the master was
+// rejected: "References undefined identifiers: variant, setVariant"
+// (2026-09-08, a collection-list master with a CMS row link).
+describe('generateConnectionCode — root handler lands on the variant ROOT, not the MotionLink wrapper', () => {
+  const MASTER = `'use client';
+import React, { useState, useEffect } from 'react';
+import { motion, LayoutGroup } from 'framer-motion';
+import Link from 'next/link';
+import { withResponsiveProps } from '@revyme/runtime';
+import blog from '@/cms/blog.json';
+
+const MotionLink = motion.create(React.forwardRef(function MotionLinkBase({ href, ...props }: any, ref: any) {
+  return href ? <Link data-id="Link-mtt22bf8-1" ref={ref} href={href} {...props} /> : <div ref={ref} {...props} />;
+}));
+
+const variantConfig = [
+  { name: 'default', label: 'Blogs', x: 0, y: 0, isPrimary: true },
+  { name: 'variant-1', label: 'Blogs', x: 741, y: 0 },
+];
+
+const connections = [
+  { from: 'default', to: 'variant-1', trigger: 'click' },
+];
+
+function ReMoHe({ style, initialVariant = 'default', ...rest }: any) {
+  const [variant, setVariant] = useState(initialVariant);
+  useEffect(() => { setVariant(initialVariant); }, [initialVariant]);
+  return <LayoutGroup>
+    <motion.div layout={true} data-id="frame-mtt1j3ka-3" {...rest} data-name="Blogs" style={{ display: 'flex', ...style }} animate={['default', variant]}>
+      {blog.map((item, idx) => <MotionLink layout={true} data-cms-nav="row" href={\`/blog/\${item?._slug ?? ''}\`} data-id="item-mtt1j3ka-4" key={idx} style={{ display: 'flex' }} data-name="Blog" animate={['default', variant]}>
+        <motion.h3 layout={true} data-id="heading-mtt1j3ka-6" style={{ position: 'relative' }}>{item.title}</motion.h3>
+      </MotionLink>)}
+    </motion.div>
+  </LayoutGroup>;
+}
+export default withResponsiveProps(ReMoHe);`;
+
+  it('puts onTap on the root motion.div inside the component and leaves the wrapper Link alone', () => {
+    const out = generateConnectionCode(MASTER, [{ from: 'default', to: 'variant-1', trigger: 'click' }]);
+    const wrapper = out.slice(out.indexOf('const MotionLink'), out.indexOf('const variantConfig'));
+    expect(wrapper).not.toContain('onTap');
+    const rootTag = out.match(/<motion\.div[\s\S]*?data-id="frame-mtt1j3ka-3"[\s\S]*?>/)![0];
+    expect(rootTag).toContain('onTap={() => {');
+    expect(rootTag).toContain("setVariant(_n)");
+    // exactly one handler in the file
+    expect(out.match(/onTap=/g)).toHaveLength(1);
+  });
+});

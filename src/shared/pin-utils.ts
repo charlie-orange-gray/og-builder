@@ -222,10 +222,18 @@ export function calculateAlignment(
   const hasRight = isSet(styles.right);
 
   const existingTransform = styles.transform || '';
-  // The element's bounding rect already bakes in any rotate/scale/skew, so
-  // when a visual transform is present prefer the explicit width/height.
+  // A rotated / scaled / skewed element: `elementRect` is the PAINTED
+  // axis-aligned box (the bridge measures the transformed element), while
+  // `left/top/width/height` position the UNROTATED layout box. The user
+  // aligns what they see, so edges and centres are computed on the painted
+  // box and converted back to layout-box CSS. With transform-origin at the
+  // centre the painted centre == layout centre (+ any translate), so the
+  // conversion is one offset per axis: (painted − layout) / 2. (Before: the
+  // layout width was used as the "visual" width — a 1119×76 bar rotated 90°
+  // in a 1119-wide parent got left: 0 for left, centre AND right, 2026-09-08.)
   const hasVisualTransform = /rotate|scale|skew/i.test(existingTransform);
 
+  // Layout (unrotated) size.
   let visualWidth: number;
   if (isHorizontalInset) {
     visualWidth = parentWidth - (parseFloat(styles.left) || 0) - (parseFloat(styles.right) || 0);
@@ -244,6 +252,30 @@ export function calculateAlignment(
     visualHeight = elementRect.height;
   }
 
+  // Painted (axis-aligned) size — equals the layout size without a visual transform.
+  const aabbW = hasVisualTransform ? (elementRect.width || visualWidth) : visualWidth;
+  const aabbH = hasVisualTransform ? (elementRect.height || visualHeight) : visualHeight;
+  // Half the overhang of the painted box past the layout box, per side.
+  const dxC = (aabbW - visualWidth) / 2;
+  const dyC = (aabbH - visualHeight) / 2;
+  // Existing translate, in px, as it shifts the painted centre. Only the
+  // px-pinned branches keep the transform (the % branches rewrite it).
+  const translatePx = (raw: string | null, size: number): number => {
+    if (!raw) return 0;
+    if (/%$/.test(raw)) return (parseFloat(raw) / 100) * size || 0;
+    return parseFloat(raw) || 0;
+  };
+  const tx = translatePx(extractTranslateX(existingTransform), visualWidth);
+  const ty = translatePx(extractTranslateY(existingTransform), visualHeight);
+  // Painted-edge targets expressed as the LEFT/TOP of the layout box under a px pin:
+  //   painted left  = left − dxC + tx  → left = target + dxC − tx
+  //   painted right = parentW − right + dxC + tx → right = parentW − target − dxC − tx … see each branch.
+  const leftFor = (paintedLeft: number) => paintedLeft + dxC - tx;
+  const rightFor = (paintedRight: number) => parentWidth - paintedRight + dxC + tx;
+  const topFor = (paintedTop: number) => paintedTop + dyC - ty;
+  const bottomFor = (paintedBottom: number) => parentHeight - paintedBottom + dyC + ty;
+  const fmt = (n: number) => `${Math.round(n * 100) / 100}px`;
+
   const u: Record<string, string> = {};
 
   switch (direction) {
@@ -257,23 +289,23 @@ export function calculateAlignment(
         u.left = '0px';
         u.right = `${parentWidth - visualWidth}px`;
       } else if (isVerticalInset && rightPinned) {
-        u.right = `${parentWidth - visualWidth}px`;
+        u.right = fmt(parentWidth - aabbW + dxC);
         u.left = '';
         u.transform = buildTransformWithNewX(existingTransform, null);
       } else if (isVerticalInset && leftPinned) {
-        u.left = '0px';
+        u.left = fmt(dxC);
         u.right = '';
         u.transform = buildTransformWithNewX(existingTransform, null);
       } else if (isVerticalInset) {
-        u.left = `${((visualWidth / 2 / parentWidth) * 100).toFixed(4)}%`;
+        u.left = `${((aabbW / 2 / parentWidth) * 100).toFixed(4)}%`;
         u.right = '';
         u.transform = buildTransformWithNewX(existingTransform, '-50%');
       } else if (leftPinned) {
-        u.left = '0px';
+        u.left = fmt(leftFor(0));
       } else if (rightPinned) {
-        u.right = `${parentWidth - visualWidth}px`;
+        u.right = fmt(rightFor(aabbW));
       } else {
-        u.left = `${((visualWidth / 2 / parentWidth) * 100).toFixed(4)}%`;
+        u.left = `${((aabbW / 2 / parentWidth) * 100).toFixed(4)}%`;
         u.right = '';
         u.transform = buildTransformWithNewX(existingTransform, '-50%');
       }
@@ -291,18 +323,18 @@ export function calculateAlignment(
         u.left = `${inset}px`;
         u.right = `${inset}px`;
       } else if (isVerticalInset && leftPinned) {
-        u.left = `${(parentWidth - visualWidth) / 2}px`;
+        u.left = fmt((parentWidth - visualWidth) / 2);
         u.transform = buildTransformWithNewX(existingTransform, null);
       } else if (isVerticalInset && rightPinned) {
-        u.right = `${(parentWidth - visualWidth) / 2}px`;
+        u.right = fmt((parentWidth - visualWidth) / 2);
         u.transform = buildTransformWithNewX(existingTransform, null);
       } else if (isVerticalInset) {
         u.left = '50%';
         u.transform = buildTransformWithNewX(existingTransform, '-50%');
       } else if (leftPinned) {
-        u.left = `${(parentWidth - visualWidth) / 2}px`;
+        u.left = fmt(leftFor((parentWidth - aabbW) / 2));
       } else if (rightPinned) {
-        u.right = `${(parentWidth - visualWidth) / 2}px`;
+        u.right = fmt(rightFor((parentWidth + aabbW) / 2));
       } else {
         u.left = '50%';
         u.right = '';
@@ -320,23 +352,23 @@ export function calculateAlignment(
         u.right = '0px';
         u.left = `${parentWidth - visualWidth}px`;
       } else if (isVerticalInset && leftPinned) {
-        u.left = `${parentWidth - visualWidth}px`;
+        u.left = fmt(parentWidth - aabbW + dxC);
         u.right = '';
         u.transform = buildTransformWithNewX(existingTransform, null);
       } else if (isVerticalInset && rightPinned) {
-        u.right = '0px';
+        u.right = fmt(dxC);
         u.left = '';
         u.transform = buildTransformWithNewX(existingTransform, null);
       } else if (isVerticalInset) {
-        u.left = `${(((parentWidth - visualWidth / 2) / parentWidth) * 100).toFixed(4)}%`;
+        u.left = `${(((parentWidth - aabbW / 2) / parentWidth) * 100).toFixed(4)}%`;
         u.right = '';
         u.transform = buildTransformWithNewX(existingTransform, '-50%');
       } else if (rightPinned) {
-        u.right = '0px';
+        u.right = fmt(rightFor(parentWidth));
       } else if (leftPinned) {
-        u.left = `${parentWidth - visualWidth}px`;
+        u.left = fmt(leftFor(parentWidth - aabbW));
       } else {
-        u.left = `${(((parentWidth - visualWidth / 2) / parentWidth) * 100).toFixed(4)}%`;
+        u.left = `${(((parentWidth - aabbW / 2) / parentWidth) * 100).toFixed(4)}%`;
         u.right = '';
         u.transform = buildTransformWithNewX(existingTransform, '-50%');
       }
@@ -352,23 +384,23 @@ export function calculateAlignment(
         u.top = '0px';
         u.bottom = `${parentHeight - visualHeight}px`;
       } else if (isHorizontalInset && bottomPinned) {
-        u.bottom = `${parentHeight - visualHeight}px`;
+        u.bottom = fmt(parentHeight - aabbH + dyC);
         u.top = '';
         u.transform = buildTransformWithNewY(existingTransform, null);
       } else if (isHorizontalInset && topPinned) {
-        u.top = '0px';
+        u.top = fmt(dyC);
         u.bottom = '';
         u.transform = buildTransformWithNewY(existingTransform, null);
       } else if (isHorizontalInset) {
-        u.top = `${((visualHeight / 2 / parentHeight) * 100).toFixed(4)}%`;
+        u.top = `${((aabbH / 2 / parentHeight) * 100).toFixed(4)}%`;
         u.bottom = '';
         u.transform = buildTransformWithNewY(existingTransform, '-50%');
       } else if (topPinned) {
-        u.top = '0px';
+        u.top = fmt(topFor(0));
       } else if (bottomPinned) {
-        u.bottom = `${parentHeight - visualHeight}px`;
+        u.bottom = fmt(bottomFor(aabbH));
       } else {
-        u.top = `${((visualHeight / 2 / parentHeight) * 100).toFixed(4)}%`;
+        u.top = `${((aabbH / 2 / parentHeight) * 100).toFixed(4)}%`;
         u.bottom = '';
         u.transform = buildTransformWithNewY(existingTransform, '-50%');
       }
@@ -386,18 +418,18 @@ export function calculateAlignment(
         u.top = `${inset}px`;
         u.bottom = `${inset}px`;
       } else if (isHorizontalInset && topPinned) {
-        u.top = `${(parentHeight - visualHeight) / 2}px`;
+        u.top = fmt((parentHeight - visualHeight) / 2);
         u.transform = buildTransformWithNewY(existingTransform, null);
       } else if (isHorizontalInset && bottomPinned) {
-        u.bottom = `${(parentHeight - visualHeight) / 2}px`;
+        u.bottom = fmt((parentHeight - visualHeight) / 2);
         u.transform = buildTransformWithNewY(existingTransform, null);
       } else if (isHorizontalInset) {
         u.top = '50%';
         u.transform = buildTransformWithNewY(existingTransform, '-50%');
       } else if (topPinned) {
-        u.top = `${(parentHeight - visualHeight) / 2}px`;
+        u.top = fmt(topFor((parentHeight - aabbH) / 2));
       } else if (bottomPinned) {
-        u.bottom = `${(parentHeight - visualHeight) / 2}px`;
+        u.bottom = fmt(bottomFor((parentHeight + aabbH) / 2));
       } else {
         u.top = '50%';
         u.bottom = '';
@@ -415,23 +447,23 @@ export function calculateAlignment(
         u.bottom = '0px';
         u.top = `${parentHeight - visualHeight}px`;
       } else if (isHorizontalInset && topPinned) {
-        u.top = `${parentHeight - visualHeight}px`;
+        u.top = fmt(parentHeight - aabbH + dyC);
         u.bottom = '';
         u.transform = buildTransformWithNewY(existingTransform, null);
       } else if (isHorizontalInset && bottomPinned) {
-        u.bottom = '0px';
+        u.bottom = fmt(dyC);
         u.top = '';
         u.transform = buildTransformWithNewY(existingTransform, null);
       } else if (isHorizontalInset) {
-        u.top = `${(((parentHeight - visualHeight / 2) / parentHeight) * 100).toFixed(4)}%`;
+        u.top = `${(((parentHeight - aabbH / 2) / parentHeight) * 100).toFixed(4)}%`;
         u.bottom = '';
         u.transform = buildTransformWithNewY(existingTransform, '-50%');
       } else if (bottomPinned) {
-        u.bottom = '0px';
+        u.bottom = fmt(bottomFor(parentHeight));
       } else if (topPinned) {
-        u.top = `${parentHeight - visualHeight}px`;
+        u.top = fmt(topFor(parentHeight - aabbH));
       } else {
-        u.top = `${(((parentHeight - visualHeight / 2) / parentHeight) * 100).toFixed(4)}%`;
+        u.top = `${(((parentHeight - aabbH / 2) / parentHeight) * 100).toFixed(4)}%`;
         u.bottom = '';
         u.transform = buildTransformWithNewY(existingTransform, '-50%');
       }

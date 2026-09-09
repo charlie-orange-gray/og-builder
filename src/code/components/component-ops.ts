@@ -5,6 +5,9 @@
 //   2. Create components/Name.tsx with the extracted JSX
 //   3. Replace the subtree in the page with <Name />
 //   4. Add import statement to the page
+import { collectPaginationHooks, paginatedContainerIds, pruneOrphanedPaginationHooks, paginationStateVar } from '../generation/cms-pagination-gen';
+import { insertConstIntoEnclosingFn, listConfigVar } from '../generation/cms-responsive-gen';
+import { findVariantRootId } from '@/shared/variant-root';
 //
 // Uses Babel AST for reliable JSX extraction (no regex on JSX).
 
@@ -560,7 +563,7 @@ export function makeComponent(
    *  "create component from the first collection item" auto-wire (Mechanism B). */
   cmsItemVar?: string,
   /** The collection-list `source` of the nearest collectionList ancestor — a CMS
-   *  slug (or `__inline:<var>`). Used to seed each hoisted prop's DEFAULT from the
+   *  slug. Used to seed each hoisted prop's DEFAULT from the
    *  collection's first item and TYPE it from the schema (image → image var, …). */
   cmsSource?: string,
 ): { componentFilePath: string; updatedPageCode: string } | null {
@@ -928,6 +931,31 @@ export function makeComponent(
     // loading/success behavior keeps working in the component (design-tool parity).
     componentCode = healMissingFormStateDeclarations(componentCode);
 
+    // PAGINATED COLLECTION LISTS INSIDE THE SUBTREE — the JSX carries the
+    // `.slice(0, visX)` chain and the `{visX < slug.length && <LoadMore/>}` guard,
+    // but their hooks (`useState` / `useRef` + observer `useEffect` /
+    // `useResponsiveListConfig`) live in the PAGE function body. Move them into
+    // the master (the page's copies are pruned below once orphaned) or the
+    // master throws "visX is not defined" on first render (2026-09-08: Make
+    // Component on a whole "Blogs" list).
+    const paginatedLists = paginatedContainerIds(componentCode);
+    if (paginatedLists.length > 0) {
+      const rootIdForHooks = findVariantRootId(componentCode) ?? nodeId;
+      let carried = 0;
+      for (const listId of paginatedLists) {
+        // Reverse so insertion-at-top keeps declaration order.
+        for (const hook of collectPaginationHooks(pageCode, listId).reverse()) {
+          if (componentCode.includes(hook)) continue;
+          componentCode = insertConstIntoEnclosingFn(componentCode, rootIdForHooks, hook);
+          carried++;
+        }
+      }
+      if (carried > 0) {
+        componentCode = syncImports(componentCode);
+        trace.action('component-ops:carry-pagination-hooks', { componentName, lists: paginatedLists, carried });
+      }
+    }
+
     // TRANSFER PARENT VARIABLES — the extracted subtree may reference parent variables (a child's bound
     // Fill / Shadow / Transform / per-viewport binding) plus the `__mq` gates those bindings use. Carry them
     // into the master as PROPS (params + @propMeta + __mq hooks + useMediaQuery) so the file isn't left with
@@ -949,6 +977,15 @@ export function makeComponent(
     // the fully-built component (variants, ported animations) before the write.
     let instanceFieldAttrs = '';
     let instanceKeyAttr = '';
+    // The row-hoist applies ONLY to a node that lives INSIDE a `.map()`. A node
+    // that merely CONTAINS one (the list container itself, made into a component
+    // as a whole) keeps its `.map()` verbatim — hoisting there rewrote
+    // `item.title` → `title` and every row showed the first item (2026-09-08).
+    if (cmsItemVar && !getEnclosingMapParamsForNode(pageCode, nodeId)) {
+      trace.action('component-ops:cms-hoist-skipped-not-in-map', { componentName, nodeId, cmsItemVar });
+      cmsItemVar = undefined;
+      cmsSource = undefined;
+    }
     if (cmsItemVar) {
       // A collection-list item is a FLOW child (it lives inside the `.map()` of a
       // flex/grid container), but the component master ROOT is forced
@@ -969,7 +1006,7 @@ export function makeComponent(
       const imageFields = new Set<string>();
       const fieldTypes: Record<string, string> = {};
       let first: Record<string, any> | undefined;
-      if (cmsSource && !cmsSource.startsWith('__inline:')) {
+      if (cmsSource) {
         const schema = getCollectionSchema(cmsSource);
         first = getCollectionData(cmsSource)[0] as Record<string, any> | undefined;
         if (schema) {
@@ -1195,6 +1232,10 @@ export function makeComponent(
       variantCount: isDirectViewportChild && viewportDimensions ? viewportDimensions.length : 1,
     });
 
+    // The lists that moved into the master left their page hooks orphaned (no
+    // `.slice(0, visX)` references them on the page any more) — prune them.
+    if (paginatedLists.length > 0) finalPageCode = pruneOrphanedPaginationHooks(finalPageCode);
+
     return { componentFilePath, updatedPageCode: finalPageCode };
   } catch (err) {
     trace.error('component-ops:makeComponent-failed', { pageFilePath, nodeId, error: err instanceof Error ? err.message : String(err) });
@@ -1344,6 +1385,13 @@ export function detachInstance(
     let rootJSX: t.JSXElement | null = null;
     traverse(compAst, {
       Function(path) {
+        // Only TOP-LEVEL functions (the component, module helpers). A nested
+        // callback's params — the `.map((item, idx) =>` of a collection list
+        // inside the master — are bound INSIDE the JSX and travel with it; treating
+        // them as component scope neutralized every `item.title` to
+        // `undefined.title` on detach (2026-09-08: "the collection list
+        // disappears").
+        if (path.getFunctionParent()) return;
         for (const p of path.node.params) {
           if (t.isObjectPattern(p)) for (const pr of p.properties) {
             if (t.isObjectProperty(pr) && t.isIdentifier(pr.key)) {
@@ -1412,6 +1460,22 @@ export function detachInstance(
       },
     });
     if (!rootJSX) return null;
+
+    // PAGINATED LISTS inside the master: their hooks (`visX` state, ref, observer
+    // effect, list config) are component-scope bindings the sweep below would
+    // neutralize — which collapses `.slice(0, visX)` and the Load More guard.
+    // They go BACK to the page with the list (the reverse of makeComponent):
+    // keep their identifiers, then re-declare the hooks in the page function
+    // and rename them to the detached container's fresh id (the parser
+    // derives the var from the container's data-id — bug-hunt 19).
+    const carriedPagination: Array<{ oldId: string; hooks: string[] }> = [];
+    for (const oldId of paginatedContainerIds(componentCode)) {
+      const hooks = collectPaginationHooks(componentCode, oldId);
+      if (hooks.length === 0) continue;
+      const v = paginationStateVar(oldId);
+      for (const id of [v, 'set' + v.charAt(0).toUpperCase() + v.slice(1), v + 'Ref', listConfigVar(oldId)]) scopeIds.delete(id);
+      carriedPagination.push({ oldId, hooks });
+    }
 
     // 3. Transform a clone of the root subtree.
     const clone = t.cloneNode(rootJSX, true) as t.JSXElement;
@@ -1805,8 +1869,33 @@ export function detachInstance(
     }
 
     // 4. Generate + splice into the page.
-    const inlined = generate(clone, { concise: false, retainLines: false }).code;
+    let inlined = generate(clone, { concise: false, retainLines: false }).code;
+    // Pagination identifiers follow the container's NEW id (same subtree order
+    // in the master and the inlined copy).
+    const pageHooks: Array<{ newId: string; hooks: string[] }> = [];
+    if (carriedPagination.length > 0) {
+      const newIds = paginatedContainerIds(inlined);
+      carriedPagination.forEach(({ oldId, hooks }, i) => {
+        const newId = newIds[i] ?? oldId;
+        const renames: Array<[string, string]> = [];
+        const ov = paginationStateVar(oldId), nv = paginationStateVar(newId);
+        if (ov !== nv) {
+          const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+          renames.push([ov + 'Ref', nv + 'Ref'], ['set' + cap(ov), 'set' + cap(nv)], [ov, nv], [listConfigVar(oldId), listConfigVar(newId)]);
+        }
+        const rename = (src: string) => renames.reduce((acc, [a, b]) => acc.replace(new RegExp(`\\b${a}\\b`, 'g'), b), src);
+        inlined = rename(inlined);
+        pageHooks.push({ newId, hooks: hooks.map(rename) });
+      });
+    }
     let result = pageCode.slice(0, instStart) + inlined + pageCode.slice(instEnd);
+    for (const { newId, hooks } of pageHooks) {
+      for (const hook of [...hooks].reverse()) {
+        if (result.includes(hook)) continue;
+        result = insertConstIntoEnclosingFn(result, newId, hook);
+      }
+    }
+    if (pageHooks.length > 0) trace.action('component-ops:detach-carry-pagination-hooks', { instanceNodeId, lists: pageHooks.map((h) => h.newId) });
 
     // 5. Carry the NESTED instances' imports into the page — the inlined `<JiPaVu/>` etc. reference
     //    components the page didn't import (only the master did), so without this they'd be undefined
@@ -1836,6 +1925,8 @@ export function detachInstance(
     //    silently vanish from preview/live (the canvas alone kept them via
     //    the instance afterCSS carry, which dies with the instance).
     result = mergeDetachedStyleCSSIntoPage(result, detachedStyleCSS.join('\n'));
+    // The carried hooks need their React named imports on the page.
+    if (pageHooks.length > 0) result = syncImports(result);
 
     trace.action('component-ops:detach-instance', { instanceNodeId, componentFilePath, resolvedVariant, instName, idCount: idMap.size, carriedImports: carried });
     return result;

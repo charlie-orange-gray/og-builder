@@ -25,8 +25,9 @@ import {
   readTranslationText,
 } from '@/code/project/translation-ops';
 import { LOCALIZABLE_ATTRS, attrMessageKey } from '@/code/generation/i18n-gen';
-import { extractTextRuns } from '@/code/parsing/rich-text-runs';
 import { substituteRichTextRuns } from '@/canvas/hooks/locale-override-map';
+import { innerJsxToRichMessage } from '@/shared/rich-message';
+import RichLocaleField from './RichLocaleField';
 import type { CanvasNode } from '@/code/parsing/parser';
 import { trace } from '@/shared/debug-trace';
 
@@ -74,18 +75,10 @@ export default function TranslationPanel() {
     >
       {node && (textOk || attrList.length > 0) ? (
         <div className="p-3 flex flex-col gap-4" key={node.id}>
-          {textOk && node.hasMixedContent && node.textContent ? (
-            // RICH TEXT — one field group per visible text RUN (never the raw
-            // inner JSX). Runs keep their persisted `{t('key')}` keys.
-            extractTextRuns(node.textContent).map((run, i) => {
-              const runKey = run.key ?? `${node.id}__r${i}`;
-              return (
-                <TranslationFieldGroup
-                  key={runKey} node={node} kind="text"
-                  runKey={runKey} runSource={run.text}
-                />
-              );
-            })
+          {textOk && (node.richTranslation || (node.hasMixedContent && node.textContent)) ? (
+            // RICH TEXT — ONE editor per locale for the whole node (marks
+            // included); the message is sanitized inline HTML.
+            <TranslationFieldGroup node={node} kind="text" rich />
           ) : textOk ? (
             <TranslationFieldGroup node={node} kind="text" />
           ) : null}
@@ -106,15 +99,15 @@ export default function TranslationPanel() {
 
 // ─── Per-locale field group (one per translatable content piece) ───────────
 
-function TranslationFieldGroup({ node, kind, attr, runKey, runSource }: {
+function TranslationFieldGroup({ node, kind, attr, rich }: {
   node: CanvasNode;
   kind: 'text' | 'attr';
   attr?: string;
-  /** Rich-text RUN routing: full message key (`<id>__r<k>`) + the run's
-   *  current plain text (the default-locale source for untransformed runs). */
-  runKey?: string;
-  runSource?: string;
+  /** RICH text: one HTML message per node, edited with RichLocaleField. */
+  rich?: boolean;
 }) {
+  const runKey: string | undefined = undefined;
+  const runSource: string | undefined = undefined;
   const config = useAtomValue(i18nConfigAtom);
   const filePath = useAtomValue(activeFilePathAtom);
   const activeLocale = useAtomValue(activeLocaleAtom);
@@ -136,6 +129,13 @@ function TranslationFieldGroup({ node, kind, attr, runKey, runSource }: {
     if (stored !== null) return stored;
     if (code === defaultLocale) {
       if (runKey !== undefined) return runSource ?? '';
+      if (rich && kind === 'text') {
+        // Untransformed rich node: the default is the inner JSX as HTML
+        // (legacy `{t('id__rN')}` runs resolved from the default messages).
+        const resolved = substituteRichTextRuns(node.textContent ?? '', (k) =>
+          readTranslationText({ filePath, key: k, locale: defaultLocale }) ?? '');
+        return innerJsxToRichMessage(resolved);
+      }
       return kind === 'text' ? (node.textContent ?? '') : (node.attrs?.[attr!] ?? '');
     }
     return '';
@@ -149,6 +149,7 @@ function TranslationFieldGroup({ node, kind, attr, runKey, runSource }: {
       commitTranslationText({
         filePath, nodeId: runKey ?? node.id, locale: code, defaultLocale, text,
         fallbackDefaultText: runKey !== undefined ? (runSource ?? '') : (node.textContent ?? ''),
+        rich,
       });
       // Instant canvas repaint when the ACTIVE locale's value changed —
       // messages-only writes don't retrigger the code-driven override
@@ -157,7 +158,7 @@ function TranslationFieldGroup({ node, kind, attr, runKey, runSource }: {
         setLocaleOverrides(prev => {
           const next = new Map(prev);
           const existing = next.get(node.id) || {};
-          next.set(node.id, { ...existing, text });
+          next.set(node.id, rich ? { ...existing, innerJsx: text } : { ...existing, text });
           return next;
         });
       }
@@ -197,7 +198,16 @@ function TranslationFieldGroup({ node, kind, attr, runKey, runSource }: {
       {kind === 'attr' && (
         <div className="text-[11px] font-semibold text-[var(--text-primary)] capitalize">{attr}</div>
       )}
-      {locales.map(l => (
+      {locales.map(l => rich ? (
+        <RichLocaleField
+          key={`${node.id}:${msgKey}:${l.code}:rich`}
+          label={l.label}
+          isDefault={l.code === defaultLocale}
+          initialHtml={valueFor(l.code)}
+          placeholderHtml={l.code === defaultLocale ? '' : defaultText}
+          onCommit={(html) => commit(l.code, html)}
+        />
+      ) : (
         <LocaleField
           key={`${node.id}:${msgKey}:${l.code}`}
           label={l.label}
@@ -231,11 +241,17 @@ function LocaleField({ label, isDefault, initialValue, placeholder, onCommit }: 
         value={value}
         placeholder={placeholder}
         rows={Math.max(2, Math.ceil((value || placeholder).length / 30))}
-        onChange={e => setValue(e.target.value)}
+        // The DEFAULT locale is design: edited on the canvas, shown here only.
+        readOnly={isDefault}
+        tabIndex={isDefault ? -1 : undefined}
+        aria-readonly={isDefault || undefined}
+        title={isDefault ? 'Edit the default text on the canvas' : undefined}
+        onChange={e => { if (!isDefault) setValue(e.target.value); }}
         onFocus={e => {
           // Select-all on focus — same affordance as ToolInput (type to
           // overwrite without triple-clicking). rAF so the selection lands
           // after React's controlled-value sync.
+          if (isDefault) { e.currentTarget.blur(); return; }
           const el = e.currentTarget;
           requestAnimationFrame(() => el.select());
         }}
@@ -243,12 +259,13 @@ function LocaleField({ label, isDefault, initialValue, placeholder, onCommit }: 
           // Browsers collapse the selection on click-focus mouseup — restore
           // the select-all unless the user drag-selected a range (ToolInput's
           // exact recipe).
+          if (isDefault) return;
           const el = e.currentTarget;
           if (el.selectionStart === el.selectionEnd) {
             requestAnimationFrame(() => el.select());
           }
         }}
-        onBlur={() => onCommit(value)}
+        onBlur={() => { if (!isDefault) onCommit(value); }}
         onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -257,7 +274,7 @@ function LocaleField({ label, isDefault, initialValue, placeholder, onCommit }: 
           }
           e.stopPropagation();
         }}
-        className="w-full px-2 py-2 text-xs bg-[var(--grid-line)] border border-[var(--control-border)] [--cut-border-color:var(--control-border)] hover:border-[var(--control-border-hover)] focus:border-[var(--border-focus)] cut-corners cut-border hover:[--cut-border-color:var(--control-border-hover)] focus:[--cut-border-color:var(--border-focus)] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] focus:outline-none transition-colors resize-none leading-relaxed"
+        className={`${isDefault ? 'opacity-60 cursor-default select-text ' : ''}w-full px-2 py-2 text-xs bg-[var(--grid-line)] border border-[var(--control-border)] [--cut-border-color:var(--control-border)] hover:border-[var(--control-border-hover)] focus:border-[var(--border-focus)] cut-corners cut-border hover:[--cut-border-color:var(--control-border-hover)] focus:[--cut-border-color:var(--border-focus)] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] focus:outline-none transition-colors resize-none leading-relaxed`}
       />
     </div>
   );

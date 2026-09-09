@@ -67,7 +67,6 @@ export const RENDER_RESOLVED_MUTATIONS: ReadonlySet<string> = new Set([
   // entries above.
   'bindField',
   'unbindField',
-  'bindStyleToMap',
   'bindPropToMap',
   'unbindPropFromMap',
   'setVariantCmsText',

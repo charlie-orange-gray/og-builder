@@ -19,7 +19,8 @@ vi.mock('@/shared/ghost-id', () => ({
   isGhostNodeId: vi.fn((id: string) => id.includes('__')),
 }));
 
-vi.mock('@/shared/css-utils', () => ({
+vi.mock('@/shared/css-utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/css-utils')>()),
   toCamel: vi.fn((s: string) => s.replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase())),
 }));
 
@@ -50,10 +51,6 @@ vi.mock('@/code/generation/i18n-gen', () => ({
   nodeHasTranslationCall: vi.fn(() => false),
 }));
 
-vi.mock('@/code/generation/map-ghost-propagate', () => ({
-  propagateToGhosts: vi.fn(),
-}));
-
 vi.mock('@/canvas/node-ops', () => ({
   removeNode: vi.fn(),
   getContentRoot: vi.fn(() => document.createElement('div')),
@@ -71,7 +68,6 @@ vi.mock('@/code/stores/store', () => ({
   selectedIdsAtom: { toString: () => 'selectedIdsAtom' },
   hoveredIdAtom: { toString: () => 'hoveredIdAtom' },
   hoveredNodeIdAtom: { toString: () => 'hoveredNodeIdAtom' },
-  mapContextAtom: { toString: () => 'mapContextAtom' },
   mapItemIndexAtom: { toString: () => 'mapItemIndexAtom' },
 }));
 
@@ -96,7 +92,6 @@ vi.mock('@/code/stores/viewport-store', () => ({
 // We need to import the atom references AFTER the mocks so we get the mock objects.
 import {
   nodesAtom,
-  mapContextAtom,
   mapItemIndexAtom,
 } from '@/code/stores/store';
 import { isTextEditingAtom } from '@/code/stores/editor-store';
@@ -168,7 +163,6 @@ describe('CanvasTextEditController', () => {
       [isDefaultLocaleAtom, true],
       [activeLocaleAtom, 'en'],
       [viewportsConfigAtom, viewports],
-      [mapContextAtom, null],
       [mapItemIndexAtom, null],
       [activeFilePathAtom, 'app/page.tsx'],
       [i18nConfigAtom, { defaultLocale: 'en' }],
@@ -219,7 +213,6 @@ describe('CanvasTextEditController', () => {
       [isDefaultLocaleAtom, true],
       [activeLocaleAtom, 'en'],
       [viewportsConfigAtom, viewports],
-      [mapContextAtom, null],
       [mapItemIndexAtom, null],
       [activeFilePathAtom, 'app/page.tsx'],
       [i18nConfigAtom, { defaultLocale: 'en' }],
@@ -283,7 +276,6 @@ describe('CanvasTextEditController', () => {
       [isDefaultLocaleAtom, true],
       [activeLocaleAtom, 'en'],
       [viewportsConfigAtom, viewports],
-      [mapContextAtom, null],
       [mapItemIndexAtom, null],
       [activeFilePathAtom, 'app/page.tsx'],
       [i18nConfigAtom, { defaultLocale: 'en' }],
@@ -323,10 +315,6 @@ describe('CanvasTextEditController', () => {
     // Controller should no longer be editing
     expect(controller.isEditing()).toBe(false);
   });
-
-  // ─── Branch 3: Ghost-map item → propagateToGhosts ────────────────────────
-
-  test.todo('ghost-map item commit calls propagateToGhosts for index 0');
 
   // ─── Branch 4: i18n non-default locale → modifyProjectFile ───────────────
 
@@ -420,5 +408,27 @@ describe('CanvasTextEditController', () => {
     // Can't directly verify private fields, but dispose should not throw
     expect(() => controller.dispose()).not.toThrow();
     expect(controller.isEditing()).toBe(false);
+  });
+});
+
+
+// ─── Translation mode: no inline text edit (2026-09-07) ─────────────────────
+// While a non-default locale is active the canvas is read-only for content —
+// double-click / Enter / creators all reach startEdit, which must be a no-op.
+describe('translation mode blocks inline text edit', () => {
+  test('startEdit is a no-op when the active locale is not the default', () => {
+    const nodes = new Map([['node1', { id: 'node1', type: 'p', textContent: 'Hello', children: [], styles: {} } as any]]);
+    const store = makeStore([[nodesAtom, nodes], [isDefaultLocaleAtom, false], [activeFilePathAtom, 'app/page.client.tsx']]);
+    const setEditingNode = vi.fn();
+    const bridge = { startTextEdit: vi.fn(), commitTextEdit: vi.fn(), cancelTextEdit: vi.fn(), getTextEditHtml: vi.fn(() => null) } as any;
+    const controller = new CanvasTextEditController({
+      jotaiStore: store as any, bridge, iframeRef: { current: null } as any,
+      renderer: { setTextEditing: vi.fn(), markCanvasUpdate: vi.fn() } as any,
+      getInteractingVpId: () => 'desktop',
+      setEditingNodeId: setEditingNode,
+    } as any);
+    controller.startEdit('node1', 'Hello');
+    expect(bridge.startTextEdit).not.toHaveBeenCalled();
+    expect((controller as any).editingNodeId ?? null).toBeNull();
   });
 });

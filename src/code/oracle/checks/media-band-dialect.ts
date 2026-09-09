@@ -22,6 +22,7 @@
 import type * as t from '@babel/types';
 import { traverse, jsxTagName, jsxAttrs, stringAttr, type OracleViolation } from './shared';
 import { parseCanvasConfig } from '@/code/project/canvas-config';
+import { findBandDeclsMissingImportant } from '@/shared/media-important';
 
 /** Collect the file's <style> template-literal CSS (same walk as
  *  checkMediaColumnFlipRebase). */
@@ -139,6 +140,43 @@ export function checkMediaBandDialect(code: string, ast: t.File, v: OracleViolat
           message: `Band '@media (max-width: ${c[1]}px)' caps the WIDEST breakpoint (${largest}px) — screens wider than ${c[1]}px match no band and fall back to base styles, so everything this band changes silently reverts there (a section it hides reappears on a >${c[1]}px monitor). The widest viewport's look must live in BASE styles (inline or unbanded CSS); write bands only for SMALLER breakpoints. To hide an element on the widest viewport, hide it in its BASE style and reveal it in the smaller bands instead.`,
         });
       }
+    }
+  }
+
+  // ── MEDIA_DECL_MISSING_IMPORTANT — band / :lang declarations must carry !important ──
+  // Base styles are INLINE, so a stylesheet declaration only beats them with
+  // `!important`. Every builder generator writes it; the canvas bakes band
+  // values onto the tiles and the panel parser strips an OPTIONAL
+  // `!important`, so a plain declaration looks applied in the editor while
+  // the LIVE site ignores it (2026-09-07: an AI-written page whose banded
+  // font sizes, paddings and column flips never applied on the published
+  // site — only the `flex/width` re-base pairs carried `!important`).
+  const missing = findBandDeclsMissingImportant(css);
+  if (missing.length > 0) {
+    const byRule = new Map<string, typeof missing>();
+    for (const d of missing) {
+      const key = `${d.band}|${d.selector}`;
+      const list = byRule.get(key) ?? [];
+      list.push(d);
+      byRule.set(key, list);
+    }
+    const MAX = 6;
+    let n = 0;
+    for (const [, decls] of byRule) {
+      if (n++ >= MAX) break;
+      const d0 = decls[0];
+      const where = d0.band ? `inside '${d0.band}'` : 'top-level';
+      const canonical = decls.map((d) => `${d.prop}: ${d.value} !important;`).join(' ');
+      v.push({
+        code: 'MEDIA_DECL_MISSING_IMPORTANT', tier: 2,
+        message: `'${d0.selector}' (${where}) declares ${decls.map((d) => d.prop).join(', ')} WITHOUT !important — the element's base value is an inline style, which always beats a stylesheet rule, so this override renders on the canvas (the editor bakes band values onto the tiles) but NEVER on the published site. Every declaration inside an @media band or a :lang() rule must end with !important. Write: ${d0.selector} { ${canonical} }`,
+      });
+    }
+    if (byRule.size > MAX) {
+      v.push({
+        code: 'MEDIA_DECL_MISSING_IMPORTANT', tier: 2,
+        message: `${byRule.size - MAX} more rule(s) in the <style> block declare band / :lang properties without !important. Add ' !important' before every ';' inside every @media block and every :lang() rule.`,
+      });
     }
   }
 

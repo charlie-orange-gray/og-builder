@@ -843,8 +843,12 @@ function wrapInternal(
           // Plain frame: take the child's own box so the child sits at 0,0 inside.
           // Real absolute elements always carry explicit width/height; fall back
           // to `auto` (hug) on the rare element that doesn't (no bbox here).
-          width: cs.width || 'auto',
-          height: cs.height || 'auto',
+          // keepFlowChildren (Make Component on a bare text): the child becomes a
+          // FLOW item below, so the wrapper must HUG it — a px box + an absolute
+          // child measured 0×0 under `overflow: hidden` and the master's text was
+          // invisible (live find 2026-09-07).
+          width: !bakeFlowToAbsolute ? 'auto' : (cs.width || 'auto'),
+          height: !bakeFlowToAbsolute ? 'auto' : (cs.height || 'auto'),
           backgroundColor: TRANSPARENT_FILL,
           overflow: wrapOverflow,
         };
@@ -977,7 +981,11 @@ function wrapInternal(
       // it; leaving it on the child too would double-shift.
       styles = layout
         ? { position: '', left: '', top: '', right: '', bottom: '', transform: '' }
-        : { position: 'absolute', left: '0px', top: '0px', right: '', bottom: '', transform: '' };
+        : !bakeFlowToAbsolute
+          // keepFlowChildren: the wrapper hugs, so the child is a flow item
+          // (explicit `relative` — every node carries a position).
+          ? { position: 'relative', left: '', top: '', right: '', bottom: '', transform: '' }
+          : { position: 'absolute', left: '0px', top: '0px', right: '', bottom: '', transform: '' };
     } else if (layout) {
       styles = {
         position: '',

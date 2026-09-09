@@ -132,15 +132,6 @@ function getCanvasViewportWidth(el: HTMLElement): number | undefined {
   return widths[vpId];
 }
 
-/** Walk up from node to find the nearest parent with an inline collection source. */
-function findMapParent(node: CanvasNode, nodes: Map<string, CanvasNode>): CanvasNode | null {
-  let mapParent = node.parentId ? nodes.get(node.parentId) ?? null : null;
-  while (mapParent && !mapParent.collectionList?.source?.startsWith('__inline:')) {
-    mapParent = mapParent.parentId ? nodes.get(mapParent.parentId) ?? null : null;
-  }
-  return mapParent;
-}
-
 // Module-level ref for direct Code component prop updates (bypass parse cycle for instant feedback)
 let _codeComponentRoots: Map<string, { root: Root; component: string; propsHash: string }> | null = null;
 let _codeComponentNodes: Map<string, CanvasNode> | null = null;
@@ -403,100 +394,8 @@ export default function CodeComponentHost() {
       const props = extractCodeComponentProps(node);
       trace.action('code-component-host:resolve-props', { nodeId: node.id, propCount: Object.keys(props).length });
 
-      // Resolve prop + attr bindings from map data (item 0 for the template)
-      if (node.isCollectionTemplate) {
-        const mapParent = findMapParent(node, nodes);
-        if (mapParent?.inlineMapData?.[0]) {
-          for (const pb of (node.propBindings || [])) {
-            const val = mapParent.inlineMapData[0][pb.field];
-            // urlWrap = whole-value image binding — the instance source wraps the
-            // plain-URL field in url() (`prop={`url(${item.f})`}`); re-apply here
-            // since we substitute the RAW field value.
-            if (val !== undefined) props[pb.prop] = pb.urlWrap ? `url(${val})` : coerceValue(val);
-          }
-          for (const ab of (node.attrBindings || [])) {
-            const val = mapParent.inlineMapData[0][ab.field];
-            if (val !== undefined) props[ab.property] = val;
-          }
-        }
-      }
-
       // Code components only run in the sandbox iframe (mounted via the bridge below).
     }
-    // ─── Ghost Code component mounting: mount Code component instances on .map() ghost copies ──
-    // For each Code component node that's inside a collection template, find ghost copies
-    // and mount separate React roots with per-item resolved props.
-    trace.fn('code-component-host:ghost-sync-pass', { codeComponentCount: codeComponentNodes.filter(n => n.isCollectionTemplate).length });
-    for (const node of codeComponentNodes) {
-      if (!node.componentFile || !node.isCollectionTemplate) continue;
-
-      // Find the parent that has the collectionList (data source)
-      const mapParent = findMapParent(node, nodes);
-      if (!mapParent?.inlineMapData) continue;
-
-      const componentCode = projectFS.readFile(node.componentFile);
-      if (!componentCode) continue;
-      const Component = compileCodeComponent(componentCode, node.type);
-      if (!Component) continue;
-
-      // Base props from template (static props)
-      const baseProps = extractCodeComponentProps(node);
-      trace.action('code-component-host:resolve-props', { nodeId: node.id, propCount: Object.keys(baseProps).length, ghost: true });
-
-      // Mount on ALL ghost copies across ALL viewports (desktop + replicas)
-      // data-collection-ghost is on the ghost ROOT, Code component element may be a child inside it.
-      // Query both: Code component IS the ghost root, or Code component is INSIDE a ghost root.
-      const allGhostEls = document.querySelectorAll(
-        `[data-collection-ghost][data-code-component="true"][data-id="${node.id}"], ` +
-        `[data-collection-ghost] [data-code-component="true"][data-id="${node.id}"]`
-      );
-
-      allGhostEls.forEach(ghostDom => {
-        const ghostEl = ghostDom as HTMLElement;
-        const ghostNodeId = ghostEl.getAttribute('data-node-id') || '';
-        // Extract ghost index from data-node-id: "...nodeId__2" → 2
-        const suffixMatch = ghostNodeId.match(/__(\d+)$/);
-        if (!suffixMatch) return;
-        const gi = parseInt(suffixMatch[1], 10);
-        if (gi < 1 || gi >= mapParent!.inlineMapData!.length) return;
-
-        const itemData = mapParent!.inlineMapData![gi];
-        const ghostProps = { ...baseProps };
-        for (const binding of (node.propBindings || [])) {
-          if (itemData[binding.field] !== undefined) {
-            // urlWrap: see the template-resolve pass above — re-apply the url() wrap.
-            ghostProps[binding.prop] = binding.urlWrap ? `url(${itemData[binding.field]})` : coerceValue(itemData[binding.field]);
-          }
-        }
-        for (const ab of (node.attrBindings || [])) {
-          if (itemData[ab.field] !== undefined) {
-            ghostProps[ab.property] = itemData[ab.field];
-          }
-        }
-
-        // Inject canvas viewport width for ghost elements too
-        const ghostVpWidth = getCanvasViewportWidth(ghostEl);
-        const ghostMountProps = ghostVpWidth !== undefined ? { ...ghostProps, __canvasViewportWidth: ghostVpWidth } : ghostProps;
-        const ghostPropsHash = JSON.stringify(ghostMountProps);
-        const existing = rootsRef.current.get(ghostNodeId);
-
-        if (existing && existing.component === node.type && existing.propsHash === ghostPropsHash) {
-          return;
-        }
-
-        if (existing) {
-          existing.root.render(React.createElement(Component, ghostMountProps));
-          existing.propsHash = ghostPropsHash;
-          trace.action('code-component-host:ghost-update', { ghostId: ghostNodeId, component: node.type, itemIndex: gi, vpWidth: ghostVpWidth });
-        } else {
-          const root = createRoot(ghostEl);
-          root.render(React.createElement(Component, ghostMountProps));
-          rootsRef.current.set(ghostNodeId, { root, component: node.type, propsHash: ghostPropsHash });
-          trace.action('code-component-host:ghost-mount', { ghostId: ghostNodeId, component: node.type, itemIndex: gi, vpWidth: ghostVpWidth });
-        }
-      });
-    }
-
     // ─── Forward code component mounts to sandbox ───────────────────────
     //
     // Always forward. The sandbox-side `mountCodeComponent` is idempotent —

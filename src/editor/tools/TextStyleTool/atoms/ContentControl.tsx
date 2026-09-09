@@ -15,7 +15,6 @@ import { CmsBoundPill, CmsMissingPill } from '../../../controls/CmsBoundPill';
 import { useControl } from '../../../controls/ControlProvider';
 import { useTextStyles } from '../../../hooks/useTextStyles';
 import { useAtomValue, useAtom } from 'jotai';
-import { mapItemIndexAtom, mapContextAtom } from '@/code/stores/store';
 import { useNodesComputed } from '@/code/stores/node-family';
 import { resolveCmsRowValues } from '@/code/generation/cms-row-resolve';
 import { interactingViewportIdAtom, viewportsConfigAtom } from '@/code/stores/viewport-store';
@@ -25,7 +24,6 @@ import { setNodeOverride } from '@/code/project/locale-ops';
 import { commitTranslationText } from '@/code/project/translation-ops';
 import { resolveTranslatedContent } from './content-translation';
 import { isPrimaryViewport } from '@/canvas/node-ops';
-import { propagateToGhosts } from '@/code/generation/map-ghost-propagate';
 import { queueMutation } from '@/code/mutation/mutation-queue';
 import { getContentRoot } from '@/canvas/node-ops';
 import { trace } from '@/shared/debug-trace';
@@ -53,8 +51,6 @@ export function ContentControl() {
     return null;
   }, [node]);
   const textNode = fitTextNode ?? node;
-  const mapItemIndex = useAtomValue(mapItemIndexAtom);
-  const mapContext = useAtomValue(mapContextAtom);
   const interactingVpId = useAtomValue(interactingViewportIdAtom);
   const viewports = useAtomValue(viewportsConfigAtom);
   const activeLocale = useAtomValue(activeLocaleAtom);
@@ -81,10 +77,6 @@ export function ContentControl() {
     translationKey: textNode?.translationKey,
     overrideText: textNode ? localeOverrides.get(textNode.id)?.text : undefined,
   });
-
-  // Determine if this node has a text binding in a map context
-  const textField = node?.binding?.property === 'text' ? node.binding.field : null;
-  const isMapText = textField != null && mapContext != null && mapItemIndex != null;
 
   // Resolve which viewport bucket the user is currently focused on. The
   // `interactingViewportIdAtom` follows whichever viewport last received a
@@ -156,11 +148,7 @@ export function ContentControl() {
 
   let displayValue: string;
   let isOverride = false;
-  if (isMapText) {
-    // Read from map JSON data for the selected item
-    const itemData = mapContext.mapData[mapItemIndex] || {};
-    displayValue = (itemData[textField] || '').replace(/<[^>]*>/g, '');
-  } else if (isLocaleOverride) {
+  if (isLocaleOverride) {
     // Non-default locale with an override: show the translation from the
     // i18n file (already in the atom), with the orange override indicator.
     displayValue = (localeTextOverride || '').replace(/<[^>]*>/g, '');
@@ -201,7 +189,7 @@ export function ContentControl() {
     isOverride = resolved.isOverride;
   }
 
-  trace.fn('ContentControl:render', { nodeId: node?.id, displayLength: displayValue.length, isEditing: text.isEditing, isMapText });
+  trace.fn('ContentControl:render', { nodeId: node?.id, displayLength: displayValue.length, isEditing: text.isEditing });
 
   // Detached CMS text (design-tool parity): the `{item.field}` text binding was dragged
   // OUT of its `.map()` and stashed as `data-cms-orphan="__text:field"` (the live
@@ -347,25 +335,6 @@ export function ContentControl() {
         value={displayValue}
         onChange={(v) => {
           if (!node) return;
-          if (isMapText) {
-            // Write to map JSON data
-            const itemData = { ...(mapContext.mapData[mapItemIndex] || {}) };
-            const oldVal = itemData[textField];
-            itemData[textField] = v;
-            queueMutation({ type: 'updateMapItem', varName: mapContext.varName, index: mapItemIndex, item: itemData });
-            if (mapItemIndex === 0) {
-              propagateToGhosts(mapContext.varName, textField, oldVal, v, mapContext.mapData);
-            }
-            // Imperative DOM update on the element
-            const contentEl = getContentRoot();
-            if (contentEl) {
-              const suffix = mapItemIndex > 0 ? `__${mapItemIndex}` : '';
-              const el = contentEl.querySelector(`[data-node-id="${node.id}${suffix}"]`) as HTMLElement;
-              if (el) el.textContent = v;
-            }
-            trace.action('content-control:map-updateText', { nodeId: node.id, mapItemIndex, textField, newText: v });
-            return;
-          }
           // Locale routing: when the user is on a non-default locale, the
           // edit is a translation — write to `i18n/{locale}.json`, not JSX.
           // This keeps the source-of-truth English text intact. The atom

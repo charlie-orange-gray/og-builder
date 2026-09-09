@@ -12,6 +12,7 @@ import { toKebab, htmlToJSX, splitStyleProps } from '@/shared/css-utils';
 import { cssTransformToMotionProps } from '@/shared/motion-transform';
 import { removeAxisTranslate } from '@/shared/position-utils';
 import { trace } from '@/shared/debug-trace';
+import { flattenPastedRichHtml } from '@/shared/rich-message';
 import { findVariantRootId } from '@/shared/variant-root';
 import { sweepEmptyGlideWrappers } from './glide-gen';
 import { generate, findTagClose, findJSXDataIdIndex, quoteStyleValue, serializeJSXAttr, findMatchingCloseTagIndex, findStyleObjectEnd } from './generator-utils';
@@ -1099,6 +1100,13 @@ export function replaceNodeTextContent(code: string, nodeId: string, text: strin
  */
 export function updateNodeChildrenFromHTML(code: string, nodeId: string, html: string): string {
   trace.fn('generator.updateNodeChildrenFromHTML', { nodeId });
+  // Commit-side net for the paste flatten (the editor flattens on paste; any
+  // other producer of block HTML lands here): block elements inside a text
+  // node are invalid nesting and override its typography.
+  if (/<(h[1-6]|div|ul|ol|li|blockquote|pre|table|section|article)\b/i.test(html)) {
+    const flat = flattenPastedRichHtml(html);
+    if (flat !== html) { trace.action('generator:children-html-flattened', { nodeId }); html = flat; }
+  }
 
   const ast = parseJSX(code);
   if (!ast) return code;

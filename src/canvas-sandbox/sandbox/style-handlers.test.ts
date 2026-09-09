@@ -88,3 +88,51 @@ describe('patchMultipleStyles residue marking', () => {
     expect(tablet.getAttribute('data-live-important')).toBe('width');
   });
 });
+
+import { setCollectionGhostsHidden } from './style-handlers';
+
+describe('setCollectionGhostsHidden — row vs node-inside-row', () => {
+  const rule = () => document.getElementById('collection-ghost-hide-style')?.textContent ?? '';
+  it('a ROW drag collapses whole ghost rows; a node inside the row hides only its own copies, keeping the rows', () => {
+    const root = document.createElement('div');
+    root.innerHTML = `
+      <div data-node-id="d:list" data-id="list">
+        <div data-node-id="d:row" data-id="row"><p data-node-id="d:title" data-id="title">a</p></div>
+        <div data-node-id="d:row__1" data-id="row" data-collection-ghost="true" data-cms-ghost="true"><p data-node-id="d:title__1" data-id="title">b</p></div>
+        <div data-node-id="d:row__2" data-id="row" data-collection-ghost="true" data-cms-ghost="true"><p data-node-id="d:title__2" data-id="title">c</p></div>
+      </div>`;
+    document.body.appendChild(root);
+    setContentRoot(root);
+
+    setCollectionGhostsHidden('list', 'd:', true);
+    expect(rule()).toBe('[data-node-id="d:list"] > [data-collection-ghost] { display: none !important; }');
+    setCollectionGhostsHidden('list', 'd:', false);
+    expect(rule()).toBe('');
+
+    setCollectionGhostsHidden('list', 'd:', true, 'title');
+    expect(rule()).toBe('[data-node-id="d:list"] > [data-collection-ghost] [data-node-id^="d:title__"] { visibility: hidden !important; }');
+    // the rule targets exactly the two ghost copies of the dragged title, never the primary or the rows
+    const matched = Array.from(root.querySelectorAll('[data-node-id="d:list"] > [data-collection-ghost] [data-node-id^="d:title__"]')).map((e) => e.getAttribute('data-node-id'));
+    expect(matched).toEqual(['d:title__1', 'd:title__2']);
+    expect(root.querySelectorAll('[data-collection-ghost]').length).toBe(2);
+    setCollectionGhostsHidden('list', 'd:', false, 'title');
+    expect(rule()).toBe('');
+    root.remove();
+  });
+});
+
+import { setNodeHidden } from './style-handlers';
+
+describe('setNodeHidden — transient drop hide in a head stylesheet', () => {
+  it('adds/removes a per-node rule in document.head, independent of the renderer-owned canvas sheet', () => {
+    const sheet = () => document.getElementById('node-transient-hide-style')?.textContent ?? '';
+    setNodeHidden('VuDaNu-1', '', true);
+    expect(sheet()).toBe('[data-node-id="VuDaNu-1"] { visibility: hidden !important; }');
+    setNodeHidden('frame-2', 'desktop:', true);
+    expect(sheet()).toContain('[data-node-id="desktop:frame-2"]');
+    setNodeHidden('VuDaNu-1', '', false);
+    expect(sheet()).toBe('[data-node-id="desktop:frame-2"] { visibility: hidden !important; }');
+    setNodeHidden('frame-2', 'desktop:', false);
+    expect(sheet()).toBe('');
+  });
+});

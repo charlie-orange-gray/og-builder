@@ -159,3 +159,27 @@ describe('LANG_RULE_ORDER', () => {
 `))).not.toContain('LANG_RULE_ORDER');
   });
 });
+
+describe('MEDIA_DECL_MISSING_IMPORTANT', () => {
+  it('passes generator output (every decl !important)', () => {
+    expect(codes(page(`
+:lang(fr) [data-id="root"] { color: #fff !important; }
+@media (max-width: 768px) and (min-width: 375.02px) { [data-id="root"] { padding: 8px !important; } }
+@media (max-width: 375px) { [data-id="root"] { padding: 4px !important; display: none !important; } }
+`))).not.toContain('MEDIA_DECL_MISSING_IMPORTANT');
+  });
+  it('flags a plain banded declaration and names the canonical form', () => {
+    const v = find(page(`
+@media (max-width: 768px) and (min-width: 375.02px) { [data-id="root"] { font-size: 44px; letter-spacing: -1.4px; flex: 0 0 auto !important; } }
+`), 'MEDIA_DECL_MISSING_IMPORTANT');
+    expect(v?.tier).toBe(2);
+    expect(v?.message).toContain('font-size, letter-spacing');
+    expect(v?.message).toContain('[data-id="root"] { font-size: 44px !important; letter-spacing: -1.4px !important; }');
+  });
+  it('flags a plain top-level :lang declaration', () => {
+    expect(codes(page(`:lang(fr) [data-id="root"] { color: #fff; }`))).toContain('MEDIA_DECL_MISSING_IMPORTANT');
+  });
+  it('ignores the top-level pseudo / caret rules (deliberately no !important)', () => {
+    expect(codes(page(`[data-id="root"]::after { content: ''; border: 1px solid red; }`))).not.toContain('MEDIA_DECL_MISSING_IMPORTANT');
+  });
+});

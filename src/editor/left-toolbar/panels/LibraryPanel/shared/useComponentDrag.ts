@@ -39,6 +39,9 @@ import {
   getFolderForVector,
 } from '@/code/project/vector-folder-ops';
 import { trace } from '@/shared/debug-trace';
+import { toast } from 'sonner';
+import { getActiveFilePath } from '@/canvas/node-ops';
+import { wouldCreateComponentCycle } from '@/code/components/component-cycle';
 import { LIBRARY_DRAG_THRESHOLD_PX } from './constants';
 
 /** Insert size for a dragged CDN component: `@defaultWidth`/`@defaultHeight`
@@ -254,6 +257,21 @@ export function useComponentDrag(filePath: string, elementType: string) {
         const dy = moveEvent.clientY - startY;
         if (dx * dx + dy * dy < LIBRARY_DRAG_THRESHOLD_PX * LIBRARY_DRAG_THRESHOLD_PX) return;
         dragStarted = true;
+        // A master can't hold an instance of itself (or of a master whose
+        // chain renders it) — the canvas and the live site would recurse
+        // forever; the parser bails with "Failed to parse JSX" and the
+        // page blanks (2026-09-08: Header dragged into the Header master).
+        // Refuse at drag start so nothing is written; the folder-move
+        // gesture in the library keeps working.
+        const activeFile = getActiveFilePath();
+        if ((isComponentItem || isVectorItem) && wouldCreateComponentCycle(filePath, activeFile)) {
+          trace.action('library-panel:drag-refused-cycle', { filePath, activeFile });
+          toast.error(filePath === activeFile
+            ? 'A component can’t be placed inside its own master.'
+            : 'That component already contains this one — placing it here would create a loop.');
+          cleanup();
+          return;
+        }
         trace.action('library-panel:drag-start', { elementType, isIconSet });
         startToolbarDrag(item, startEvent);
       }

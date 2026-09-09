@@ -13,6 +13,7 @@ import { getContentRoot } from '@/canvas/node-ops';
 import { selectedNodeAtom } from '@/code/stores/store';
 import { activeFilePathAtom, isIconSetFilePath } from '@/code/project/active-file-store';
 import { i18nConfigAtom, activeLocaleAtom, isDefaultLocaleAtom } from '@/code/stores/locale-store';
+import { creatorToolsLockedAtom } from '@/code/stores/tool-store';
 import { commentModeActiveAtom } from '@/code/stores/comment-store';
 import {
   CursorIcon, FrameToolbarIcon, TextToolbarIcon, HandToolbarIcon,
@@ -145,6 +146,22 @@ function ToolButton({ active, onClick, title, children, dataTutorial }: {
     >
       {children}
     </button>
+  );
+}
+
+/** Greys + inerts a creator control while a translation is being edited. */
+function CreatorGate({ locked, children }: { locked: boolean; children: React.ReactNode }) {
+  if (!locked) return <>{children}</>;
+  return (
+    <div
+      className="flex items-center opacity-40"
+      style={{ pointerEvents: 'none' }}
+      aria-disabled="true"
+      title="Creating elements is disabled while editing a translation"
+      data-creator-locked
+    >
+      {children}
+    </div>
   );
 }
 
@@ -471,6 +488,7 @@ export default function BottomToolbar() {
   // there, nobody found it, so it's back as the distinct accent pill;
   // the menu entry remains as a secondary path).
   const isViewer = useIsViewer();
+  const creatorLocked = useAtomValue(creatorToolsLockedAtom);
   const setSettingsOpen = useSetAtom(settingsOverlayOpenAtom);
   const setSettingsSection = useSetAtom(settingsSectionAtom);
   // Sites already on a paid, active plan don't need the Upgrade nudge —
@@ -594,15 +612,19 @@ export default function BottomToolbar() {
             authoring context — icons hold vector shapes; it doesn't
             benefit from layout chrome. */}
         {!isContainerSetMaster && (
-          <ToolButton active={toolMode === 'frame'} onClick={() => handleToolClick('frame')} title="Draw Frame (F)" dataTutorial="frame-tool">
-            <FrameToolbarIcon className="w-[22px] h-[22px]" />
-          </ToolButton>
+          <CreatorGate locked={creatorLocked}>
+            <ToolButton active={toolMode === 'frame'} onClick={() => handleToolClick('frame')} title="Draw Frame (F)" dataTutorial="frame-tool">
+              <FrameToolbarIcon className="w-[22px] h-[22px]" />
+            </ToolButton>
+          </CreatorGate>
         )}
 
         {!isContainerSetMaster && (
-          <ToolButton active={toolMode === 'text'} onClick={() => handleToolClick('text')} title="Draw Text (T)" dataTutorial="text-tool">
-            <TextToolbarIcon className="w-[22px] h-[22px]" />
-          </ToolButton>
+          <CreatorGate locked={creatorLocked}>
+            <ToolButton active={toolMode === 'text'} onClick={() => handleToolClick('text')} title="Draw Text (T)" dataTutorial="text-tool">
+              <TextToolbarIcon className="w-[22px] h-[22px]" />
+            </ToolButton>
+          </CreatorGate>
         )}
 
         {/* ── Shapes ── */}
@@ -612,7 +634,7 @@ export default function BottomToolbar() {
             cursor → frame → text → layout → shape → sketch, mirroring
             the user's mental order (structure before primitives). */}
         {!isContainerSetMaster && (
-          <LayoutDropdown toolMode={toolMode} onSelect={(layout) => {
+          <CreatorGate locked={creatorLocked}><LayoutDropdown toolMode={toolMode} onSelect={(layout) => {
             const layoutToMode: Record<string, ToolMode> = {
               rows: 'layout-rows',
               columns: 'layout-columns',
@@ -623,7 +645,7 @@ export default function BottomToolbar() {
               trace.action('toolbar:layout', { layout, mode });
               setToolMode(toolMode === mode ? 'select' : mode);
             }
-          }} />
+          }} /></CreatorGate>
         )}
 
         {/* Drawing shapes is the primary action on a vector master, so the
@@ -652,7 +674,7 @@ export default function BottomToolbar() {
             </ToolButton>
           </>
         ) : (
-          <ShapeDropdown
+          <CreatorGate locked={creatorLocked}><ShapeDropdown
             active={isShapeMode(toolMode)}
             sketchActive={toolMode === 'sketch'}
             onSketch={() => handleToolClick('sketch')}
@@ -669,7 +691,7 @@ export default function BottomToolbar() {
                 setToolMode(mode);
               }
             }}
-          />
+          /></CreatorGate>
         )}
 
         {/* Sketch — on normal pages it lives INSIDE the shape dropdown

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { transform } from '@babel/standalone';
-import { setPaginationInCode, removePaginationInCode, paginationStateVar, buildLoadMoreComponentCode, LOADMORE_COMPONENT_NAME, buildSpinnerComponentCode, SPINNER_COMPONENT_NAME, readPaginationMarker, pruneOrphanedPaginationHooks } from './cms-pagination-gen';
+import { setPaginationInCode, removePaginationInCode, paginationStateVar, buildLoadMoreComponentCode, ensureLoadMoreLabelNowrap, paginationUiParentId, collectPaginationHooks, paginatedContainerIds, LOADMORE_COMPONENT_NAME, buildSpinnerComponentCode, SPINNER_COMPONENT_NAME, readPaginationMarker, pruneOrphanedPaginationHooks } from './cms-pagination-gen';
 import { updateCollectionListConfigInCode } from './cms-gen';
 import { buildAutoImports } from '@/shared/import-detection.mjs';
 
@@ -318,5 +318,77 @@ export default function Page() {
     expect(out).toContain('visList < advisors.length');           // slug resolved from __applyListConfig
     expect(out).toContain('data-pagination="loadMore:3"');
     parses(out);
+  });
+});
+
+describe('Load More label never wraps (root is min-content)', () => {
+  it('the template carries whiteSpace: nowrap on the label', () => {
+    const code = buildLoadMoreComponentCode();
+    const label = code.slice(code.indexOf('data-id="loadmore-label"'), code.indexOf('Load More\n'));
+    expect(label).toContain("whiteSpace: 'nowrap'");
+  });
+  it('an existing current-shape master is patched in place, idempotently, and left alone when already set', () => {
+    const before = buildLoadMoreComponentCode().replace("        whiteSpace: 'nowrap',\n", '');
+    expect(before).not.toContain('whiteSpace');
+    const after = ensureLoadMoreLabelNowrap(before);
+    expect(after.slice(after.indexOf('loadmore-label'), after.indexOf('Load More\n'))).toContain("whiteSpace: 'nowrap'");
+    // only the label style changed
+    expect(after.replace("\n        whiteSpace: 'nowrap',", '')).toBe(before);
+    expect(ensureLoadMoreLabelNowrap(after)).toBe(after);
+    const custom = before.replace("fontSize: '14px',", "fontSize: '14px',\n        whiteSpace: 'pre',");
+    expect(ensureLoadMoreLabelNowrap(custom)).toBe(custom);
+  });
+});
+
+describe('paginationUiParentId — deleting the Load More / sentinel means "remove pagination"', () => {
+  it('resolves the list for the Load More instance, the sentinel and its spinner', () => {
+    const lm = setPaginationInCode(PAGE, 'list', { mode: 'loadMore', perPage: 3 });
+    expect(paginationUiParentId(lm, 'loadmore-list')).toBe('list');
+    const inf = setPaginationInCode(PAGE, 'list', { mode: 'infinite', perPage: 6 });
+    expect(paginationUiParentId(inf, 'sentinel-list')).toBe('list');
+    expect(paginationUiParentId(inf, 'spinner-list')).toBe('list');
+  });
+  it('ignores ordinary nodes and user nodes that merely LOOK like pagination ids', () => {
+    const lm = setPaginationInCode(PAGE, 'list', { mode: 'loadMore', perPage: 3 });
+    expect(paginationUiParentId(lm, 'list')).toBeNull();
+    const fake = PAGE.replace('data-id="list"', 'data-id="loadmore-x"');
+    expect(paginationUiParentId(fake, 'loadmore-x')).toBeNull();
+  });
+  it('the full teardown after deleting the instance leaves parseable code with no guard residue', () => {
+    const on = setPaginationInCode(PAGE, 'list', { mode: 'loadMore', perPage: 3 });
+    const off = removePaginationInCode(on, paginationUiParentId(on, 'loadmore-list')!);
+    expect(off).not.toMatch(/&&\s*\}/);
+    expect(off).not.toContain('loadmore-list');
+    parses(off);
+  });
+});
+
+describe('collectPaginationHooks / paginatedContainerIds — moving a list between function bodies', () => {
+  it('returns the Load More state hook, and the ref + observer effect for infinite scroll, in order', () => {
+    const lm = setPaginationInCode(PAGE, 'list', { mode: 'loadMore', perPage: 3 });
+    expect(collectPaginationHooks(lm, 'list')).toEqual([`const [${VAR}, ${SETTER}] = useState(3);`]);
+    const inf = setPaginationInCode(PAGE, 'list', { mode: 'infinite', perPage: 6 });
+    const hooks = collectPaginationHooks(inf, 'list');
+    expect(hooks[0]).toBe(`const [${VAR}, ${SETTER}] = useState(6);`);
+    expect(hooks[1]).toBe(`const ${VAR}Ref = useRef(null);`);
+    expect(hooks[2]).toMatch(/^useEffect\(\(\) => \{[\s\S]*IntersectionObserver[\s\S]*\}, \[\]\);$/);
+    expect(collectPaginationHooks(PAGE, 'list')).toEqual([]);
+  });
+  it('finds the paginated containers inside a JSX subtree', () => {
+    const lm = setPaginationInCode(PAGE, 'list', { mode: 'loadMore', perPage: 3 });
+    expect(paginatedContainerIds(lm)).toEqual(['list']);
+    expect(paginatedContainerIds(PAGE)).toEqual([]);
+  });
+  it('the real import sync adds useState to the React import once the hook lands in a master', async () => {
+    const { syncImports } = await import('../mutation/mutation-queue');
+    const master = `import React from 'react';
+import { motion } from 'framer-motion';
+import blog from '@/cms/blog.json';
+function Blogs({ style }) {
+  const [visBlogs, setVisBlogs] = useState(2);
+  return <motion.div data-id="blogs" style={{ position: 'relative' }}>{blog.slice(0, visBlogs).map((item) => <p data-id="t">{item.title}</p>)}</motion.div>;
+}
+export default Blogs;`;
+    expect(syncImports(master)).toMatch(/import React, \{ useState \} from 'react';/);
   });
 });

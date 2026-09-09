@@ -4,6 +4,8 @@
 
 Orange & Gray is adapting Revyme into a self-hosted visual website platform. The intended platform provides server-backed project persistence, staging deployments, Git-backed version control, versioned Docker images, production promotion, and rollback.
 
+The authoritative long-term platform design is [CHAZ-Architecture.md](./CHAZ-Architecture.md). This file is the concise current-state engineering handoff and should not duplicate that specification.
+
 ## Upstream Repository
 
 https://github.com/revyme-web/builder.git
@@ -24,15 +26,17 @@ https://github.com/charlie-orange-gray/og-builder.git
 
 ## Current Architecture
 
-The editor exposes one publishing capability, `PUBLISH_ENABLED`, from `src/shared/publish-flag.ts`. Revyme Cloud enables it through `CLOUD_ENABLED`; standalone self-hosted publishing enables it with the exact environment value `VITE_SELF_HOSTED_PUBLISH=true` without enabling cloud authentication, billing, marketplace, collaboration, cloud persistence, or hosted services.
+On `feature/self-hosted-publish-ui`, the editor exposes one publishing capability, `PUBLISH_ENABLED`, from `src/shared/publish-flag.ts`. Revyme Cloud enables it through `CLOUD_ENABLED`; standalone self-hosted publishing enables it with the exact environment value `VITE_SELF_HOSTED_PUBLISH=true` without enabling cloud authentication, billing, marketplace, collaboration, cloud persistence, or hosted services.
 
 In self-hosted development, same-origin `/api/*` requests are proxied by Vite to `VITE_API_URL`. Production should route `/api/*` to the control-plane service at the reverse proxy. The current editor seam expects `/api/websites/:id` and `/api/websites/:id/publish`; the control plane is intentionally not part of this repository.
 
-Current local development values are `VITE_SELF_HOSTED_PUBLISH=true` and `VITE_API_URL=http://localhost:8090`. Node is pinned by `.nvmrc` to `22.23.2`.
+The target architecture, not yet implemented, makes Orange & Gray infrastructure authoritative for editable projects. Each site has one independent Git repository. Publish first freezes a server project revision, materialises the complete generated site and its design assets, commits and pushes Git, and then deploys the resulting SHA. Runtime uploads remain in persistent per-site storage. Staging and production use blue/green Docker deployment, and production promotes the exact staging Git revision and image that was tested.
+
+The feature branch's local development values are `VITE_SELF_HOSTED_PUBLISH=true` and `VITE_API_URL=http://localhost:8090`. That branch also pins Node with `.nvmrc` to `22.23.2`.
 
 ## Current Branch
 
-`feature/self-hosted-publish-ui`
+`feature/self-hosted-publish-ui`, integrating synchronized `origin/main` (`11e43f6`) without rebasing.
 
 ## Completed Work
 
@@ -44,9 +48,13 @@ Current local development values are `VITE_SELF_HOSTED_PUBLISH=true` and `VITE_A
 
 ## Current Work
 
-The current task is an upstream synchronization audit and handoff maintenance. The fetched `upstream/main` is six commits and 168 changed files ahead of `origin/main`; the feature branch is one commit ahead of `origin/main` and six commits behind `upstream/main`. No sync branch has been created and no merge, rebase, commit, or push is authorized yet. The only overlapping file is `src/editor/header/RightHeader.tsx`, where upstream added publish preflight validation. A read-only `git merge-tree` check found no textual conflicts. Any future sync should preserve both that upstream preflight and the `PUBLISH_ENABLED` capability seam.
+PR #1 merged with a normal merge commit as `11e43f6` after explicit user approval and exact-head verification. `origin/main` contains upstream `e7b5b9f`, the required lockfile correction, and both architecture documents. A fresh upstream fetch found no newer commit.
 
-Next recommended action: after review, create a dedicated `chore/sync-upstream-2026-09-09` branch and merge `upstream/main` there, then run the full validation checklist before considering that branch for integration.
+The synchronized main is merged into the Publish feature. Only `codex_handoff.md` had an add/add conflict; this latest handoff is preserved. `RightHeader.tsx` auto-merged and retains the capability guard, mutation flush, upstream preflight and blocking feedback, autosave flush, then publish request.
+
+Feature validation passed fresh `npm ci`, TypeScript, all three builds, diff checks against `origin/main`, and scoped ESLint (zero errors; 29 existing warnings across RightHeader and Vite). The initial full test run had one failure in the unchanged 30 ms mounting test in `sandbox-code-host.test.ts`; isolated rerun passed all 17 tests. A complete confirmation run with `--maxWorkers=4` passed all 654 files: 10,307 passed, 1 skipped, 3 todo. No test or runtime code was changed for that failure. Logs: `/private/tmp/og-phase0-tests.log`, `/private/tmp/og-phase0-confirm-tests.log`, and `/private/tmp/og-phase0-build.log`.
+
+Next action: finish feature validation, create PR #2, and merge it if clean and mergeable as explicitly authorized. Then begin the separate control-plane persistence repository and editor adapter. No persistence, site Git publishing, Docker worker, or Debian deployment is implemented yet.
 
 ## Next Planned Milestones
 
@@ -120,7 +128,7 @@ Each individual website repository owns generated Next.js website source and its
 
 - The upstream `package-lock.json` was missing `@swc/helpers@0.5.23`; the fork carries only the minimal nested lockfile correction.
 - Full-repository lint currently contains unrelated existing failures. Do not call these regressions from Orange & Gray changes unless changed files introduce new failures.
-- The current upstream sync overlap is `src/editor/header/RightHeader.tsx`; upstream added a publish preflight before autosave/publish.
+- The current upstream sync overlap is `src/editor/header/RightHeader.tsx`; upstream added a publish preflight before autosave/publish. The source-level read-only feature application is clean; only the independently maintained handoff file has an add/add documentation conflict.
 
 ## Validation Checklist
 
@@ -132,7 +140,7 @@ npm run build:all
 git diff --check
 ```
 
-Also run scoped ESLint on changed source files. The last completed validation passed all of the above except full `npm run lint`, which remains blocked by baseline repository errors; scoped lint had zero errors.
+Current sync validation on 2026-09-09: `npm ci`, `npx tsc --noEmit`, `npm run test:run` (653 files; 10,303 passed, 1 skipped, 3 todo), `npm run build:all` (editor, sandbox, preview), and `git diff --check` all passed. Scoped RightHeader ESLint had zero errors and five existing hook warnings. Non-fatal output included test-environment media/canvas stubs, SDK sourcemaps, a dynamic-import warning, and large build chunks. Full repository lint remains baseline debt and was not used as a sync gate. Full test/build logs for this run are `/private/tmp/og-sync-tests.log` and `/private/tmp/og-sync-build.log`.
 
 ## Important Decisions
 

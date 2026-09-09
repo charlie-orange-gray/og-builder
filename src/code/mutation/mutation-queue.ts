@@ -155,7 +155,7 @@ import { setResponsiveTextVariableInCode, resetResponsiveTextVariableInCode, set
 import { addPageInteractionInCode, removePageInteractionInCode } from '../generation/page-interactions-gen';
 import { addCloseOverlayInCode, removeCloseOverlayInCode, setCloseOverlayDelayInCode, overlayCloseSetter } from '../generation/close-overlay-gen';
 import type { InteractionTrigger } from '../features/page-interactions';
-import { makeIntoMapInCode, addMapItemInCode, removeMapItemInCode, updateMapItemInCode, addMapFieldInCode, bindStyleToMapInCode, unbindStyleFromMapInCode, bindPropToMapInCode, unbindPropFromMapInCode, bindToCmsCollectionInCode, unbindFromCmsCollectionInCode, changeCollectionSourceInCode, bindCmsFieldOnDropInCode, bindCmsNavLinkOnDropInCode, setCmsNavHrefInCode, getEnclosingMapIteratorForNode } from '../generation/map-gen';
+import { unbindStyleFromMapInCode, bindPropToMapInCode, unbindPropFromMapInCode, bindToCmsCollectionInCode, unbindFromCmsCollectionInCode, changeCollectionSourceInCode, bindCmsFieldOnDropInCode, bindCmsNavLinkOnDropInCode, setCmsNavHrefInCode, getEnclosingMapIteratorForNode } from '../generation/map-gen';
 import { dormantizeCmsBindings, rehydrateCmsBindings, clearCmsOrphanInCode, healDanglingCanvasNodeBindings, detachCmsSubtreeWithValues } from '../generation/cms-detach-gen';
 import { resolveCmsRowForNodeInCode } from '../generation/cms-row-resolve';
 import { dormantizeComponentVarBindings, rehydrateComponentVarBindings, clearVarOrphanInCode, isCanvasNode } from '../generation/component-var-detach-gen';
@@ -169,7 +169,7 @@ import {
   createCollectionListInCode, bindFieldInCode, unbindFieldInCode,
   updateCollectionListConfigInCode,
 } from '../generation/cms-gen';
-import { setPaginationInCode, removePaginationInCode, ensureLoadMoreComponentFile, ensureSpinnerComponentFile, readPaginationMarker, pruneOrphanedPaginationHooks } from '../generation/cms-pagination-gen';
+import { setPaginationInCode, removePaginationInCode, ensureLoadMoreComponentFile, ensureSpinnerComponentFile, readPaginationMarker, pruneOrphanedPaginationHooks, paginationUiParentId } from '../generation/cms-pagination-gen';
 import { addSearchFieldInCode, setSearchInputVariableInCode } from '../generation/cms-search-field-gen';
 import { writeResponsiveListConfigInCode, type ResponsiveListConfig } from '../generation/cms-responsive-gen';
 import { duplicateCollectionListToCanvasInCode } from '../generation/cms-paste-gen';
@@ -545,24 +545,15 @@ export type Mutation =
   | { type: 'unbindInstanceEvent'; nodeId: string; propName: string }
   // ─── Inline .map() / Repeater mutations ─────────────────────────────────
   /** Convert an element into an inline .map() repeater with data array */
-  | { type: 'makeIntoMap'; nodeId: string; varName?: string }
   | { type: 'bindToCmsCollection'; nodeId: string; collectionSlug: string }
   | { type: 'unbindFromCmsCollection'; nodeId: string }
   | { type: 'changeCollectionSource'; parentNodeId: string; newSlug: string; fieldRemap?: Record<string, string> }
-  /** Add an item to an existing inline .map() data array */
-  | { type: 'addMapItem'; varName: string; item: Record<string, string> }
-  /** Remove an item from an inline .map() data array by index */
-  | { type: 'removeMapItem'; varName: string; index: number }
-  /** Update an item in an inline .map() data array by index */
-  | { type: 'updateMapItem'; varName: string; index: number; item: Record<string, string> }
-  /** Add a new field to all items in an inline .map() data array */
-  | { type: 'addMapField'; varName: string; fieldName: string; defaultValue?: string }
-  /** Bind a style property to map data: inline value → item.fieldName */
-  | { type: 'bindStyleToMap'; nodeId: string; varName: string; styleProp: string; fieldName: string; currentValue: string }
   /** Unbind a style property from map data: item.fieldName → inline value */
   | { type: 'unbindStyleFromMap'; nodeId: string; varName: string; styleProp: string; fieldName: string; inlineValue: string }
-  /** Bind a component prop to map data: static value → item.fieldName */
+  /** Bind a component-instance prop (inside a CMS collection list) to a row field:
+   *  `propName={item.fieldName}` (`urlWrap` → `propName={\`url(${item.fieldName})\`}`). */
   | { type: 'bindPropToMap'; nodeId: string; varName: string; propName: string; fieldName: string; currentValue: string; urlWrap?: boolean }
+  /** Strip a bound `propName={…}` off a component instance (→ the component default). */
   | { type: 'unbindPropFromMap'; nodeId: string; propName: string }
   /** Clear ONE orphaned CMS prop binding (the "Missing" pill ×) → revert to default. */
   | { type: 'clearCmsOrphan'; nodeId: string; propName: string }
@@ -1435,9 +1426,12 @@ function extractCodeExcerpt(code: string, errorMessage: string): string | undefi
 /** @internal Exported for testing. */
 export function validateGeneratedCode(code: string): string | null {
   // Fast semantic checks first (cheap, catch AI-specific mistakes)
-  // Detect character-indexed properties pattern: AI spread a JSON string as object keys
-  // Pattern: 3+ consecutive numeric keys like `0: '...', 1: '...', 2: '...'`
-  if (/\b\d+:\s*['"][^'"]*['"],\s*\d+:\s*['"]/.test(code)) {
+  // Detect character-indexed properties pattern: AI spread a JSON string as object keys.
+  // The signature is SEQUENTIAL keys from zero (`0: 'a', 1: 'b', 2: 'c'`). The
+  // previous "any two adjacent numeric keys" test also matched the builder's own
+  // responsive-text overrides keyed by viewport width (`375: "…", 768: "…"`), so
+  // the SECOND per-viewport text edit on a node was blocked (live find 2026-09-07).
+  if (/\b0:\s*['"][^'"]*['"],\s*1:\s*['"][^'"]*['"],\s*2:\s*['"]/.test(code)) {
     return 'Generated code contains character-indexed properties — AI sent properties as a string instead of an object';
   }
 
@@ -2765,6 +2759,16 @@ function applyMutationCore(code: string, mutation: Mutation): string {
       }
 
       case 'removeNode': {
+        // Deleting the Load More instance / infinite-scroll sentinel IS
+        // "remove pagination" for its list: the element lives inside the
+        // `{vis < slug.length && …}` guard, so stripping only the JSX left
+        // `{vis < blog.length && }` — a parse error that blocked the delete
+        // (2026-09-08). Route through the full teardown instead.
+        const paginatedList = paginationUiParentId(code, mutation.nodeId);
+        if (paginatedList) {
+          trace.action('mutation:removeNode-pagination-ui', { nodeId: mutation.nodeId, listId: paginatedList });
+          return pruneOrphanedPaginationHooks(removePaginationInCode(code, paginatedList));
+        }
         // Strip the element, then drop any connection whose trigger element is
         // now gone (its onTap went with the element; the `connections` entry +
         // arrow would otherwise linger as dead data). Presence-based so it also
@@ -3516,8 +3520,6 @@ function applyMutationCore(code: string, mutation: Mutation): string {
         return setInstancePropBaseInCode(code, mutation.nodeId, mutation.componentName, mutation.prop, JSON.stringify(mutation.value));
 
       // ─── Inline .map() / Repeater mutations ──────────────────────────────
-      case 'makeIntoMap':
-        return makeIntoMapInCode(code, mutation.nodeId, mutation.varName);
       case 'bindToCmsCollection':
         return bindToCmsCollectionInCode(code, mutation.nodeId, mutation.collectionSlug);
       case 'unbindFromCmsCollection':
@@ -3539,16 +3541,6 @@ function applyMutationCore(code: string, mutation: Mutation): string {
         // lists (they keep referencing a no-longer-imported slug → crash).
         return pruneOrphanedPaginationHooks(out);
       }
-      case 'addMapItem':
-        return addMapItemInCode(code, mutation.varName, mutation.item);
-      case 'removeMapItem':
-        return removeMapItemInCode(code, mutation.varName, mutation.index);
-      case 'updateMapItem':
-        return updateMapItemInCode(code, mutation.varName, mutation.index, mutation.item);
-      case 'addMapField':
-        return addMapFieldInCode(code, mutation.varName, mutation.fieldName, mutation.defaultValue);
-      case 'bindStyleToMap':
-        return bindStyleToMapInCode(code, mutation.nodeId, mutation.varName, mutation.styleProp, mutation.fieldName, mutation.currentValue);
       case 'unbindStyleFromMap':
         return unbindStyleFromMapInCode(code, mutation.nodeId, mutation.varName, mutation.styleProp, mutation.fieldName, mutation.inlineValue);
       case 'bindPropToMap':

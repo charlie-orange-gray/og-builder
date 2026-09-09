@@ -36,6 +36,15 @@ import type { ClipboardData, PasteResult } from './types';
  * `contentEl` and `handleNodeMouseDown` are accepted but ignored — the
  * engine now goes through the mutation queue, not direct DOM.
  */
+
+// ─── UI follow-up hooks ──────────────────────────────────────────────────────
+// This module has no React store access (the app runs under <Provider>), so
+// Canvas registers the follow-ups that need atoms. Today: entering overlay
+// edit mode on an overlay the paste just ATTACHED to the selection.
+export interface PasteUiHooks { enterOverlayEdit?: (overlayId: string) => void }
+let pasteUiHooks: PasteUiHooks | null = null;
+export function setPasteUiHooks(hooks: PasteUiHooks | null): void { pasteUiHooks = hooks; }
+
 export function executePaste(
   nodes: Map<string, CanvasNode>,
   contentEl: HTMLElement | null,
@@ -80,9 +89,17 @@ export function executePaste(
   // and remounts on the next render after flush ("reappears"). The visible
   // result is a one-frame flash on every paste.
   const finish = (result: PasteResult): void => {
+    if (!result.success && result.userFacing && result.message) {
+      toast.error(result.message);
+      return;
+    }
     if (result.success && result.createdIds.length > 0) {
       flushNow();
       setSelectedId(result.createdIds[0]);
+      if (result.attachedOverlayId) {
+        trace.action('paste:enter-overlay-edit', { overlayId: result.attachedOverlayId, hooked: !!pasteUiHooks?.enterOverlayEdit });
+        pasteUiHooks?.enterOverlayEdit?.(result.attachedOverlayId);
+      }
     }
   };
 

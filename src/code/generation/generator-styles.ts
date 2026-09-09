@@ -1602,6 +1602,32 @@ export function setSmoothScrollInCode(code: string, nodeId: string, enabled: boo
  * expressions (prop or literal), so it works for literal AND variable links.
  * Injected when anchor-capable OR keep-params is active; removed otherwise.
  */
+/** Read a JSX expression attribute's value, brace-aware.
+ *
+ *  `href={`/blog/${item.slug}`}` -> "`/blog/${item.slug}`"
+ *
+ *  The naive /\bprop=\{([^}]+)\}/ this replaces stops at the FIRST `}`, which on a
+ *  CMS-bound href is the one closing `${…}`. syncLinkHandlerInCode then inlined that
+ *  truncated expression into the managed onClick and the file stopped parsing
+ *  ("Unexpected token, expected }") — the page could not be edited until the handler
+ *  was deleted by hand. Same depth scan already used for CMS attrs in cms-detach-gen.
+ *  Returns null when the attribute is absent or its braces are unbalanced. */
+function readJsxExprAttr(tag: string, attr: string): string | null {
+  const m = new RegExp(`\\b${attr}=\\{`).exec(tag);
+  if (!m) return null;
+  const braceStart = m.index + m[0].length - 1;
+  let depth = 0;
+  for (let j = braceStart; j < tag.length; j++) {
+    const c = tag[j];
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return tag.slice(braceStart + 1, j);
+    }
+  }
+  return null;
+}
+
 export function syncLinkHandlerInCode(code: string, nodeId: string): string {
   trace.fn('generator.syncLinkHandlerInCode', { nodeId });
 
@@ -1614,12 +1640,12 @@ export function syncLinkHandlerInCode(code: string, nodeId: string): string {
   const tagContent = code.substring(tagStart, tagEnd + 1);
 
   // href value — expression `{EXPR}` (prop) or string literal "LIT".
-  const hrefExprMatch = tagContent.match(/\bhref=\{([^}]+)\}/);
+  const hrefExprRaw = readJsxExprAttr(tagContent, 'href');
   const hrefLitMatch = tagContent.match(/\bhref="([^"]*)"/);
-  const hrefIsExpr = !!hrefExprMatch;
+  const hrefIsExpr = hrefExprRaw !== null;
   const hrefLit = hrefLitMatch ? hrefLitMatch[1] : null;
   const hrefExpr = hrefIsExpr
-    ? hrefExprMatch![1].trim()
+    ? hrefExprRaw!.trim()
     : (hrefLit != null ? JSON.stringify(hrefLit) : null);
 
   // smooth flag → the behavior guard. Expression (variable) → use it raw
@@ -1632,11 +1658,11 @@ export function syncLinkHandlerInCode(code: string, nodeId: string): string {
   const smoothGuard = "e.currentTarget.dataset.smoothScroll === 'true'";
 
   // keep-params flag → guard. Expression (variable) raw, literal "true" → true.
-  const keepExprMatch = tagContent.match(/\bdata-keep-params=\{([^}]+)\}/);
+  const keepExprRaw = readJsxExprAttr(tagContent, 'data-keep-params');
   const keepLitMatch = tagContent.match(/\bdata-keep-params="([^"]*)"/);
-  const keepActive = !!keepExprMatch || (keepLitMatch && keepLitMatch[1] === 'true');
-  const keepGuard = keepExprMatch
-    ? keepExprMatch[1].trim()
+  const keepActive = keepExprRaw !== null || (keepLitMatch && keepLitMatch[1] === 'true');
+  const keepGuard = keepExprRaw !== null
+    ? keepExprRaw.trim()
     : (keepLitMatch && keepLitMatch[1] === 'true' ? 'true' : 'false');
 
   // Inject for any ANCHOR-CAPABLE link (variable href, or literal href with `#`)

@@ -20,10 +20,16 @@ export function ColorSwatch({ style, size = 'sm', className, children }: {
     <span
       // cut-border paints the diagonal segments the clip removes; the pin is a
       // literal because this swatch's hairline is border-white/10, not a token.
-      className={`${sizeClass} cut-border [--cut-border-color:rgba(255,255,255,0.1)] border border-white/10 flex-shrink-0 flex items-center justify-center${className ? ' ' + className : ''}`}
-      style={style}
+      className={`${sizeClass} relative cut-border [--cut-border-color:rgba(255,255,255,0.1)] border border-white/10 flex-shrink-0 flex items-center justify-center${className ? ' ' + className : ''}`}
     >
-      {children}
+      {/* The fill paints on its OWN layer, never on the shell. The shell's
+        * .cut-border is a background-image stack with background-repeat:
+        * no-repeat, so an inline fill on the same element (a) replaced the
+        * diagonal corner strokes and (b) inherited no-repeat — the 6px
+        * checkerboard of the empty / Mixed swatch collapsed to a single tile
+        * in the top-left corner (2026-09-08). */}
+      {style && <span aria-hidden className="absolute inset-0 pointer-events-none" style={style} />}
+      {children != null && <span className="relative flex items-center justify-center">{children}</span>}
     </span>
   );
 }

@@ -59,7 +59,7 @@ describe('deepEqualPlain', () => {
       isComponentRoot: false, motionVariants: { default: { height: '80px' } },
       motionVariantsRef: null, motionProps: null, responsiveVariantMap: null,
       conditionalStyles: null, hiddenOnVariants: new Set(['variant-2']),
-      inlineMapData: [{ title: 'One' }, { title: 'Two' }],
+      rows: [{ title: 'One' }, { title: 'Two' }],
     });
     expect(deepEqualPlain(mk(), mk())).toBe(true);
     const changed = mk();

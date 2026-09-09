@@ -1025,3 +1025,32 @@ describe('wrapInFrame / wrapInLayout — bbox falls back to live rects', () => {
     expect(framed()).toMatchObject({ left: '100px', top: '100px', width: '500px', height: '350px' });
   });
 });
+
+// ─── Make Component on an ABSOLUTE bare text (live find 2026-09-07) ─────────
+// The text was `position: absolute` on the page. keepFlowChildren wrapped it
+// in a px-sized frame with the text still absolute at 0,0 → the master root
+// (hug → max-content/min-content + overflow hidden) measured 0×0 and the text
+// was invisible. The wrapper must hug and the text must become a flow child.
+describe('wrapInFrame — keepFlowChildren on a single ABSOLUTE text', () => {
+  const dummyEl = {} as unknown as HTMLElement;
+  it('hugging wrapper + relative child', async () => {
+    const mutQueue = await import('@/code/mutation/mutation-queue');
+    const q = mutQueue.queueMutation as ReturnType<typeof vi.fn>;
+    q.mockClear();
+    const map = buildMap([
+      makeNode('root', null, ['t'], { position: 'relative' }),
+      { id: 't', type: 'p', name: 'Text', parentId: 'root', children: [], textContent: 'Hello',
+        styles: { position: 'absolute', left: '41.58%', top: '396px', width: 'max-content', height: 'auto' } } as unknown as CanvasNode,
+    ]);
+    wrapInFrame(['t'], map, dummyEl, undefined, { keepFlowChildren: true });
+    const calls = q.mock.calls.map(c => c[0]);
+    const f = calls.find(m => m.type === 'addNode')?.node?.styles as Record<string, string>;
+    expect(f.position).toBe('absolute');      // wrapper inherits the text's placement
+    expect(f.left).toBe('41.58%');
+    expect(f.width).toBe('auto');             // …and HUGS its flow child
+    expect(f.height).toBe('auto');
+    const ms = calls.find(m => m.type === 'move' && m.nodeId === 't')?.styles as Record<string, string>;
+    expect(ms.position).toBe('relative');
+    expect(ms.left).toBe(''); expect(ms.top).toBe('');
+  });
+});

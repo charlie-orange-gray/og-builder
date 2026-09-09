@@ -497,6 +497,46 @@ describe('checkFile — code components', () => {
   it('the built-in Aurora code component passes with ZERO violations (prime rule)', async () => {
     const { AURORA_BACKGROUND_COMPONENT } = await import('@/code/project/default-code-components/AuroraBackground');
     expect(checkFile(AURORA_BACKGROUND_COMPONENT, { kind: 'code-component' })).toEqual([]);
+
+    // The shader backgrounds shipped in the Insert panel are code components
+    // like any other: if one cannot be resolved, it drags into a page and is
+    // uneditable forever.
+    const backgrounds: [string, string][] = [
+      ['SilkRibbons', 'SILK_RIBBONS_COMPONENT'],
+      ['LightPillar', 'LIGHT_PILLAR_COMPONENT'],
+      ['IridescentFilm', 'IRIDESCENT_FILM_COMPONENT'],
+      ['GodRays', 'GOD_RAYS_COMPONENT'],
+      ['GrainField', 'GRAIN_FIELD_COMPONENT'],
+      ['NebulaField', 'NEBULA_FIELD_COMPONENT'],
+      ['DotWave', 'DOT_WAVE_COMPONENT'],
+      ['ContourMap', 'CONTOUR_MAP_COMPONENT'],
+      ['FluidGradient', 'FLUID_GRADIENT_COMPONENT'],
+      ['CyberGrid', 'CYBER_GRID_COMPONENT'],
+      ['RippleGrid', 'RIPPLE_GRID_COMPONENT'],
+      ['VoronoiCells', 'VORONOI_CELLS_COMPONENT'],
+      ['MetaballField', 'METABALL_FIELD_COMPONENT'],
+      ['HalftoneScreen', 'HALFTONE_SCREEN_COMPONENT'],
+      ['ScanlineCRT', 'SCANLINE_C_R_T_COMPONENT'],
+      ['Smoke', 'SMOKE_COMPONENT'],
+      ['Marble', 'MARBLE_COMPONENT'],
+      ['WarpTunnel', 'WARP_TUNNEL_COMPONENT'],
+      ['StarWarp', 'STAR_WARP_COMPONENT'],
+      ['HexGrid', 'HEX_GRID_COMPONENT'],
+      ['Lightning', 'LIGHTNING_COMPONENT'],
+      ['LiquidChrome', 'LIQUID_CHROME_COMPONENT'],
+      ['Bokeh', 'BOKEH_COMPONENT'],
+      ['RainGlass', 'RAIN_GLASS_COMPONENT'],
+      ['Fireflies', 'FIREFLIES_COMPONENT'],
+      ['Vortex', 'VORTEX_COMPONENT'],
+      ['Sunset', 'SUNSET_COMPONENT'],
+      ['Dunes', 'DUNES_COMPONENT'],
+      ['OilSlick', 'OIL_SLICK_COMPONENT'],
+      ['WaveStack', 'WAVE_STACK_COMPONENT'],
+    ];
+    for (const [file, key] of backgrounds) {
+      const mod = await import(`@/code/project/default-code-components/${file}`);
+      expect(checkFile(mod[key] as string, { kind: 'code-component' }), file).toEqual([]);
+    }
   });
 
   it('code component internals do not need data-ids (black box edited via @controls)', () => {

@@ -484,7 +484,7 @@ import React from 'react';
 export default function Page() {
   return <div data-id="root" data-name="Page" style={{ position: 'relative', width: '100%', display: 'flex', flexDirection: 'column' }}>
     <h1 data-id="hero-title" data-name="Title" style={{ position: 'relative', fontFamily: 'var(--typo-display-font)', fontSize: 'var(--typo-display-size)', fontWeight: 'var(--typo-display-weight)', color: 'var(--typo-display-color)', lineHeight: 'var(--typo-display-line-height)', margin: '0px' }}>Hello</h1>
-    <style>{\`@media (max-width: 1199px){ [data-id="hero-title"] { font-size: var(--typo-display-size-md); } }\`}</style>
+    <style>{\`@media (max-width: 1199px){ [data-id="hero-title"] { font-size: var(--typo-display-size-md) !important; } }\`}</style>
   </div>;
 }`;
     const { gateTurnFiles } = await import('@/ai/freeform/freeform-client');

@@ -604,14 +604,13 @@ export function computeSelectionSets(
 // ─── Layer Row (pure — no useMemo, no layers array) ──────────────────────
 
 export const LayerRow = React.memo(function LayerRow({
-  layer, isSelected, isMapTemplate, isChildOfSelected, hasHighlightedChildren, isLastHighlightedChild,
+  layer, isSelected, isChildOfSelected, hasHighlightedChildren, isLastHighlightedChild,
   isDragOver, dropPosition, dropDepth, isDragging, effectiveHidden,
   onSelect, onToggleExpand, onDragStart, onContextMenu, onToggleLock, onToggleVisibility,
   isRenaming, onRenameCommit, onVariantRenameCommit, onDoubleClickLayout, isComponentMode, nodes, presetTokens, layerDisplay, layerFlexDirection,
 }: {
   layer: FlatLayer;
   isSelected: boolean;
-  isMapTemplate: boolean;
   isComponentMode: boolean;
   /** The row's RESOLVED `display` for its own viewport/variant (from
    *  resolveDisplayForLayer, computed once by the panel and shared with the eye
@@ -717,20 +716,16 @@ export const LayerRow = React.memo(function LayerRow({
   // over props already in memory, and memoising would need the styles object's
   // identity to be stable across edits, which it isn't.
   const preview = previewFailed ? null : deriveLayerPreview(node, nodes, 18, presetTokens);
-  // Map template nodes use orange, component mode/instances use purple, regular nodes use blue
+  // Component mode/instances use purple, regular nodes use blue
   const isComponentInstance = !!node.componentFile;
   const usePurple = isComponentMode || (isComponentInstance && !isSvgVector);
-  const selColor = isMapTemplate ? 'rgb(249, 115, 22)' : usePurple ? 'var(--accent-secondary)' : 'var(--accent)';
+  const selColor = usePurple ? 'var(--accent-secondary)' : 'var(--accent)';
   // Foreground for anything sitting ON the selected row's accent fill —
   // label, icons, chevron. Mirrors selColor's branching.
-  const selFg = isMapTemplate
-    ? '#0d1017'
-    : usePurple ? 'var(--accent-secondary-fg)' : 'var(--accent-fg)';
-  const selColorFaded = isMapTemplate
-    ? 'rgba(249, 115, 22, 0.2)'
-    : usePurple
-      ? 'color-mix(in srgb, var(--accent-secondary) 20%, transparent)'
-      : 'color-mix(in srgb, var(--accent) 20%, transparent)';
+  const selFg = usePurple ? 'var(--accent-secondary-fg)' : 'var(--accent-fg)';
+  const selColorFaded = usePurple
+    ? 'color-mix(in srgb, var(--accent-secondary) 20%, transparent)'
+    : 'color-mix(in srgb, var(--accent) 20%, transparent)';
 
   // The selection/child background lives on a SEPARATE, viewport-pinned layer
   // (rendered in the JSX below) so it can stay inset from both edges while the

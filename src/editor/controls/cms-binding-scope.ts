@@ -33,9 +33,6 @@ export interface CmsListScope {
  * the collection-list CONTAINER — a sibling of the `.map()` expression, not a
  * descendant of the row — satisfied the ancestor walk on its first hop and was
  * offered the full binding surface (reported 2026-08-24).
- *
- * `__inline:` sources are skipped: those are literal arrays, not CMS
- * collections, and have no schema to bind against.
  */
 export function findCmsListScope(
   node: CanvasNode | null | undefined,
@@ -44,7 +41,7 @@ export function findCmsListScope(
   if (!node?.isCollectionTemplate) return null;
   let cursor: CanvasNode | undefined = node;
   while (cursor) {
-    if (cursor.collectionList && !cursor.collectionList.source.startsWith('__inline:')) {
+    if (cursor.collectionList) {
       return { slug: cursor.collectionList.source, itemVar: cursor.collectionList.itemVar };
     }
     cursor = cursor.parentId ? nodes.get(cursor.parentId) : undefined;

@@ -50,9 +50,7 @@ export function resolveCmsRowValues(node: CanvasNode, nodes: Map<string, CanvasN
   try {
     const rowIndex = getDefaultStore().get(mapItemIndexAtom) ?? 0;
     const offset = list!.collectionList!.offset ?? 0;
-    const items = source.startsWith('__inline:')
-      ? (list!.inlineMapData ?? [])
-      : getCollectionData(source);
+    const items = getCollectionData(source);
     row = items[offset + rowIndex] ?? items[offset] ?? items[0];
   } catch (err) {
     trace.error('cms-detach:row-resolve-failed', err);

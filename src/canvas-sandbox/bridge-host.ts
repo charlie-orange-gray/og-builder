@@ -459,8 +459,13 @@ export class PostMessageBridge implements CanvasBridge {
 
   /** Hide/show a CMS collection list's ghost copies during a layout drag of one
    *  of its items (see sandbox impl). */
-  setCollectionGhostsHidden(containerId: string, vpPrefix: string, hidden: boolean): void {
-    this.remote?.setCollectionGhostsHidden(containerId, vpPrefix, hidden);
+  setCollectionGhostsHidden(containerId: string, vpPrefix: string, hidden: boolean, nodeId?: string): void {
+    this.remote?.setCollectionGhostsHidden(containerId, vpPrefix, hidden, nodeId);
+  }
+
+  /** Hide / show ONE node transiently (drop re-centre) — see sandbox impl. */
+  setNodeHidden(nodeId: string, vpPrefix: string, hidden: boolean): void {
+    this.remote?.setNodeHidden(nodeId, vpPrefix, hidden);
   }
 
   /** Swap two children of a parent in DOM order. Either id may be a

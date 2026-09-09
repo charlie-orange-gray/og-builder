@@ -1993,6 +1993,19 @@ export class CanvasDragStrategy implements DragStrategy {
             // works for ANY cumulative ancestor transform (rotate, skew,
             // scale at any nesting depth). Falls back to AABB math when
             // corners aren't cached.
+            // ANCHOR = the element's PAINTED CENTRE this frame (the mouse-
+            // synchronous rect the containment test just used), NOT the
+            // cursor. Anchoring on the cursor re-centred the element under
+            // the pointer at the entry moment and threw away the grab offset,
+            // so a node grabbed off-centre jumped by (grab offset − half
+            // size) — visibly more for bigger nodes (user repro 2026-09-09,
+            // a rotated 293×529 frame entering a layout-child frame). The
+            // AABB centre is the layout-box centre for any centred affine
+            // transform, so this stays exact for rotated/scaled nodes; the
+            // cursor is only the fallback when no rect exists.
+            const entryAnchor = elRect
+              ? { x: elRect.left + elRect.width / 2, y: elRect.top + elRect.height / 2 }
+              : mouseScreen;
             const corners = getScreenCornersById(enteredParentId, dropVpId);
             const sibCssDims = findNodeComputedStyles(enteredParentId, dropVpId, ['width', 'height']);
             const sibCssW = parseFloat(sibCssDims.width);
@@ -2020,8 +2033,8 @@ export class CanvasDragStrategy implements DragStrategy {
               const xAxisY = corners.TR.y - corners.TL.y;
               const yAxisX = corners.BL.x - corners.TL.x;
               const yAxisY = corners.BL.y - corners.TL.y;
-              const dx = mouseScreen.x - corners.TL.x;
-              const dy = mouseScreen.y - corners.TL.y;
+              const dx = entryAnchor.x - corners.TL.x;
+              const dy = entryAnchor.y - corners.TL.y;
               const det = xAxisX * yAxisY - yAxisX * xAxisY;
               const relX = det !== 0 ? (dx * yAxisY - dy * yAxisX) / det : 0;
               const relY = det !== 0 ? (dy * xAxisX - dx * xAxisY) / det : 0;
@@ -2033,8 +2046,8 @@ export class CanvasDragStrategy implements DragStrategy {
               // Fallback: AABB-relative math for non-transformed parents.
               const sibScreenRect = findNodeRect(enteredParentId, dropVpId);
               if (sibScreenRect) {
-                const cursorLocalX = (mouseScreen.x - sibScreenRect.left) / scale;
-                const cursorLocalY = (mouseScreen.y - sibScreenRect.top) / scale;
+                const cursorLocalX = (entryAnchor.x - sibScreenRect.left) / scale;
+                const cursorLocalY = (entryAnchor.y - sibScreenRect.top) / scale;
                 cssLeft = Math.round(cursorLocalX - cssW / 2);
                 cssTop = Math.round(cursorLocalY - cssH / 2);
               }

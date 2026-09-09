@@ -30,7 +30,7 @@ import { getActiveAnimationScope } from '@/editor/tools/AnimationTool/animation-
 import { setResponsiveInstancePropVarInCode, resetResponsiveInstancePropVarInCode, getResponsiveInstancePropValueAtViewport, getInstancePropBaseValue, setInstancePropBaseInCode, setBoolNavCondForViewport, setBoolNavCondBase, getBoolNavCondBase, getBoolNavCondAtViewport, resetBoolNavCondForViewport, boolNavHasViewportBranches } from '@/code/generation/responsive-instance-prop-vars-gen';
 import { modifyProjectFile } from '@/code/project/modify-file';
 import type { LinkAttrKind } from '@/code/features/variable-ops';
-import { mapItemIndexAtom, mapContextAtom, nodesAtom } from '@/code/stores/store';
+import { nodesAtom } from '@/code/stores/store';
 import { cmsPageMetaAtom } from '@/code/stores/cms-page-store';
 import { queueMutation, queueMutations, flushNow } from '@/code/mutation/mutation-queue';
 import { trace } from '@/shared/debug-trace';
@@ -96,19 +96,12 @@ export default function LinkTool() {
     return s && 'query' in s ? s.query : null;
   })();
 
-  // Map context — when inside .map(), href may be bound to a data field
-  const mapItemIndex = useAtomValue(mapItemIndexAtom);
-  const mapContext = useAtomValue(mapContextAtom);
-  const isInMap = mapItemIndex != null && mapContext != null;
-
-  // Resolve href: from map data if bound, otherwise from node attrs
+  // href bound to a CMS row field (`href={item.url}`) — the URL field is then
+  // owned by the collection, not the attr.
   const hrefBinding = node?.attrBindings?.find(b => b.property === 'href');
-  const mapItem = isInMap ? mapContext.mapData[mapItemIndex] : null;
 
   const isLink = node?.type === 'a' || node?.type === 'Link' || node?.type === 'MotionLink';
-  const href = (isInMap && hrefBinding && mapItem)
-    ? (mapItem[hrefBinding.field] ?? '')
-    : (node?.attrs?.href ?? '');
+  const href = node?.attrs?.href ?? '';
   const target = node?.attrs?.target ?? '';
   const smoothScroll = node?.attrs?.['data-smooth-scroll'] ?? '';
   const relValue = node?.attrs?.rel ?? '';
@@ -120,8 +113,7 @@ export default function LinkTool() {
   const navMode = (node?.attrs?.['data-cms-nav'] as CmsNavMode) || 'none';
 
   // Detect a CMS-backed map ancestor. Walks up from the selected node
-  // looking for a wrapper whose `collectionList.source` is a real
-  // collection slug (not the `__inline:…` placeholder for inline arrays).
+  // looking for a wrapper whose `collectionList.source` is the collection slug.
   // When found, the Slug control becomes available on ANY page — picking
   // "This Row" binds the link to that row's item slug, so each rendered
   // map row navigates to its own detail page.
@@ -131,7 +123,7 @@ export default function LinkTool() {
     let curr: typeof node | undefined = node;
     while (curr) {
       const src = curr.collectionList?.source;
-      if (src && !src.startsWith('__inline:')) {
+      if (src) {
         return { collection: src, itemVar: curr.collectionList!.itemVar };
       }
       curr = curr.parentId ? nodes.get(curr.parentId) : undefined;
@@ -524,7 +516,7 @@ export default function LinkTool() {
     const isExternal = newHref.startsWith('http://') || newHref.startsWith('https://') || newHref.startsWith('mailto:');
     trace.action('link-tool:url-change', { nodeId, href: newHref, isComponentFile, isExternal });
 
-    // Cleared the URL (no CMS-nav binding, not bound to a map data field) → the
+    // Cleared the URL (no CMS-nav binding, not bound to a CMS row field) → the
     // element navigates nowhere → revert it to a plain container rather than
     // leave a href-less <Link> (which crashes SSR — see revertLinkToDivMutations).
     if (!newHref && navMode === 'none' && !hrefBinding) {
@@ -556,11 +548,8 @@ export default function LinkTool() {
       }
     }
 
-    // Set href — route through map data if inside .map() with binding
-    if (isInMap && hrefBinding && mapContext) {
-      const updatedItem = { ...(mapContext.mapData[mapItemIndex!] || {}), [hrefBinding.field]: newHref };
-      mutations.push({ type: 'updateMapItem', varName: mapContext.varName, index: mapItemIndex!, item: updatedItem });
-    } else {
+    // Set href
+    {
       const attrs: Record<string, string> = { href: newHref };
       // Auto-add rel for external links
       if (isExternal) {
@@ -575,7 +564,7 @@ export default function LinkTool() {
     mutations.push({ type: 'syncLinkHandler', nodeId });
 
     queueMutations(mutations);
-  }, [nodeId, isLink, node?.type, isComponentFile, isInMap, hrefBinding, mapContext, mapItemIndex, navMode, revertLinkToDivMutations]);
+  }, [nodeId, isLink, node?.type, isComponentFile, navMode, hrefBinding, revertLinkToDivMutations]);
 
   const handleNewTabChange = useCallback((newTab: boolean) => {
     if (!nodeId) return;
@@ -683,21 +672,15 @@ export default function LinkTool() {
     // Build href: use /#section format so it works from any page
     const base = pagePart || '/';
     const newHref = section ? `${base}#${section}` : base;
-    trace.action('link-tool:section-change', { nodeId, section, newHref, isInMap });
+    trace.action('link-tool:section-change', { nodeId, section, newHref });
 
-    if (isInMap && hrefBinding && mapContext) {
-      // Map mode: update the data array item's href field
-      const updatedItem = { ...(mapContext.mapData[mapItemIndex!] || {}), [hrefBinding.field]: newHref };
-      queueMutation({ type: 'updateMapItem', varName: mapContext.varName, index: mapItemIndex!, item: updatedItem });
-    } else {
-      // Set the #section href + (re)sync the anchor-scroll handler so the link
-      // scrolls to the section on click (instant, or smooth when enabled).
-      queueMutations([
-        { type: 'updateHtmlAttrs', nodeId, attrs: { href: newHref } },
-        { type: 'syncLinkHandler', nodeId },
-      ]);
-    }
-  }, [nodeId, pagePart, isInMap, hrefBinding, mapContext, mapItemIndex]);
+    // Set the #section href + (re)sync the anchor-scroll handler so the link
+    // scrolls to the section on click (instant, or smooth when enabled).
+    queueMutations([
+      { type: 'updateHtmlAttrs', nodeId, attrs: { href: newHref } },
+      { type: 'syncLinkHandler', nodeId },
+    ]);
+  }, [nodeId, pagePart]);
 
   // CMS slug binding. Picks one of:
   //   - Detail page: Current / Previous / Next → resolve via `params.slug`.

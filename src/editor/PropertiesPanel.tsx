@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedNodeAtom, selectedIdsAtom, mapItemIndexAtom, mapContextAtom, isMapTemplateSelectedAtom } from '../code/stores/store';
+import { selectedNodeAtom, selectedIdsAtom } from '../code/stores/store';
 import { useNodesComputed } from '../code/stores/node-family';
 import { activeFilePathAtom, isComponentFilePath, isIconSetFilePath, isPageClientFile, isPageServerFile, isDesignComponentFile, isVariantFile, isTemplateFilePath } from '../code/project/active-file-store';
 import { activeEditorAtom } from '../code/stores/editor-store';
@@ -32,7 +32,6 @@ import SvgShapeTool from './tools/SvgShapeTool';
 import PathTool from './tools/PathTool';
 import SketchTool from './tools/SketchTool';
 import AnimationTool from './tools/AnimationTool';
-import MapTool from './tools/MapTool';
 import ImageTool from './tools/ImageTool';
 import VideoTool from './tools/VideoTool';
 import AudioTool from './tools/AudioTool';
@@ -112,56 +111,6 @@ function findCollectionContext(node: CanvasNode, nodes: Map<string, CanvasNode>)
     current = current.parentId ? nodes.get(current.parentId) : undefined;
   }
   return null;
-}
-
-// ─── Map Item Navigator — sticky bar for switching between ghost clones ────
-function MapItemNavigator({ node }: { node: CanvasNode }) {
-  const mapItemIndex = useAtomValue(mapItemIndexAtom);
-  const mapContext = useAtomValue(mapContextAtom);
-  const isMapTemplate = useAtomValue(isMapTemplateSelectedAtom);
-  const setMapItemIndex = useSetAtom(mapItemIndexAtom);
-
-  if (!isMapTemplate || mapItemIndex == null || !mapContext) return null;
-
-  const totalItems = mapContext.mapData.length;
-  const itemLabel = mapItemIndex === 0 ? 'Template' : `Item ${mapItemIndex}`;
-
-  const goPrev = () => {
-    if (mapItemIndex > 0) setMapItemIndex(mapItemIndex - 1);
-  };
-  const goNext = () => {
-    if (mapItemIndex < totalItems - 1) setMapItemIndex(mapItemIndex + 1);
-  };
-
-  return (
-    <div
-      className="flex items-center justify-between px-3 py-1.5 border-b border-[rgba(249,115,22,0.3)]"
-      style={{ backgroundColor: 'rgba(249, 115, 22, 0.15)' }}
-    >
-      <button
-        onClick={goPrev}
-        disabled={mapItemIndex <= 0}
-        className="w-5 h-5 flex items-center justify-center rounded text-[var(--text-primary)] disabled:opacity-20 hover:bg-[rgba(249,115,22,0.3)] transition-colors cursor-pointer disabled:cursor-default"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
-      </button>
-      <div className="flex items-center gap-1.5">
-        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'rgb(249, 115, 22)' }}>
-          {itemLabel}
-        </span>
-        <span className="text-[10px] text-[var(--text-disabled)]">
-          {node.name || node.type}
-        </span>
-      </div>
-      <button
-        onClick={goNext}
-        disabled={mapItemIndex >= totalItems - 1}
-        className="w-5 h-5 flex items-center justify-center rounded text-[var(--text-primary)] disabled:opacity-20 hover:bg-[rgba(249,115,22,0.3)] transition-colors cursor-pointer disabled:cursor-default"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
-      </button>
-    </div>
-  );
 }
 
 // The CMS detail-page item navigator ("ITEM 1 / 4") used to live here as a
@@ -462,13 +411,9 @@ function PropertiesPanelInner({ isMultiSelect = false }: { isMultiSelect?: boole
           (the shell div stays, so layout holds) and re-arms when the
           selection changes. */}
       <PanelErrorBoundary name="properties-panel" resetKey={node.id}>
-      {/* ─── Fixed top: Map Navigator ───
-          (The CMS detail-page "ITEM 1 / 4" item switcher moved OUT of the
+      {/* (The CMS detail-page "ITEM 1 / 4" item switcher moved OUT of the
           panel to the canvas-top SlugPageBreadcrumb — standard, with a
           searchable item dropdown. See canvas/ui/SlugPageBreadcrumb.tsx.) */}
-      <div className="shrink-0">
-        <MapItemNavigator node={node} />
-      </div>
 
       {/* ─── Scrollable content ─── */}
       <div className="flex-1 overflow-y-auto scrollbar-hide">
@@ -724,9 +669,6 @@ function PropertiesPanelInner({ isMultiSelect = false }: { isMultiSelect?: boole
 
         {/* Page Effects (View Transitions) live INSIDE the AnimationTool's "+"
             on a viewport (a "Page Transition" effect), not a separate section. */}
-
-        {/* 5. Map data editor (inline .map() repeater) — before Layout */}
-        <MapTool />
 
         {/* 5b. Layout (all elements — text nodes get Block-only mode).
             Container-set instances (icon sets) hide it: the

@@ -6,8 +6,6 @@ import { ToolSection, ToolDivider } from '../../controls';
 import { CreateVariableGate } from '../../controls/create-variable-gate';
 import { LocalizeGate } from '../../controls/localize-gate';
 import { useControl } from '../../controls/ControlProvider';
-import { useAtomValue } from 'jotai';
-import { isMapTemplateSelectedAtom } from '@/code/stores/store';
 import { trace } from '@/shared/debug-trace';
 import {
   TypographyPresetControl,
@@ -19,7 +17,6 @@ import {
 
 export default function TextStyleTool() {
   const { node, styles } = useControl();
-  const isMapTemplate = useAtomValue(isMapTemplateSelectedAtom);
 
   // PropertiesPanel only renders TextStyleTool when isText is true — no need to re-check.
   if (!node) return null;
@@ -27,7 +24,7 @@ export default function TextStyleTool() {
   // When a typography preset is active, hide all preset-controlled properties
   const hasPreset = !!styles.fontFamily?.startsWith('var(--typo-');
 
-  trace.fn('TextStyleTool:render', { nodeId: node.id, nodeType: node.type, hasPreset, isMapTemplate });
+  trace.fn('TextStyleTool:render', { nodeId: node.id, nodeType: node.type, hasPreset });
 
   return (
     <>
@@ -44,7 +41,7 @@ export default function TextStyleTool() {
       <LocalizeGate hidden>
       <CreateVariableGate hidden>
         <ToolSection title="Text" collapsible>
-          {!isMapTemplate && <TypographyPresetControl />}
+          <TypographyPresetControl />
           <LocalizeGate hidden={false}>
             <CreateVariableGate hidden={false}><ContentControl /></CreateVariableGate>
           </LocalizeGate>

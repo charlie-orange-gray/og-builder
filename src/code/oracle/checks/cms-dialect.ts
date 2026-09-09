@@ -3,6 +3,7 @@
 
 import * as t from '@babel/types';
 import { cmsNavHrefExpr } from '@/code/generation/map-gen';
+import { paginationStateVar } from '@/code/generation/cms-pagination-gen';
 import { traverse, jsxTagName, jsxAttrs, stringAttr } from './shared';
 import { MOTION_LINK_DECL_ANY_RE } from '@/code/generation/generator-attrs';
 import type { OracleViolation, FileKind } from './shared';
@@ -118,6 +119,44 @@ function checkCmsCollectionDialect(code: string, ast: t.File, v: OracleViolation
       v.push({
         code: 'CMS_PAGINATION_VAR_UNDECLARED', tier: 3, line: lineOf(m.index ?? 0),
         message: `Pagination slices by "${visVar}" but it's never declared → ReferenceError. A Load More / Infinite Scroll list needs THREE things together: (1) const [${visVar}, ${setter}] = useState(<perPage>); in the function body, (2) the chain "…slice(0, ${visVar}).map(…)", and (3) the guard {${visVar} < <slug>.length && <LoadMore data-id="loadmore-<containerId>" onLoadMore={() => ${setter}(c => c + <perPage>)} />} as the last child. The editor's Pagination control emits all three; don't add one without the others.`,
+      });
+    }
+  }
+
+  // 3b. Pagination CANONICAL FORM — the panel reads pagination ONLY from
+  //     `data-pagination="<loadMore|infinite>:<n>"` on the list container and
+  //     derives the state var from the container's data-id (`vis<Id>` with the
+  //     id's non-alphanumerics dropped). Any other marker or var name PARSES and
+  //     RENDERS, but the next Filter/Sort edit rebuilds the chain without the
+  //     `.slice()` (marker unreadable) or leaves an orphan useState (var
+  //     unrecognised) — bug-hunt 19, AI-only after the builder doors closed
+  //     (2026-09-08).
+  for (const m of code.matchAll(/\bdata-pagination=(?:"([^"]*)"|'([^']*)'|\{[^}]*\})/g)) {
+    // Only the double-quoted literal is readable (the panel's regex is exact).
+    const raw = m[1];
+    const idx = m.index ?? 0;
+    if (raw == null || !/^(loadMore|infinite):[1-9]\d*$/.test(raw)) {
+      v.push({
+        code: 'CMS_PAGINATION_MARKER_FORM', tier: 2, line: lineOf(idx),
+        message: `data-pagination=${m[0].slice('data-pagination='.length)} is not a marker the Pagination control can read — write exactly data-pagination="loadMore:<perPage>" or data-pagination="infinite:<perPage>" (a positive integer, double quotes, no spaces). Anything else renders but the next Filter/Sort edit rebuilds the list WITHOUT its pagination.`,
+      });
+      continue;
+    }
+    // The container's data-id → the ONLY state var the panel recognises.
+    const tagStart = code.lastIndexOf('<', idx);
+    const tagEnd = code.indexOf('>', idx);
+    const tag = tagStart === -1 || tagEnd === -1 ? '' : code.slice(tagStart, tagEnd);
+    const idM = /\bdata-id="([^"]+)"/.exec(tag);
+    if (!idM) continue;
+    const expected = paginationStateVar(idM[1]);
+    const after = code.slice(tagEnd);
+    const sliceM = /\.slice\(\s*0\s*,\s*([A-Za-z_$][\w$]*)\s*\)/.exec(after);
+    const actual = sliceM?.[1] ?? null;
+    if (actual !== expected) {
+      const setter = 'set' + expected.charAt(0).toUpperCase() + expected.slice(1);
+      v.push({
+        code: 'CMS_PAGINATION_VAR_NONCANONICAL', tier: 2, line: lineOf(idx),
+        message: `The list <${idM[1]}> is paginated (${raw}) but ${actual ? `slices by "${actual}"` : 'has no ".slice(0, <var>)" in its chain'} — the Pagination control derives the state var from the container's data-id and recognises ONLY "${expected}". Write: const [${expected}, ${setter}] = useState(${raw.split(':')[1]}); … {<slug>.slice(0, ${expected}).map(…)} … {${expected} < <slug>.length && <LoadMore data-id="loadmore-${idM[1]}" data-pagination-ui="true" onLoadMore={() => ${setter}(c => c + ${raw.split(':')[1]})} />}. With another name the next Filter/Sort edit drops the pagination and leaves the useState orphaned.`,
       });
     }
   }
