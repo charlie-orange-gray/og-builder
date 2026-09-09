@@ -48,15 +48,17 @@ The feature branch's local development values are `VITE_SELF_HOSTED_PUBLISH=true
 
 ## Current Work
 
-The sync branch fast-forwarded from `origin/main` to upstream commit `b3ed3d9` (`fix: rotated elements alignment icon fix`). No merge conflicts or manual source resolutions occurred. The only source overlap with the feature is `src/editor/header/RightHeader.tsx`, where upstream added publish preflight validation. A read-only merge-tree application of the source changes is clean: `RightHeader.tsx` auto-merges. A full branch merge reports an expected add/add conflict only in `codex_handoff.md`, because both branches carry independent handoff revisions. Any future feature integration should preserve both that upstream preflight and the `PUBLISH_ENABLED` capability seam.
+Phase 0 is validated locally and awaiting remote merge approval. A fresh fetch on 2026-09-09 found upstream commit `e7b5b9f`, covering transformed drag/resize behavior across 23 files. It merged cleanly on the dedicated sync branch without Orange & Gray source changes. `origin/main` remains `a3ed7b5`.
 
-The sync branch contains one intentional 11-line lockfile correction, committed as `b8f851a`: nested `@swc/helpers@0.5.23`, still required because upstream's `next-intl` dependency resolves `@swc/core@1.15.33` with an optional `@swc/helpers>=0.5.17` peer. `npm ci` is clean with that correction. The updated handoff is committed separately as `ecf5856`.
+The sync branch is pushed and [PR #1](https://github.com/charlie-orange-gray/og-builder/pull/1) is open and mergeable. Automatic approval review rejected merging this specific PR into the remote default branch, citing the earlier explicit approval requirement even after the latest implementation request was supplied. No remote main merge, feature merge, or rebase occurred. Resume only after approval naming PR #1; use a merge commit and verify the PR head before merging.
 
-`CHAZ-Architecture.md` now specifies the long-term platform, the detailed server-persistence boundary, and the future publish/deployment metadata model. No persistence service, Git publishing, or Docker deployment code has been added. A fresh fetch on 2026-09-09 confirmed that `origin/main` remains `a3ed7b5` and `upstream/main` remains `b3ed3d9`.
+The only fork source divergence from `upstream/main` on the sync branch is the existing 11-line nested `@swc/helpers@0.5.23` lockfile correction (`b8f851a`). Documentation is also present. Fresh `npm ci` succeeds with that correction.
 
-The implementation request on 2026-09-09 authorizes controlled PR integration and subsequent feature integration. A fresh fetch found one additional upstream commit, `e7b5b9f`, covering transformed drag/resize behavior with no overlap in Orange & Gray source files. It merged cleanly on this dedicated sync branch. Current sync validation: `npm ci`, TypeScript, 653 test files (10,303 passed, 1 skipped, 3 todo), all three builds, and `git diff --check` passed. Scoped RightHeader ESLint has zero errors and the same five hook warnings. Test-environment media/canvas warnings, SDK sourcemap warnings, and build chunk-size warnings remain non-fatal.
+A renewed read-only merge-tree check confirms `RightHeader.tsx` combines the upstream publish preflight with `PUBLISH_ENABLED` without a textual conflict. Only `codex_handoff.md` has an expected add/add documentation conflict. Preserve the newer handoff and update its branch/state during integration. Required publish order remains: capability guard, `flushNow()`, preflight and blocking feedback, `flushSaveNow()`, publish request.
 
-Next action: integrate this validated sync through a merge PR preserving ancestry, merge updated `origin/main` into the Publish feature, resolve the handoff add/add conflict, verify preflight and capability gating, and rerun validation before merging the feature. Phase 1 begins only after Phase 0 is clean.
+No control-plane repository, database, persistence API, asset pipeline, Git site publisher, Docker worker, or Debian deployment has been implemented. Local Docker CLI exists but its daemon socket is absent; PostgreSQL executables were not found on PATH. No credentials or host configuration were changed.
+
+Next action: merge PR #1 after specific approval, fetch `origin`, merge updated `origin/main` into the Publish feature, resolve the documentation conflict, rerun the required validations, and integrate the feature through a second PR. The implementation request explicitly prohibits beginning Phase 1 until Phase 0 is clean.
 
 ## Next Planned Milestones
 
@@ -142,7 +144,7 @@ npm run build:all
 git diff --check
 ```
 
-Also run scoped ESLint on changed source files. On this sync branch, `npm ci`, `npx tsc --noEmit`, `CI=1 npm run test` (648 files, 10,274 tests passed; 1 skipped; 3 todo), `npm run build`, and `git diff --check` passed. Scoped ESLint on `RightHeader.tsx` had zero errors and five existing hook-dependency warnings. Full repository lint remains baseline debt and was not used as a sync gate.
+Current sync validation on 2026-09-09: `npm ci`, `npx tsc --noEmit`, `npm run test:run` (653 files; 10,303 passed, 1 skipped, 3 todo), `npm run build:all` (editor, sandbox, preview), and `git diff --check` all passed. Scoped RightHeader ESLint had zero errors and five existing hook warnings. Non-fatal output included test-environment media/canvas stubs, SDK sourcemaps, a dynamic-import warning, and large build chunks. Full repository lint remains baseline debt and was not used as a sync gate. Full test/build logs for this run are `/private/tmp/og-sync-tests.log` and `/private/tmp/og-sync-build.log`.
 
 ## Important Decisions
 
