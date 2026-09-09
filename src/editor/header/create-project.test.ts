@@ -22,6 +22,9 @@ const backendObjMock = vi.hoisted(() => ({
   getWebsiteWorkspaceId: vi.fn<(id: string) => Promise<string | null>>(),
 }));
 
+const selfHostedMock = vi.hoisted(() => ({ createProject: vi.fn() }));
+vi.mock('@/backend/self-hosted-client', () => ({ selfHostedClient: selfHostedMock }));
+
 function makeTab() {
   return { location: { href: '' }, close: vi.fn() } as unknown as Window & { location: { href: string }; close: () => void };
 }
@@ -37,12 +40,15 @@ async function loadWithCloud(enabled: boolean) {
 }
 
 beforeEach(() => {
+  vi.stubEnv('VITE_SELF_HOSTED_PERSISTENCE', '');
+  selfHostedMock.createProject.mockReset();
   backendMock.createWebsite.mockReset();
   backendObjMock.getWebsiteWorkspaceId.mockReset();
   backendObjMock.getWebsiteWorkspaceId.mockResolvedValue(null);
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -119,5 +125,32 @@ describe('createAndOpenProject — local mode', () => {
     createAndOpenProject();
     expect(backendMock.createWebsite).not.toHaveBeenCalled();
     expect(tab.location.href).toMatch(/^\/builder\/[a-z0-9-]+$/i);
+  });
+});
+
+describe('createAndOpenProject — self-hosted persistence', () => {
+  it('creates a server row before navigating the tab, without using the Cloud allocator', async () => {
+    vi.stubEnv('VITE_SELF_HOSTED_PERSISTENCE', 'true');
+    const { createAndOpenProject } = await loadWithCloud(false);
+    const tab = makeTab();
+    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    backendObjMock.getWebsiteWorkspaceId.mockResolvedValue('agency');
+    selfHostedMock.createProject.mockResolvedValue({ projectId: 'server-created-project' });
+    createAndOpenProject();
+    expect(tab.location.href).toBe('');
+    await vi.waitFor(() => expect(tab.location.href).toBe('/builder/server-created-project'));
+    expect(selfHostedMock.createProject).toHaveBeenCalledWith('Untitled project', 'agency');
+    expect(backendMock.createWebsite).not.toHaveBeenCalled();
+  });
+
+  it('closes the blank tab when server creation fails', async () => {
+    vi.stubEnv('VITE_SELF_HOSTED_PERSISTENCE', 'true');
+    const { createAndOpenProject } = await loadWithCloud(false);
+    const tab = makeTab();
+    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    selfHostedMock.createProject.mockRejectedValue(new Error('offline'));
+    createAndOpenProject();
+    await vi.waitFor(() => expect(tab.close).toHaveBeenCalledTimes(1));
+    expect(tab.location.href).toBe('');
   });
 });

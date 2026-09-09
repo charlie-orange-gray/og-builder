@@ -373,8 +373,8 @@ export default defineConfig(({ mode }) => {
   const cloudMode = env.VITE_REVYME_CLOUD === 'true';
   // Cloud mode keeps its existing routing even if both flags are set by
   // mistake. The self-hosted flag only owns the standalone development seam.
-  const selfHostedPublishMode =
-    !cloudMode && env.VITE_SELF_HOSTED_PUBLISH === 'true';
+  const selfHostedApiMode = !cloudMode &&
+    (env.VITE_SELF_HOSTED_PUBLISH === 'true' || env.VITE_SELF_HOSTED_PERSISTENCE === 'true');
   return {
   plugins: [react(), tailwindcss(), debugTracePlugin()],
   // In cloud mode assets must be served under /builder/ so Next.js rewrite proxy can forward them.
@@ -385,7 +385,7 @@ export default defineConfig(({ mode }) => {
     // The browser always calls same-origin /api routes. During local
     // development, proxy those requests to the self-hosted control plane.
     // Production uses Nginx for the equivalent routing.
-    ...(selfHostedPublishMode && env.VITE_API_URL
+    ...(selfHostedApiMode && env.VITE_API_URL
       ? {
           proxy: {
             '/api': {

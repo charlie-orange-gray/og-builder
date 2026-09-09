@@ -68,6 +68,10 @@ export interface ProjectBackend {
   /** Save the full project snapshot. */
   saveProject(id: string, data: ProjectData): Promise<void>;
 
+  /** Optional versioned-persistence hook: retain loaded settings while the editor
+   *  serializes file changes. Explicit settings in `data` take precedence. */
+  completeSnapshot?(id: string, data: ProjectData): ProjectData;
+
   /** Update the website's canonical name (`websites.name`) — the value the
    *  dashboard tile shows. Called when the user renames the project from the
    *  in-editor chip so the editor and dashboard stay in sync. */
