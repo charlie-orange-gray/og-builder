@@ -26,13 +26,15 @@ https://github.com/charlie-orange-gray/og-builder.git
 
 ## Current Architecture
 
-On `feature/self-hosted-publish-ui`, the editor exposes one publishing capability, `PUBLISH_ENABLED`, from `src/shared/publish-flag.ts`. Revyme Cloud enables it through `CLOUD_ENABLED`; standalone self-hosted publishing enables it with the exact environment value `VITE_SELF_HOSTED_PUBLISH=true` without enabling cloud authentication, billing, marketplace, collaboration, cloud persistence, or hosted services.
+Stable `origin/main` exposes the publishing capability `PUBLISH_ENABLED` from `src/shared/publish-flag.ts`. Revyme Cloud enables it through `CLOUD_ENABLED`; self-hosted publishing enables it with the exact environment value `VITE_SELF_HOSTED_PUBLISH=true` without enabling cloud services. The upstream publish preflight remains intact.
 
 In self-hosted development, same-origin `/api/*` requests are proxied by Vite to `VITE_API_URL`. Production should route `/api/*` to the control-plane service at the reverse proxy. The current editor seam expects `/api/websites/:id` and `/api/websites/:id/publish`; the control plane is intentionally not part of this repository.
 
-The target architecture, not yet implemented, makes Orange & Gray infrastructure authoritative for editable projects. Each site has one independent Git repository. Publish first freezes a server project revision, materialises the complete generated site and its design assets, commits and pushes Git, and then deploys the resulting SHA. Runtime uploads remain in persistent per-site storage. Staging and production use blue/green Docker deployment, and production promotes the exact staging Git revision and image that was tested.
+The Phase 1 branch selects persistence once through `backendCapabilities`: Cloud → `RevymeBackend`; exact `VITE_SELF_HOSTED_PERSISTENCE=true` → `SelfHostedBackend`; otherwise → `LocalBackend`. Publishing and persistence are independent. The new adapter stores full editable `ProjectData` through the separate `/Users/chaz/og-control-plane` service. PostgreSQL owns identity, permissions, revision metadata, and idempotency receipts; durable immutable snapshot files contain project contents/settings. Browser project localStorage is not the self-hosted source of truth.
 
-The feature branch's local development values are `VITE_SELF_HOSTED_PUBLISH=true` and `VITE_API_URL=http://localhost:8090`. That branch also pins Node with `.nvmrc` to `22.23.2`.
+Git publishing and Docker remain unimplemented. Their required order is still frozen server revision → complete generated site/design assets → Git commit/push → exact SHA/image → staging health check → approved production promotion. Runtime uploads must remain outside disposable containers.
+
+The ignored `.env.local` still contains the original Publish flag and API URL; it was not silently switched to persistence. See [SELF_HOSTED_PERSISTENCE.md](./SELF_HOSTED_PERSISTENCE.md) for explicit proof commands with publishing disabled. Both repositories pin Node `22.23.2`.
 
 ## Current Branch
 
@@ -45,6 +47,9 @@ The feature branch's local development values are `VITE_SELF_HOSTED_PUBLISH=true
 3. Added `.nvmrc` for Node `22.23.2`.
 4. Repaired the upstream lockfile with the missing nested `@swc/helpers@0.5.23` entry while avoiding unrelated platform metadata churn.
 5. Added capability-flag tests and validated the editor, sandbox, and preview builds.
+6. Completed Phase 0 through normal merge commits for PRs #1 and #2, preserving published feature history.
+7. Implemented the local Phase 1 persistence proof: project create/list/load/rename/autosave, revision conflicts, idempotent retries, load-failure protection, read-only access, and downloadable conflict recovery.
+8. Added PostgreSQL migrations, atomic compressed snapshot storage, API/session boundaries, real database tests, and an independent-browser editor proof.
 
 ## Current Work
 
@@ -56,12 +61,24 @@ Feature validation passed fresh `npm ci`, TypeScript, all three builds, diff che
 
 Phase 0 is complete. [PR #2](https://github.com/charlie-orange-gray/og-builder/pull/2) merged with a normal merge commit as `84181a3` after successful confirmation validation and mergeability verification. `origin/main` contains both the latest validated upstream baseline (`e7b5b9f`) and the Publish capability feature (`74a3981`). Published feature history was not rebased. A fresh fetch at the start of persistence work found no newer upstream commit.
 
-Phase 1 is in progress on `feature/self-hosted-project-persistence`. The separate `/Users/chaz/og-control-plane` repository has been initialized for the API, PostgreSQL migrations, and snapshot storage. The editor will add a third backend provider and revision-aware persistence. Git publishing, Docker deployment, and Debian rollout remain later phases.
+Phase 1's first local persistence proof is implemented and validated on `feature/self-hosted-project-persistence`; it has not been merged into stable main. `/Users/chaz/og-control-plane` is a separate local Git repository with no remote configured. These Phase 1 changes are kept local for review; no new website repository, Git publishing pipeline, Docker operation, or Debian deployment was performed.
+
+Local implementation commits: editor adapter `795c2c5`; control-plane initial commit `f327b9a`. Phase 0 completion was recorded separately as `7e8ea40`. A final fetch of both builder remotes still reports `origin/main=84181a3` and `upstream/main=e7b5b9f`.
+
+The API implements `POST/GET /api/projects`, `GET/PUT/PATCH /api/projects/:projectId`, `POST /api/dev/session`, `GET /api/session`, `/healthz`, and `/readyz`. Its SQL migration creates users, workspaces, workspace memberships, projects, immutable project snapshots, project assets, audit events, sessions, and save receipts. Migration replay is checksummed and serialized. `project_assets` is schema groundwork only; a dedicated asset upload pipeline is not yet implemented.
+
+Saves send a base revision, matching `If-Match`, and an idempotency key. Stale saves return 409, pause autosave, and preserve the local copy. Files are written/fsynced/renamed before database references commit. Settings survive load/save/recovery. Snapshot compression is gzip using stable Node 22 support; the actual architecture decision is recorded in `CHAZ-Architecture.md`. No protected canvas/parser/runtime/mutation/generator/CMS internals were changed.
+
+The local browser proof uses real PostgreSQL 18.4 and durable data in the service's ignored `.data/phase1-proof-v1`. It creates a project through the UI, draws through actual pointer/keyboard input, closes the first browser context, reloads in a fresh context, edits/saves again, and reloads both frames. Further cases prove failed-load blocking and stale-browser recovery without overwriting the newer server revision. A test-harness click initially targeted the fixed header; correcting that test target produced a clean three-test run. No product workaround was used.
+
+Final proof project: `d71de69c-e859-4498-bb2d-1cf6131927c8`, revision 1 → 2 across independent browser contexts. The retained JSON report is `test-results/persistence-report.json`; the screenshot shows both frames reloaded with acknowledged Saved status.
+
+Next recommended action: review the two local persistence repositories and run the manual proof, then publish a persistence PR. The next implementation dependency is content-addressed design asset storage and exact frozen-revision materialization, before a publishing API, site Git repositories, or Docker. Production authentication, database backup/restore, Debian access/configuration, and deployment operations remain unvalidated.
 
 ## Next Planned Milestones
 
-1. Self-hosted publishing capability seam
-2. Self-hosted project persistence backend
+1. Self-hosted publishing capability seam — complete on stable main
+2. Self-hosted project persistence backend — local proof complete; review pending
 3. Local/server asset upload storage
 4. Minimal publish API
 5. Git staging deployment
@@ -103,13 +120,14 @@ Production must promote the exact tested staging revision and image rather than 
 
 `og-builder` is the visual editor fork only.
 
-The future control-plane repository owns persistence, authentication, the publishing API, and deployment jobs.
+`og-control-plane` owns implemented persistence/session boundaries and will own the publishing API. Privileged deployment jobs must remain in a separate worker/process.
 
 Each individual website repository owns generated Next.js website source and its history.
 
 ## Storage Strategy
 
-- Editor autosaves should eventually be sent to the server.
+- Self-hosted editor autosaves now go to the server; standalone and Cloud keep their existing providers.
+- Full immutable snapshots use canonical SHA-256 identity and `.json.gz` storage. Existing design data URLs are retained inside snapshots until the dedicated asset phase.
 - Runtime uploads must not depend on a container writable layer.
 - Persistent uploads should use server storage or bind mounts.
 - Static design assets may be baked into versioned site builds.
@@ -130,7 +148,8 @@ Each individual website repository owns generated Next.js website source and its
 
 - The upstream `package-lock.json` was missing `@swc/helpers@0.5.23`; the fork carries only the minimal nested lockfile correction.
 - Full-repository lint currently contains unrelated existing failures. Do not call these regressions from Orange & Gray changes unless changed files introduce new failures.
-- The current upstream sync overlap is `src/editor/header/RightHeader.tsx`; upstream added a publish preflight before autosave/publish. The source-level read-only feature application is clean; only the independently maintained handoff file has an add/add documentation conflict.
+- The Phase 0 `RightHeader.tsx` overlap integrated cleanly. The handoff add/add conflict was resolved using the latest correct state; no conflict remains.
+- A baseline 30 ms sandbox mounting test flaked in the first Phase 0 full run, then passed isolated and full confirmation runs. No protected runtime/test code was changed to mask it.
 
 ## Validation Checklist
 
@@ -142,7 +161,13 @@ npm run build:all
 git diff --check
 ```
 
-Current sync validation on 2026-09-09: `npm ci`, `npx tsc --noEmit`, `npm run test:run` (653 files; 10,303 passed, 1 skipped, 3 todo), `npm run build:all` (editor, sandbox, preview), and `git diff --check` all passed. Scoped RightHeader ESLint had zero errors and five existing hook warnings. Non-fatal output included test-environment media/canvas stubs, SDK sourcemaps, a dynamic-import warning, and large build chunks. Full repository lint remains baseline debt and was not used as a sync gate. Full test/build logs for this run are `/private/tmp/og-sync-tests.log` and `/private/tmp/og-sync-build.log`.
+Phase 1 validation on 2026-09-09:
+
+- Editor: fresh `npm ci`, TypeScript, all three builds, and diff checks passed. Full `npm run test:run -- --maxWorkers=4`: 658 files, 10,342 passed, 1 skipped, 3 todo. Scoped ESLint: zero errors, 42 existing warnings in touched upstream files; new modules/tests clean.
+- Service: fresh `npm ci` (zero reported vulnerabilities), TypeScript, build, 19 tests against real PostgreSQL, and whitespace checks passed. Tests include concurrency, dedupe, receipt replay, storage failures/corruption, authorization, and a fresh service/pool instance (not a database process crash simulation).
+- Browser: `npm run test:persistence` passed all three real-editor cases. Evidence and screenshots are under ignored `test-results/`; logs are `/private/tmp/og-persistence-browser.log`. Editor test/build logs are `/private/tmp/og-phase1-tests.log` and `/private/tmp/og-phase1-build.log`.
+- Existing warnings: media/canvas test stubs, SDK sourcemaps, dynamic imports, large build chunks, and Node's ESLint module-type notice. Browser runs also show the existing layout-no-children bootstrap trace; the deliberate missing-project case logs its expected 404. No unresolved validation failure remains.
+- The service pins its dependency graph and uses `.npmrc` `legacy-peer-deps=true` to work around npm 10's optional-peer resolver crash. This disables all peer resolution; the installed runtime graph is explicitly pinned and tested.
 
 ## Important Decisions
 
@@ -152,6 +177,7 @@ Current sync validation on 2026-09-09: `npm ci`, `npx tsc --noEmit`, `npm run te
 - Git should represent meaningful deployment snapshots, not every visual editor mutation.
 - Production promotes an approved staging revision and the exact tested image.
 - Upstream compatibility is a first-class requirement.
+- Development sessions are local-proof only. The server checks identity, workspace role and allowed Origin, and rejects development bypass/sessions in production. Do not expose this service publicly before real authentication and operational hardening.
 
 ## Last Updated
 

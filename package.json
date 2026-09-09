@@ -13,6 +13,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest --coverage",
+    "test:persistence": "playwright test --config playwright.persistence.config.ts",
     "lint": "eslint src",
     "e2e": "playwright test",
     "e2e:headed": "playwright test --headed",

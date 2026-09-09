@@ -1119,8 +1119,8 @@ Site and deployment tables are introduced in the Publish model below. Large snap
 ```text
 /srv/og-platform/projects/<project-id>/
 ├── snapshots/
-│   ├── 00000001-<sha256>.json.zst
-│   ├── 00000002-<sha256>.json.zst
+│   ├── 00000001-<sha256>.json.gz
+│   ├── 00000002-<sha256>.json.gz
 │   └── ...
 └── assets/
     └── objects/
@@ -1128,6 +1128,8 @@ Site and deployment tables are introduced in the Publish model below. Large snap
 ```
 
 Snapshot and asset writes use a server-created temporary file in the same filesystem, validate size and hash, fsync where required, and atomically rename into the content-addressed location. Browser-provided filenames never determine server paths.
+
+The initial Node.js 22 implementation uses its stable built-in gzip codec (`.json.gz`) instead of the originally proposed Zstandard extension. Compression is a storage detail; content identity is computed from the canonical uncompressed project payload. A later codec change must preserve existing snapshot readability and hashes.
 
 ### Project Snapshot Format
 
