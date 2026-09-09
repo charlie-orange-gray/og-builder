@@ -32,7 +32,7 @@ function canvasImageSrc(src: string): string {
 }
 
 // `formatBoundStyleValue` lives in `cms-style-format.ts` so the canvas
-// Renderer (.map() ghost path, inline-map per-item path) and
+// Renderer (CMS collection-list ghost path) and
 // `applyDetailPageBindings` (CMS detail-page substitution) format URL-bearing
 // values identically. The Renderer was the original home; moved out so the
 // bindings module can reuse it without pulling Renderer's React deps.

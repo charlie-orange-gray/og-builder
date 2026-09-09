@@ -36,6 +36,24 @@ interface Props {
   min?: number;
   /** Clamp ceiling for numeric scrubbing — same semantics as `min`. */
   max?: number;
+  /** ZERO-CROSSING display: a scrub past 0 keeps emitting the SIGNED value (the
+   *  consumer mirrors the box — Dimensions on an absolute node), but the field
+   *  shows the magnitude, since that is what will be written (`-15%` → `15%`).
+   *  Without it the field read a negative size mid-drag and flipped on release. */
+  mirrorNegative?: boolean;
+}
+
+/** Resting display of a LENGTH: whole numbers. The source keeps its full
+ *  precision (`left: '30.8353%'`, `width: '414.131px'` — the rotated-corner
+ *  compensation needs it, rounding it there jiggles), the field shows `31` /
+ *  `414`; focusing the field reveals the exact value for editing. Only px / %
+ *  / viewport units — unitless (line-height 1.6), deg and fr keep decimals. */
+export function roundLengthForDisplay(v: string): string {
+  const m = /^(-?[\d.]+)(px|%|vh|vw)$/.exec((v || '').trim());
+  if (!m) return v;
+  const n = parseFloat(m[1]);
+  if (!Number.isFinite(n) || Number.isInteger(n)) return v;
+  return `${Math.round(n)}${m[2]}`;
 }
 
 /** Parse "300px" → { num: 300, unit: "px" } */
@@ -45,7 +63,7 @@ function parseNumeric(v: string): { num: number; unit: string } | null {
   return { num: parseFloat(match[1]), unit: match[2] || '' };
 }
 
-export default function ToolInput({ value, onChange, onChangeLive, onCommit, step = 1, text, chevronLabel, className, disabled, placeholder, min, max }: Props) {
+export default function ToolInput({ value, onChange, onChangeLive, onCommit, step = 1, text, chevronLabel, className, disabled, placeholder, min, max, mirrorNegative }: Props) {
   // Viewers see every ToolInput in the read-only disabled state. The
   // parent <fieldset disabled> already blocks the native input, but the
   // ToolInput wrapper's dimmed look keys off this flag — without it the
@@ -121,12 +139,12 @@ export default function ToolInput({ value, onChange, onChangeLive, onCommit, ste
   const applyValue = useCallback((num: number, live = false) => {
     const rounded = Math.round(clampNum(num) * 100) / 100;
     const newVal = `${rounded}${unit}`;
-    setLocalValue(newVal);
+    setLocalValue(mirrorNegative ? `${Math.abs(rounded)}${unit}` : newVal);
     // Chevron drags pass live=true → DOM-only patch (commit on mouseup).
     // Everything else (arrow keys, single click without a live path) commits.
     if (live && onChangeLive) onChangeLive(newVal);
     else onChange(newVal);
-  }, [onChange, onChangeLive, unit, clampNum]);
+  }, [onChange, onChangeLive, unit, clampNum, mirrorNegative]);
 
   const commit = useCallback((val: string) => {
     const trimmed = val.trim();
@@ -226,7 +244,7 @@ export default function ToolInput({ value, onChange, onChangeLive, onCommit, ste
       <input
         ref={inputRef}
         type="text"
-        value={isFocused || chevronDragging || holdLocal ? localValue : value}
+        value={isFocused || chevronDragging || holdLocal ? localValue : roundLengthForDisplay(value)}
         onChange={(e) => setLocalValue(e.target.value)}
         onFocus={(e) => {
           setIsFocused(true);

@@ -1,6 +1,6 @@
 // ImageTool.tsx — Image source, alt text, objectFit, and objectPosition controls.
 // Shows only when an <img> or <Image> element is selected.
-// Map-aware: when inside .map(), reads src/alt from data array item and writes via updateMapItem.
+// Src/alt live on the node attrs; a CMS-bound src shows as a pill via ControlLabel.
 // Uses ImageSearchModal for Unsplash/upload image selection.
 //
 // Layout — rows mirror the Fill control pattern: every value column is a
@@ -13,7 +13,6 @@ import { useAtomValue } from 'jotai';
 import { ToolSection, ToolInput, ToolSelect, ControlLabel, ControlActionRow, ColorSwatch } from '../controls';
 import { useControl } from '../controls/ControlProvider';
 import { CmsBoundPill } from '../controls/CmsBoundPill';
-import { mapItemIndexAtom, mapContextAtom } from '@/code/stores/store';
 import { queueMutation } from '@/code/mutation/mutation-queue';
 import { getViewportPrefix } from '@/canvas/node-ops';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
@@ -97,63 +96,35 @@ function ImageToolInner({
   // automatically — no extra chain icon needed.
   const isSrcCmsBound = !!cmsBinding?.getBindingForProperty('src');
 
-  // Map context — when inside .map(), attrs are bound to data fields
-  const mapItemIndex = useAtomValue(mapItemIndexAtom);
-  const mapContext = useAtomValue(mapContextAtom);
-  const isInMap = mapItemIndex != null && mapContext != null;
-
-  // Find attr binding field names for src and alt
-  const srcBinding = node.attrBindings?.find(b => b.property === 'src');
-  const altBinding = node.attrBindings?.find(b => b.property === 'alt');
-
-  // Resolve current src/alt — from map data if bound, otherwise from node attrs
-  const mapItem = isInMap ? mapContext.mapData[mapItemIndex] : null;
-  const src = (isInMap && srcBinding && mapItem)
-    ? (mapItem[srcBinding.field] ?? '')
-    : (node.attrs?.src ?? '');
-  const alt = (isInMap && altBinding && mapItem)
-    ? (mapItem[altBinding.field] ?? '')
-    : (node.attrs?.alt ?? '');
+  const src = node.attrs?.src ?? '';
+  const alt = node.attrs?.alt ?? '';
 
   const [localAlt, setLocalAlt] = useState(alt);
   const objectFit = styles.objectFit || 'cover';
   const objectPosition = styles.objectPosition || 'center';
 
-  // Sync local alt when node/map item changes
+  // Sync local alt when the node changes
   useEffect(() => {
     setLocalAlt(alt);
-  }, [nodeId, alt, mapItemIndex]);
+  }, [nodeId, alt]);
 
   // ─── Image selection ──────────────────────────────────────────────
   const handleImageSelect = useCallback((url: string) => {
-    trace.action('image-tool:select-image', { nodeId, url: url.slice(0, 80), isInMap, mapItemIndex });
+    trace.action('image-tool:select-image', { nodeId, url: url.slice(0, 80) });
 
-    if (isInMap && srcBinding && mapContext) {
-      // Map mode: update the data array item's field
-      const updatedItem = { ...(mapContext.mapData[mapItemIndex!] || {}), [srcBinding.field]: url };
-      queueMutation({ type: 'updateMapItem', varName: mapContext.varName, index: mapItemIndex!, item: updatedItem });
-    } else {
-      // Direct mode: update the HTML attr
-      queueMutation({ type: 'updateHtmlAttrs', nodeId, attrs: { src: url } });
-    }
+    queueMutation({ type: 'updateHtmlAttrs', nodeId, attrs: { src: url } });
 
     // Imperative canvas update for instant feedback — the canvas DOM lives
     // in the sandbox iframe, so the attribute patch goes through the bridge.
     getCanvasBridge().setAttribute(nodeId, getViewportPrefix(vpId), 'src', url);
-  }, [nodeId, vpId, isInMap, mapItemIndex, srcBinding, mapContext]);
+  }, [nodeId, vpId]);
 
   // ─── Alt text ─────────────────────────────────────────────────────
   const commitAlt = useCallback((value: string) => {
     const trimmed = value.trim();
-    trace.action('image-tool:update-alt', { nodeId, alt: trimmed, isInMap, mapItemIndex });
-
-    if (isInMap && altBinding && mapContext) {
-      const updatedItem = { ...(mapContext.mapData[mapItemIndex!] || {}), [altBinding.field]: trimmed };
-      queueMutation({ type: 'updateMapItem', varName: mapContext.varName, index: mapItemIndex!, item: updatedItem });
-    } else {
-      queueMutation({ type: 'updateHtmlAttrs', nodeId, attrs: { alt: trimmed } });
-    }
-  }, [nodeId, isInMap, mapItemIndex, altBinding, mapContext]);
+    trace.action('image-tool:update-alt', { nodeId, alt: trimmed });
+    queueMutation({ type: 'updateHtmlAttrs', nodeId, attrs: { alt: trimmed } });
+  }, [nodeId]);
 
   // ─── Object Fit ───────────────────────────────────────────────────
   const handleFitChange = useCallback((value: string) => {
@@ -167,7 +138,7 @@ function ImageToolInner({
     updateStyle('objectPosition', value);
   }, [nodeId, updateStyle]);
 
-  trace.fn('ImageTool:render', { nodeId, src: src.slice(0, 60), alt: localAlt, objectFit, objectPosition, isInMap, mapItemIndex, isSrcCmsBound });
+  trace.fn('ImageTool:render', { nodeId, src: src.slice(0, 60), alt: localAlt, objectFit, objectPosition, isSrcCmsBound });
 
   // Source row — single ControlActionRow shape (just like Fill). The
   // swatch shows a thumbnail of the current image, or the alpha-checker

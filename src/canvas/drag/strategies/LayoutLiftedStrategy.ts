@@ -127,6 +127,24 @@ export function computeMergedTemplatedOrder(mergedChildren: string[], pageSectio
 
 
 
+/** The `collectionList` container whose TEMPLATE ROW contains `draggedId`
+ *  (the row itself, or any descendant of it), walking up from `parentId`.
+ *  Null when the drag is not inside a collection row. Single source for the
+ *  ghost-hide AND the live-size-read skip so the two can never drift. */
+export function findCollectionGhostContainer(draggedId: string, parentId: string): { containerId: string; isRow: boolean } | null {
+  let rowId = draggedId;
+  let cur = getNodeFromCache(parentId);
+  for (let i = 0; cur && i < 50; i++) {
+    if (cur.collectionList) {
+      if (!Object.values(cur.collectionList.templateIds).includes(rowId)) return null;
+      return { containerId: cur.id, isRow: rowId === draggedId };
+    }
+    rowId = cur.id;
+    cur = cur.parentId ? getNodeFromCache(cur.parentId) : undefined;
+  }
+  return null;
+}
+
 export class LayoutLiftedStrategy implements DragStrategy {
   readonly name = 'layout-lifted';
 
@@ -273,6 +291,8 @@ export class LayoutLiftedStrategy implements DragStrategy {
    *  would otherwise persist). Null when the drag isn't inside a collection. */
   private hiddenGhostsContainerId: string | null = null;
   private hiddenGhostsVpPrefix: string = '';
+  /** Set when only ONE node's ghost copies are hidden (drag inside a row). */
+  private hiddenGhostsNodeId: string | null = null;
   /** Set when the drag happened ANYWHERE inside a collection-list template row
    *  (not just ON the row — `hiddenGhostsContainerId` covers that narrower
    *  case). The DOM-only ghost rows are clones of the template, and the
@@ -863,15 +883,28 @@ export class LayoutLiftedStrategy implements DragStrategy {
     // Will this drag hide the parent's collection ghosts? Same test the
     // ghost-hide below performs, hoisted because the live-size read has to know
     // BEFORE it issues (see the skip inside the loop).
-    const ghostParentForRead = getNodeFromCache(parentId);
-    const hidesCollectionGhosts = !!ghostParentForRead?.collectionList
-      && Object.values(ghostParentForRead.collectionList.templateIds).includes(draggedNodes[0]?.id ?? '');
+    // Only a ROW drag hides whole ghost rows (and reflows the template — the
+    // reason for the read skip). A node inside the row hides just its own
+    // ghost copies with `visibility`, so the rows keep their layout.
+    const ghostScope = findCollectionGhostContainer(draggedNodes[0]?.id ?? '', parentId);
+    const hidesCollectionGhosts = !!ghostScope?.isRow;
 
     const liveSizeReads = new Map<string, Promise<DOMRect | null>>();
     if ('getRectAsync' in bridge) {
       for (const node of draggedNodes) {
         const ns0 = getNodeFromCache(node.id)?.styles ?? {};
         if (ns0.transform || ns0.rotate) continue;
+        // ANCESTOR rotation/skew too: a flow child of a `rotate(90deg)` flex
+        // frame carries no transform of its own, but getRectAsync still
+        // returns its PAINTED AABB — here the 120×40 chip's 40×120 box. The
+        // "correction" swapped the lifted overlay's width/height in place
+        // (left/top untouched), so its centre jumped 40px off the cursor
+        // for the whole drag (user repro 2026-09-09, transformed frame with
+        // layout). The cached css size from the lift is the right one.
+        if (nodeOrAncestorHasRotationOrSkewById(node.id, vpIdFromPrefix(vpPrefix))) {
+          trace.action('layout-lifted:live-size-skip-rotated-ancestor', { nodeId: node.id });
+          continue;
+        }
         // COLLECTION-LIST TEMPLATE rows are skipped. Dragging one hides its
         // ghost siblings (`setCollectionGhostsHidden`, below) so a single row
         // drags cleanly — which leaves the template as the ONLY flex child and
@@ -1123,23 +1156,27 @@ export class LayoutLiftedStrategy implements DragStrategy {
       (bridge as PostMessageBridge).setDragLockedNodeIds(allLockedIds);
     }
 
-    // CMS collection list: collapse the DOM-only ghost copies ONLY while the
-    // dragged node IS a collection ITEM (the data-index-0 template node) — so
-    // that one item drags cleanly without the repeated rows. Dragging a child
-    // INSIDE the item, or any sibling node, must leave the list intact, so this
-    // checks the DIRECT parent (the `collectionList` container) and that the
-    // dragged node is one of its template nodes — NOT an ancestor walk.
-    this.hiddenGhostsContainerId = null;
-    const ghostParent = getNodeFromCache(parentId);
-    if (
-      ghostParent?.collectionList &&
-      Object.values(ghostParent.collectionList.templateIds).includes(draggedNodes[0]?.id ?? '')
-    ) {
-      this.hiddenGhostsContainerId = parentId;
-    }
+    // CMS collection list: collapse the DOM-only ghost copies while the dragged
+    // node is the collection ITEM (the data-index-0 template row) OR any node
+    // INSIDE it — a title, an image. The ghosts are clones of the template
+    // row whose inline styles are re-synced from it by the Renderer; mid-drag
+    // that copies the LIFTED geometry (position/left/top at the cursor) onto
+    // every ghost's copy of the dragged node, which then paints offset far
+    // from its row (2026-09-08: dragging a row title showed the other rows'
+    // titles floating bottom-right). Hiding the ghosts for the whole gesture
+    // leaves exactly one element under the cursor. Sibling nodes OUTSIDE the
+    // row leave the list intact (the walk stops at the first collection
+    // container and requires the row to be one of its template nodes).
+    // Row drag → whole ghost rows collapse (`display:none`). Node INSIDE the
+    // row → only that node's ghost copies hide (`visibility`), every other
+    // row stays exactly where it is (2026-09-08 follow-up: hiding the rows
+    // for a title drag emptied the whole list under the cursor).
+    const ghostHide = findCollectionGhostContainer(draggedNodes[0]?.id ?? '', parentId);
+    this.hiddenGhostsContainerId = ghostHide?.containerId ?? null;
+    this.hiddenGhostsNodeId = ghostHide && !ghostHide.isRow ? (draggedNodes[0]?.id ?? null) : null;
     if (this.hiddenGhostsContainerId && 'setCollectionGhostsHidden' in bridge) {
       this.hiddenGhostsVpPrefix = vpPrefix;
-      (bridge as PostMessageBridge).setCollectionGhostsHidden(this.hiddenGhostsContainerId, vpPrefix, true);
+      (bridge as PostMessageBridge).setCollectionGhostsHidden(this.hiddenGhostsContainerId, vpPrefix, true, this.hiddenGhostsNodeId ?? undefined);
     }
 
     // Was this drag anywhere inside a collection-list row? Walk the ANCESTORS
@@ -3911,9 +3948,10 @@ export class LayoutLiftedStrategy implements DragStrategy {
     // Re-show the collection-list ghosts hidden on lift (ghost elements are
     // reused across renders, so their inline visibility must be cleared here).
     if (this.hiddenGhostsContainerId && 'setCollectionGhostsHidden' in bridge) {
-      (bridge as PostMessageBridge).setCollectionGhostsHidden(this.hiddenGhostsContainerId, this.hiddenGhostsVpPrefix, false);
+      (bridge as PostMessageBridge).setCollectionGhostsHidden(this.hiddenGhostsContainerId, this.hiddenGhostsVpPrefix, false, this.hiddenGhostsNodeId ?? undefined);
     }
     this.hiddenGhostsContainerId = null;
+    this.hiddenGhostsNodeId = null;
     this.hiddenGhostsVpPrefix = '';
     // Collection-list ghosts are clones of the template row, re-synced by the
     // Renderer's patch only when the row's DOM structure or CMS bindings move.

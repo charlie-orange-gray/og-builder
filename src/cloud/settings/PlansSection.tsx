@@ -27,7 +27,19 @@ const FREE_PUBLISH_LIMITS = [
   '5 CMS collections with 200 items each',
   '2 languages',
   '500 MB storage',
+  // Enforced by the Forms Worker per UTC month (worker-forms/src/quota.ts);
+  // past it, submissions are stored but held until the site upgrades.
+  '50 form submissions / month',
 ] as const;
+
+/** GET /api/websites/:id/forms/usage — null when forms aren't configured. */
+interface FormsUsage {
+  plan: 'free' | 'paid';
+  cap: number | null;
+  used: number;
+  heldThisMonth: number;
+  held: number;
+}
 
 // ─── Inline SVG icons ──────────────────────────────────────────────────────
 
@@ -94,6 +106,7 @@ const PLANS: PlanDef[] = [
     // backend/src/services/plan.ts keeps it true.
     features: [
       'Unlimited pages, CMS & languages',
+      'Unlimited form submissions',
       'Custom domain',
       'Advanced analytics',
       '10 GB storage',
@@ -156,6 +169,27 @@ export default function PlansSection({ websiteId }: PlansSectionProps) {
   // Pending tier change — opens the confirm modal. The actual API call
   // only fires once the user clicks Confirm. Null = modal closed.
   const [pendingChange, setPendingChange] = useState<{ plan: PlanDef; direction: 'upgrade' | 'downgrade' } | null>(null);
+  // This month's form-submission usage (the one Free cap that fills up on its
+  // own, from traffic, so it needs a live number next to the static limits).
+  const [formsUsage, setFormsUsage] = useState<FormsUsage | null>(null);
+
+  useEffect(() => {
+    if (!websiteId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`/api/websites/${websiteId}/forms/usage`);
+        if (!response.ok) return;
+        const data = (await response.json()) as { usage: FormsUsage | null };
+        if (!cancelled) setFormsUsage(data.usage);
+      } catch (error) {
+        trace.error('plans-section:fetch-forms-usage', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [websiteId]);
 
   useEffect(() => {
     if (!websiteId) {
@@ -326,6 +360,15 @@ export default function PlansSection({ websiteId }: PlansSectionProps) {
             <p className="text-xs text-[var(--text-tertiary)] mt-1">
               revyme.app subdomain · Basic analytics · Unlimited visitors
             </p>
+            {formsUsage && formsUsage.cap != null && (
+              <p
+                data-testid="forms-usage"
+                className={`text-xs mt-1 ${formsUsage.held > 0 ? 'text-amber-500' : 'text-[var(--text-secondary)]'}`}
+              >
+                {formsUsage.used} / {formsUsage.cap} form submissions this month
+                {formsUsage.held > 0 && ` · ${formsUsage.held} held — upgrade to receive them`}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-1.5 px-2 py-1 bg-green-500/10 cut-corners shrink-0">
             <div className="relative flex items-center justify-center w-2 h-2">

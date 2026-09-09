@@ -35,12 +35,17 @@ describe('live-size correction skips collection template rows', () => {
   it('derives the flag from the SAME test the ghost-hide uses', () => {
     // Two different tests would drift: the read would skip rows the hide
     // doesn't touch, or miss rows it does.
-    const hoisted = SRC.slice(SRC.indexOf('const ghostParentForRead'), SRC.indexOf('const liveSizeReads'));
-    expect(hoisted).toContain('collectionList');
-    expect(hoisted).toContain('templateIds');
-    const hideBlock = SRC.slice(SRC.indexOf('this.hiddenGhostsContainerId = null;'));
-    expect(hideBlock).toContain('collectionList');
-    expect(hideBlock).toContain('templateIds');
+    // Both go through ONE helper (findCollectionGhostContainerId), which walks
+    // up from the dragged node so a title INSIDE the row hides ghosts too
+    // (2026-09-08: ghost titles floated offset while dragging a row title).
+    const hoisted = SRC.slice(SRC.indexOf('const ghostScope = findCollectionGhostContainer('), SRC.indexOf('const liveSizeReads'));
+    expect(hoisted).toContain('findCollectionGhostContainer(');
+    expect(hoisted).toContain('isRow');
+    const hideBlock = SRC.slice(SRC.indexOf('const ghostHide = findCollectionGhostContainer('));
+    expect(hideBlock.length).toBeGreaterThan(0);
+    const helper = SRC.slice(SRC.indexOf('export function findCollectionGhostContainer'), SRC.indexOf('export class LayoutLiftedStrategy'));
+    expect(helper).toContain('collectionList');
+    expect(helper).toContain('templateIds');
   });
 
   it('keeps the rotated/scaled skip that was already there', () => {

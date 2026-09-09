@@ -7,6 +7,7 @@
 // Each connection generates framer-motion event handlers in the code.
 
 import { modifyProjectFile } from '@/code/project/modify-file';
+import { findVariantRootId } from '@/shared/variant-root';
 import { projectFS } from '@/code/project/project-fs';
 import { isIndexInsideSlotConst } from '@/code/generation/slot-ops';
 import { ensureVariantListWiring } from '@/code/generation/generator-styles';
@@ -906,6 +907,25 @@ function stripPropFromAllTags(code: string, prop: string): string {
  *  CTA" master). In a mixed tree it also mis-targeted the first descendant
  *  motion.* as "the root". */
 function insertPropOnRootMotion(code: string, propName: string, handler: string): string {
+  // The root is the first data-id inside the component's JSX return — NOT the
+  // first motion/Uppercase tag in the FILE. A master carrying the MotionLink
+  // wrapper declares `<Link data-id="Link-…">` at MODULE scope before the
+  // component; the file-order scan landed the handler there, where `variant`
+  // / `setVariant` don't exist → every variant write bounced with
+  // "References undefined identifiers: variant, setVariant" (2026-09-08, a
+  // collection-list master with a CMS row link). Same root law as
+  // generator-styles / project-fs (`findVariantRootId`).
+  const rootId = findVariantRootId(code);
+  if (rootId) {
+    const idIdx = code.indexOf(`data-id="${rootId}"`);
+    if (idIdx !== -1) {
+      const tagStart = code.lastIndexOf('<', idIdx);
+      const tagEnd = tagStart === -1 ? -1 : findTagEnd(code, tagStart);
+      if (tagStart !== -1 && tagEnd !== -1 && tagEnd > idIdx && HANDLER_TAG_OPEN.test(code.slice(tagStart, tagStart + 64))) {
+        return insertPropAtTag(code, tagStart, propName, handler);
+      }
+    }
+  }
   const WRAPPER_TAGS = new Set(['LayoutGroup', 'MotionConfig', 'AnimatePresence']);
   HANDLER_TAG_OPEN_G.lastIndex = 0;
   let m: RegExpExecArray | null;

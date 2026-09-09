@@ -32,10 +32,12 @@ vi.mock('../mutation/mutation-queue', () => ({
 import { bakeNestedInstanceVariantTernaries, makeComponent, detachComponent, detachInstance, parseComponentName, setComponentName, getComponentDisplayName, cleanComponentRootJSX, ensureLayoutRootOnComponentRoot, detectCmsNavLink, rewriteVariantStateRefsToInitialVariant, stripParentVariantToggleHandlers, extractRootVariantToggleHandler } from './component-ops';
 import { parseJSX } from '../parsing/ast-utils';
 import { projectFS } from '../project/project-fs';
-import { queueMutation } from '../mutation/mutation-queue';
+import { queueMutation, syncImports } from '../mutation/mutation-queue';
+import { paginationStateVar } from '../generation/cms-pagination-gen';
 
 const mockFS = vi.mocked(projectFS);
 const mockQueueMutation = vi.mocked(queueMutation);
+const mockSyncImports = vi.mocked(syncImports);
 
 // ─── Test Data ────────────────────────────────────────────────────────────────
 
@@ -2751,5 +2753,111 @@ export default function Page() {
     // the measurement.
     const stretched = HEADER.replace(", alignItems: 'center'", '');
     expect(extract(stretched).master).not.toContain("height: '36px'");
+  });
+});
+
+// Make Component on a WHOLE paginated collection list (the container, not a row).
+// Two regressions from one user report (2026-09-08, "Blogs" list → component):
+//   1. the context menu passed the container's own itemVar, so the row hoist
+//      rewrote `item.title` → `title` and every row rendered the first item;
+//   2. the `.slice(0, visX)` + Load More guard moved into the master but the
+//      `useState` stayed on the page → "visX is not defined" in preview.
+describe('makeComponent — whole paginated collection list', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const LIST_PAGE = `import React, { useState } from 'react';
+import blog from '@/cms/blog.json';
+import LoadMore from '@/components/LoadMore';
+export default function Page() {
+  const [visBlogs, setVisBlogs] = useState(2);
+  return (
+    <div data-id="root" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div data-id="blogs" data-name="Blogs" style={{ position: 'relative', display: 'flex', flexDirection: 'column', width: '320px' }} data-pagination="loadMore:2">
+        {blog.slice(0, visBlogs).map((item, idx) => <div data-id="item" key={idx} data-name="Blog" style={{ position: 'relative', display: 'flex' }}>
+          <h3 data-id="h3" style={{ position: 'relative' }}>{item.title}</h3>
+        </div>)}
+        {visBlogs < blog.length && <LoadMore data-id="loadmore-blogs" data-pagination-ui="true" onLoadMore={() => setVisBlogs((c) => c + 2)} style={{ order: '1' }} />}
+      </div>
+    </div>
+  );
+}`;
+
+  test('keeps the .map() bindings verbatim even when a (bogus) itemVar is passed, and carries the pagination state into the master', () => {
+    mockFS.readFile.mockReturnValue(LIST_PAGE);
+    mockFS.exists.mockReturnValue(false);
+    const result = makeComponent('app/page.tsx', 'blogs', 'Blogs', false, undefined, 'item', 'blog');
+    expect(result).not.toBeNull();
+    const master = getWrittenComponentCode();
+    // 1. no row hoist: rows still read their own item
+    expect(master).toContain('{item.title}');
+    expect(master).not.toMatch(/title = "/);
+    expect(master).toContain('blog.slice(0, visBlogs).map((item, idx)');
+    // 2. the hooks moved with the list
+    expect(master).toContain('const [visBlogs, setVisBlogs] = useState(2);');
+    expect(master).toContain('{visBlogs < blog.length && <LoadMore');
+    // (syncImports is a pass-through mock here — the real one adds `useState` to the
+    // React import; covered by the real-import test in cms-pagination-gen.test.ts.)
+    expect(mockSyncImports).toHaveBeenCalled();
+    expect(() => parseJSX(master)).not.toThrow();
+    // the page no longer declares the orphaned state, and the instance is plain
+    expect(result!.updatedPageCode).not.toContain('useState(2)');
+    const compName = result!.componentFilePath.replace(/^components\//, '').replace(/\.tsx$/, '');
+    expect(result!.updatedPageCode).toContain(`<${compName}`);
+    expect(result!.updatedPageCode).not.toContain('title={item.title}');
+  });
+});
+
+// Detaching an instance whose master IS a paginated collection list (the
+// reverse of the whole-list Make Component above). Live find 2026-09-08: the
+// map callback's `item`/`idx` were treated as component scope → `undefined.title`
+// on every row, the `.slice(0, visX)` collapsed and the Load More guard vanished.
+describe('detachInstance — master is a paginated collection list', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const LIST_MASTER = `'use client';
+import React, { useState } from 'react';
+import { motion, LayoutGroup } from 'framer-motion';
+import { withResponsiveProps } from '@revyme/runtime';
+import blog from '@/cms/blog.json';
+import LoadMore from '@/components/LoadMore';
+function Blogs({ style, initialVariant = 'default', ...rest }) {
+  const [visBlogs, setVisBlogs] = useState(2);
+  return <LayoutGroup>
+    <motion.div layout={true} data-id="blogs" {...rest} data-name="Blogs" style={{ display: 'flex', flexDirection: 'column', position: 'absolute', ...style }} data-pagination="loadMore:2">
+      {blog.slice(0, visBlogs).map((item, idx) => <motion.div layout={true} data-id="item" key={idx} data-name="Blog" style={{ position: 'relative', display: 'flex' }}>
+        <motion.h3 layout={true} data-id="h3" style={{ position: 'relative' }}>{item.title}</motion.h3>
+      </motion.div>)}
+      {visBlogs < blog.length && <LoadMore data-id="loadmore-blogs" data-pagination-ui="true" onLoadMore={() => setVisBlogs((c) => c + 2)} style={{ order: '1' }} />}
+    </motion.div>
+  </LayoutGroup>;
+}
+export default withResponsiveProps(Blogs);`;
+  const LIST_PAGE = `import React from 'react';
+import blog from '@/cms/blog.json';
+import Blogs from '@/components/Blogs';
+export default function Page() {
+  return (<div data-id="page-root" style={{ display: 'flex', flexDirection: 'column' }}><Blogs data-id="inst" data-name="Blogs" style={{ width: '320px', position: 'relative', order: '1' }} /></div>);
+}`;
+
+  test('rows keep their item bindings, the pagination state moves to the page under the new container id, LoadMore is imported', () => {
+    mockFS.readFile.mockImplementation((p: string) =>
+      p === 'app/page.tsx' ? LIST_PAGE : p === 'components/Blogs.tsx' ? LIST_MASTER : null);
+    const out: { rootId?: string } = {};
+    const page = detachInstance('app/page.tsx', 'inst', 'components/Blogs.tsx', 'default', out)!;
+    expect(page).not.toBeNull();
+    expect(parseJSX(page)).not.toBeNull();
+    expect(page).toContain('{item.title}');
+    expect(page).not.toContain('undefined.');
+    expect(page).not.toContain('key={undefined}');
+    const newId = out.rootId!;
+    expect(newId).toMatch(/^det-/);
+    // derived exactly like the parser: paginationStateVar(newId)
+    const stateVar = paginationStateVar(newId);
+    expect(page).toContain(`const [${stateVar}, set${stateVar.charAt(0).toUpperCase()}${stateVar.slice(1)}] = useState(2);`);
+    expect(page).toContain(`blog.slice(0, ${stateVar}).map((item, idx)`);
+    expect(page).toContain(`{${stateVar} < blog.length && <LoadMore`);
+    expect(page).toContain('data-pagination="loadMore:2"');
+    expect(page).toContain("import LoadMore from '@/components/LoadMore'");
+    expect(page).not.toContain('visBlogs');
   });
 });

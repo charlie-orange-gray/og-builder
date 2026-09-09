@@ -6,14 +6,22 @@
 // writer derive positions from ONE implementation — the rotated-AABB → layout
 // box correction below is exactly the kind of math that drifts when copied.
 
-import { getNodesSnapshot } from '@/code/stores/store';
+import { getNodesSnapshot, getNodeFromCache } from '@/code/stores/store';
 import { transformManager } from '@/canvas/transform';
 import { findNodeRect, findNodeComputedStyles, findNodeParentInnerSize } from '@/canvas/node-ops';
 import { trace } from '@/shared/debug-trace';
 import type { VisualRect } from '@/shared/position-utils';
+import { getScreenCornersById } from '@/canvas/resize/geometry-utils';
+import { frameFromCorners, localRectOfCorners } from '@/canvas/drag/layout-local-frame';
 
 export function captureVisualRect(nodeId: string, vpId: string): VisualRect | null {
-  const node = getNodesSnapshot().get(nodeId);
+  // IMPERATIVE CACHE FIRST. nodesAtom does not re-derive during a drag
+  // (deferred flush), so a canvas node that just ENTERED a frame mid-gesture
+  // still reads `parentId: null` from the snapshot — the Position fields then
+  // froze at their lift values until the next drag (2026-09-09). The drag
+  // strategies keep `moveNodeInCache` current at every enter/exit, and at
+  // rest the cache equals the atom, so the cache is the fresher truth here.
+  const node = getNodeFromCache(nodeId) ?? getNodesSnapshot().get(nodeId);
   const parentId = node?.parentId;
   if (!parentId) return null;
   const scale = transformManager.getTransform().scale || 1;
@@ -40,10 +48,30 @@ export function captureVisualRect(nodeId: string, vpId: string): VisualRect | nu
   // transform-origin 50% 50% the AABB centre IS the layout-box centre, so
   // layoutLeft = aabbCentreX - layoutW / 2 (collapses to the plain formula
   // when un-rotated).
-  const aabbCssW = elScreen.width / scale;
-  const aabbCssH = elScreen.height / scale;
-  const aabbLeft = (elScreen.left - parentScreen.left) / scale - borderL;
-  const aabbTop = (elScreen.top - parentScreen.top) / scale - borderT;
+  //
+  // ROTATED / SKEWED PARENT: the child's and the parent's screen AABBs are
+  // both bounding boxes of tilted quads, so their delta is NOT the child's
+  // offset inside the parent (a 1px drag inside a 45° frame jumped the live
+  // T/L from 168/29 to 265/79 and back on mouse-up, 2026-09-09). Map the
+  // child's painted corners into the parent's own frame (origin = parent's
+  // painted TL, axes along its edges) and take the bbox there — its centre is
+  // the layout-box centre whatever the child's own rotation.
+  let aabbCssW = elScreen.width / scale;
+  let aabbCssH = elScreen.height / scale;
+  let aabbLeft = (elScreen.left - parentScreen.left) / scale - borderL;
+  let aabbTop = (elScreen.top - parentScreen.top) / scale - borderT;
+  const parentCorners = getScreenCornersById(parentId, vpId);
+  const frame = parentCorners ? frameFromCorners(parentCorners, parentScreen) : null;
+  if (frame && !frame.identity) {
+    const elCorners = getScreenCornersById(nodeId, vpId);
+    if (elCorners) {
+      const local = localRectOfCorners(frame, elCorners);
+      aabbCssW = local.width / scale;
+      aabbCssH = local.height / scale;
+      aabbLeft = local.left / scale - borderL;
+      aabbTop = local.top / scale - borderT;
+    }
+  }
   const left = aabbLeft + (aabbCssW - width) / 2;
   const top = aabbTop + (aabbCssH - height) / 2;
 

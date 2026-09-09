@@ -17,7 +17,7 @@ import type { I18nConfig } from '@/shared/types';
 
 /** Version marker — bump when the template shape changes so older generated
  *  providers are upgraded on load. */
-export const PROVIDERS_MARKER = '@revyme-providers v2';
+export const PROVIDERS_MARKER = '@revyme-providers v3';
 
 /** A locale code safe to interpolate into generated code/identifiers. */
 function safeLocale(code: string): boolean {
@@ -43,7 +43,7 @@ export function buildProvidersSource(config: I18nConfig): string {
  *  The editor regenerates this file when locales change. Do not hand-edit. */
 
 import { useEffect, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { ThemeProvider } from 'next-themes';
 import { NextIntlClientProvider } from 'next-intl';
 
@@ -55,6 +55,67 @@ ${mapEntries}
 const DEFAULT_LOCALE = '${defaultLocale}';
 const LOCALES = Object.keys(messagesByLocale);
 
+// ── Link attributes runtime (data-smooth-scroll / data-keep-params) ──────────
+// The attributes are the source of truth for the Link tool's Smooth Scroll and
+// Keep Params toggles. A per-link inline onClick used to be their ONLY
+// implementation, and any path that dropped it (paste, AI edit) left the panel
+// saying "Smooth: Yes" while the live site jumped. This document-level
+// listener honours the attributes on every link, handler or not. It runs in
+// the bubble phase AFTER React's own handlers, so a link that still carries
+// the inline handler (which calls preventDefault) is left alone — no double
+// navigation. Modified clicks, other buttons, new-tab links and cross-origin
+// links are never touched.
+const SMOOTH_KEY = 'revyme:smooth-target';
+function revymeNavClick(e, nav) {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+  if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+  let url;
+  try { url = new URL(a.getAttribute('href') || '', window.location.href); } catch { return; }
+  if (url.origin !== window.location.origin) return;
+  const smooth = a.dataset.smoothScroll === 'true';
+  const keep = a.dataset.keepParams === 'true';
+  if (smooth && url.hash) {
+    const id = decodeURIComponent(url.hash.slice(1));
+    if (url.pathname === window.location.pathname) {
+      const el = id ? document.getElementById(id) : null;
+      if (el) {
+        e.preventDefault();
+        el.scrollIntoView({ behavior: 'smooth' });
+        try { window.history.pushState(null, '', url.pathname + url.search + url.hash); } catch {}
+        return;
+      }
+    } else if (id) {
+      // Cross-page: let the router navigate, scroll on arrival (see effect below).
+      try { window.sessionStorage.setItem(SMOOTH_KEY, id); } catch {}
+    }
+  }
+  if (keep && window.location.search) {
+    const merged = new URL(url.href);
+    new URLSearchParams(window.location.search).forEach((v, k) => { if (!merged.searchParams.has(k)) merged.searchParams.set(k, v); });
+    if (merged.href !== url.href) {
+      e.preventDefault();
+      nav.push(merged.pathname + merged.search + merged.hash);
+    }
+  }
+}
+/** Scroll smoothly to the section a cross-page smooth link targeted, once
+ *  the destination page has mounted it (polls up to 10s — SPA routers do no
+ *  native hash scrolling). */
+function revymeScrollOnArrival() {
+  let id = null;
+  try { id = window.sessionStorage.getItem(SMOOTH_KEY); } catch {}
+  if (!id) return () => {};
+  try { window.sessionStorage.removeItem(SMOOTH_KEY); } catch {}
+  let n = 0;
+  const t = window.setInterval(() => {
+    const el = document.getElementById(id);
+    if (el) { window.clearInterval(t); el.scrollIntoView({ behavior: 'smooth' }); }
+    else if (++n > 100) window.clearInterval(t);
+  }, 100);
+  return () => window.clearInterval(t);
+}
+
 /** '/fr/about' -> 'fr' when fr is a configured non-default locale, else null. */
 function localeFromPath(pathname: string | null): string | null {
   const seg = (pathname || '/').split('/')[1];
@@ -64,9 +125,19 @@ function localeFromPath(pathname: string | null): string | null {
 export function Providers({ children }: { children: React.ReactNode }) {
   // ROUTE-FIRST locale: /fr/... serves French on the server render itself
   // (usePathname resolves during SSR), so crawlers get translated HTML.
-  const routeLocale = localeFromPath(usePathname());
+  const pathname = usePathname();
+  const router = useRouter();
+  const routeLocale = localeFromPath(pathname);
   const [clientLocale, setClientLocale] = useState(DEFAULT_LOCALE);
   const locale = routeLocale ?? clientLocale;
+
+  // Link attributes runtime — see revymeNavClick above.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => revymeNavClick(e, router);
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, [router]);
+  useEffect(() => revymeScrollOnArrival(), [pathname]);
 
   // Client channel: persisted preference + the 'locale-change' event any
   // component (LocaleSwitcher) can dispatch. Only applies on unprefixed URLs.

@@ -924,3 +924,42 @@ describe('buildCanvasCloneDescriptor — bakes the source viewport/variant', () 
     expect(desc.attrs!.initialVariant).toBeUndefined();
   });
 });
+
+
+// ─── Layout-sibling drop commit (bug-hunt #11, 2026-09-07) ──────────────────
+// Dropping an absolute box between the children of a flex/grid sibling must
+// leave a proper flow child: `position: 'relative'` (never a deleted key —
+// every node carries a position) and `flex: '0 0 auto'` only for FLEX targets.
+describe('layout-sibling drop commit', () => {
+  const run = (display: string) => {
+    const strategy = new AbsoluteInFrameStrategy();
+    const nodes = new Map<string, any>([
+      ['root', { id: 'root', type: 'div', styles: { position: 'relative' }, children: ['box', 'sib'] }],
+      ['box', { id: 'box', type: 'div', parentId: 'root', styles: { position: 'absolute', left: '10px', top: '10px' }, children: [] }],
+      ['sib', { id: 'sib', type: 'div', parentId: 'root', styles: { display, position: 'relative' }, children: [] }],
+    ]);
+    mockFindNodeComputedStyle.mockImplementation((id: string, _vp: string, prop: string) => {
+      if (id === 'sib' && prop === 'display') return display;
+      return '';
+    });
+    const ctx = makeContext({ draggedNodes: [makeDraggedNode({ id: 'box', startParentId: 'root' })], nodes });
+    (strategy as any).parentId = 'root';
+    (strategy as any).vpId = 'desktop';
+    (strategy as any).pendingLayoutDrop = { siblingId: 'sib', insertIndex: 1 };
+    const updates = strategy.onEnd(ctx) as any[];
+    const move = updates.find((u) => u.type === 'move');
+    expect(move).toBeTruthy();
+    return move.styles as Record<string, string>;
+  };
+  test('grid target: relative, insets cleared, NO flex', () => {
+    const s = run('grid');
+    expect(s.position).toBe('relative');
+    expect(s.left).toBe(''); expect(s.top).toBe(''); expect(s.right).toBe(''); expect(s.bottom).toBe('');
+    expect('flex' in s).toBe(false);
+  });
+  test('flex target: relative + flex 0 0 auto', () => {
+    const s = run('flex');
+    expect(s.position).toBe('relative');
+    expect(s.flex).toBe('0 0 auto');
+  });
+});

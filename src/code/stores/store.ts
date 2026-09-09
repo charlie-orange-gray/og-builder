@@ -920,32 +920,6 @@ export const isComponentSelectedAtom = atom((get) => {
 });
 
 /**
- * True when the selected node is a map template element or a child of one.
- * Only nodes with isCollectionTemplate (set by parser inside .map() callbacks) qualify.
- * The parent container that holds the .map() does NOT qualify — nor do its non-map siblings.
- */
-export const isMapTemplateSelectedAtom = atom((get) => {
-  const selectedId = get(selectedNodeAtom);
-  if (!selectedId) return false;
-  const nodes = get(nodesAtom);
-  const node = nodes.get(selectedId);
-  if (!node) return false;
-
-  // The node itself or any ancestor must have isCollectionTemplate
-  // AND the collection source must be __inline: (not CMS)
-  let current: typeof node | undefined = node;
-  while (current) {
-    if (current.isCollectionTemplate) {
-      // Verify the parent's collectionList is an inline map
-      const parent = current.parentId ? nodes.get(current.parentId) : null;
-      if (parent?.collectionList?.source?.startsWith('__inline:')) return true;
-    }
-    current = current.parentId ? nodes.get(current.parentId) : undefined;
-  }
-  return false;
-});
-
-/**
  * Which map item index is currently selected on canvas.
  * null = template (item 0) or non-map node.
  * 1+ = ghost copy at that index.
@@ -953,38 +927,6 @@ export const isMapTemplateSelectedAtom = atom((get) => {
  */
 export const mapItemIndexAtom = atom<number | null>(null);
 
-/**
- * Derived: map context for the currently selected map item.
- * Returns the parent node (with collectionList), varName, and inlineMapData.
- * null when selection is not inside an inline map.
- */
-export const mapContextAtom = atom((get) => {
-  const selectedId = get(selectedNodeAtom);
-  if (!selectedId) return null;
-  const nodes = get(nodesAtom);
-  const node = nodes.get(selectedId);
-  if (!node) return null;
-
-  let current: typeof node | undefined = node;
-  while (current) {
-    if (current.isCollectionTemplate) {
-      const parent = current.parentId ? nodes.get(current.parentId) : null;
-      if (parent?.collectionList?.source?.startsWith('__inline:')) {
-        const templateId = parent.collectionList!.templateIds['default']
-          || Object.values(parent.collectionList!.templateIds)[0];
-        const varName = parent.collectionList!.source.replace('__inline:', '');
-        return {
-          parentNode: parent,
-          templateId: templateId || current.id,
-          varName,
-          mapData: parent.inlineMapData || [],
-        };
-      }
-    }
-    current = current.parentId ? nodes.get(current.parentId) : undefined;
-  }
-  return null;
-});
 
 // ─── Variable modal request ─────────────────────────────────────────────────
 // The "Create Variable" flow (ControlLabel chevron menu) creates the variable, then wants to open the

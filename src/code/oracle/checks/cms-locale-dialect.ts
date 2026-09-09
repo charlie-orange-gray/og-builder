@@ -299,6 +299,49 @@ export function checkCmsStyleBindingsResolve(
 }
 
 /**
+ * INLINE `.map()` REPEATER (tier 3).
+ *
+ * The builder has exactly ONE repeat primitive: a CMS collection list — a
+ * `.map()` whose head is an imported `@/cms/<slug>.json` collection (or a
+ * derivation of one). The inline repeater (`const items = […]` mapped to JSX)
+ * was retired: the parser no longer registers it, so it renders on the live
+ * site but is invisible in the editor — no rows, no bindings, no CMS panel.
+ * Any rendered `.map()` that does NOT reference a CMS import is rejected here.
+ */
+export function checkInlineMapUnsupported(
+  code: string,
+  ast: t.File,
+  v: OracleViolation[],
+  kind: FileKind,
+): void {
+  if (kind !== 'page' && kind !== 'component' && kind !== 'template') return;
+  const cmsVars = cmsImportNames(code);
+  const derived = cmsVars.size > 0 ? cmsDerivedNames(code, ast, cmsVars) : cmsVars;
+  const reported = new Set<number>();
+
+  traverse(ast, {
+    CallExpression(path) {
+      const obj = mapObjectOf(path.node);
+      if (!obj) return;
+      if (!returnsJsx(path.node.arguments[0])) return;   // not a rendered repeater
+      if (referencesAny(code, obj, derived)) return;     // a CMS list → checkCmsMapResolves owns it
+      const line = path.node.loc?.start.line ?? 0;
+      if (reported.has(line)) return;
+      reported.add(line);
+      const host = path.findParent((p) => p.isJSXElement());
+      const hostId = host?.isJSXElement()
+        ? stringAttr(jsxAttrs(host.node.openingElement), 'data-id')
+        : undefined;
+      const headSrc = obj.start != null && obj.end != null ? code.slice(obj.start, obj.end) : '<expr>';
+      v.push({
+        code: 'INLINE_MAP_UNSUPPORTED', tier: 3, line: line || undefined, elementId: hostId ?? undefined,
+        message: `Inline \`.map()\` repeaters are not supported by the builder — use a CMS collection list (import from '@/cms/<name>.json'). The .map() at line ${line} maps \`${headSrc}\`, which is not a CMS collection: the builder cannot register it as a collection list, so the repeated rows and their {row.field} bindings are dead in the editor. Move the data into a collection and map the import directly: \`{<name>.map((row, idx) => …)}\`.`,
+      });
+    },
+  });
+}
+
+/**
  * UNRESOLVABLE COLLECTION `.map()` — the general net (tier 3).
  *
  * Every rendered `.map()` rooted in a CMS import must come back from the REAL

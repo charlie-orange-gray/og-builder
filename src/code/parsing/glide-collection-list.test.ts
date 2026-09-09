@@ -8,7 +8,7 @@ import { parseJSXToNodes } from './parser';
 // wrapperless <LayoutGroup> — so collectionList never reached the grid and the
 // canvas rendered only item 0 with empty ghost copies (live site was fine).
 
-const ITEMS = `const items = [{ name: 'A' }, { name: 'B' }, { name: 'C' }];`;
+const ITEMS = `import items from '@/cms/items.json';`;
 
 function gridNode(code: string) {
   return parseJSXToNodes(code).get('grid');
@@ -26,7 +26,7 @@ describe('collectionList survives transparent wrappers around the .map()', () =>
       }`;
     const grid = gridNode(code);
     expect(grid?.collectionList?.templateIds?.default).toBe('tpl');
-    expect(grid?.inlineMapData?.length).toBe(3);
+    expect(grid?.collectionList?.source).toBe('items');
   });
 
   test('Glide: <motion.div data-glide> + <LayoutGroup> wrapper around the map', () => {
@@ -43,7 +43,7 @@ describe('collectionList survives transparent wrappers around the .map()', () =>
     const grid = gridNode(code);
     // Was undefined before the fix (break bailed on LayoutGroup).
     expect(grid?.collectionList?.templateIds?.default).toBe('tpl');
-    expect(grid?.inlineMapData?.length).toBe(3);
+    expect(grid?.collectionList?.source).toBe('items');
   });
 
   test('AnimatePresence wrapper around the map also passes through', () => {
@@ -59,6 +59,6 @@ describe('collectionList survives transparent wrappers around the .map()', () =>
       }`;
     const grid = gridNode(code);
     expect(grid?.collectionList?.templateIds?.default).toBe('tpl');
-    expect(grid?.inlineMapData?.length).toBe(3);
+    expect(grid?.collectionList?.source).toBe('items');
   });
 });

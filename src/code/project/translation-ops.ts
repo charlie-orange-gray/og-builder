@@ -23,12 +23,16 @@ import {
   getMessageValue,
   deleteMessageValue,
   nodeHasTranslationCall,
+  nodeHasRichTranslation,
+  transformRichTextToTranslation,
   getTranslationOrphanKey,
   collectTranslationKeys,
   ensureTranslationsScaffoldInCode,
 } from '@/code/generation/i18n-gen';
 import { extractTextRuns, replaceRunWithText, nodeInnerSpan, RUN_KEY_RE } from '@/code/parsing/rich-text-runs';
-import { updateNodeTextInCode } from '@/code/generation/generator-crud';
+import { sanitizeRichMessage, innerJsxToRichMessage, syncRunStyles } from '@/shared/rich-message';
+import { substituteRichTextRuns } from '@/canvas/hooks/locale-override-map';
+import { updateNodeTextInCode, updateNodeChildrenFromHTML } from '@/code/generation/generator-crud';
 import { updateHtmlAttrsInCode } from '@/code/generation/generator-attrs';
 import { parseJSXToNodes } from '@/code/parsing/parser';
 import { isTextTag } from '@/shared/constants';
@@ -58,6 +62,10 @@ export interface TranslatableText {
    *  `<instanceId>#<prop>`; reads/writes route through the scoped
    *  instance-prop expression, not messages/t(). */
   instanceProp?: { componentName: string; prop: string };
+  /** RICH text: `source` is sanitized inline HTML (marks included) and the
+   *  panel edits it with the TipTap editor; commits route through the rich
+   *  pipeline (one message per node, `dangerouslySetInnerHTML={{ __html: t.raw(key) }}`). */
+  rich?: boolean;
 }
 
 // ─── Instance plainText props ───────────────────────────────────────────────
@@ -131,22 +139,22 @@ export function listTranslatableTexts(defaultLocale: string): TranslatableText[]
       // style={{…}}>…`, the user-reported markup leak). Each visible text RUN
       // is its own row under `<nodeId>__r<index>`; a run already transformed
       // to {t('key')} keeps its persisted key so edits can't re-key it.
+      // RICH TEXT — ONE row per node (2026-09-07; replaces the per-run split,
+      // which turned "<strong>hello</strong> my friend" into two translatable
+      // fragments). `source` is the node's content as sanitized inline HTML:
+      // the message for a transformed node, the inner JSX serialised (legacy
+      // `{t('id__rN')}` runs resolved from the default messages) otherwise.
+      if (node.richTranslation && node.translationKey && isTextTag(node.type)) {
+        const source = readTranslationText({ filePath, key: node.translationKey, locale: defaultLocale }) ?? '';
+        out.push({ filePath, kind, nodeId, label: node.name || node.type, source, fallbackDefaultText: source, rich: true });
+        continue;
+      }
       if (node.hasMixedContent && node.textContent?.trim() && !node.textVariable && !node.binding
           && isTextTag(node.type)) {
-        const runs = extractTextRuns(node.textContent);
-        runs.forEach((run, i) => {
-          const key = run.key ?? `${nodeId}__r${i}`;
-          const source = run.key
-            ? (readTranslationText({ filePath, key, locale: defaultLocale }) ?? '')
-            : run.text;
-          if (!source.trim()) return;
-          out.push({
-            filePath, kind, nodeId: key,
-            label: `${node.name || node.type}${runs.length > 1 ? ` · ${i + 1}` : ''}`,
-            source,
-            fallbackDefaultText: source,
-          });
-        });
+        const resolved = substituteRichTextRuns(node.textContent, (k) => readTranslationText({ filePath, key: k, locale: defaultLocale }) ?? '');
+        const source = innerJsxToRichMessage(resolved);
+        if (!source.trim()) continue;
+        out.push({ filePath, kind, nodeId, label: node.name || node.type, source, fallbackDefaultText: source, rich: true });
         continue;
       }
       const translatable = node.translationKey
@@ -240,8 +248,14 @@ function commitTranslationTextInner(opts: {
   /** Pre-edit default-locale text (parsed node textContent) — the seed
    *  fallback when the JSX transform can't capture the original. */
   fallbackDefaultText?: string;
+  /** RICH text commit — `text` is inline HTML from the panel's editor. */
+  rich?: boolean;
 }): void {
   const { filePath, nodeId, locale, defaultLocale, text } = opts;
+  if (opts.rich) {
+    commitRichTranslation({ filePath, nodeId, locale, defaultLocale, html: text });
+    return;
+  }
 
   // RICH-TEXT RUN key (`<hostId>__r<index>`) — route to the run pipeline:
   //   · default locale, untransformed run → in-place text splice in the JSX
@@ -375,6 +389,106 @@ function commitTranslationTextInner(opts: {
   const raw = projectFS.readFile(msgPath) ?? '{}';
   projectFS.writeFile(msgPath, setMessageValue(raw, namespace, key, text));
   trace.action('commitTranslationText:locale-message', { nodeId, locale, namespace });
+}
+
+/** RICH translation commit — one message per node, sanitized inline HTML.
+ *   · default locale, transformed node   → messages/{default}.json
+ *   · default locale, untransformed node → inner JSX rewritten from the HTML
+ *   · non-default locale                 → transform the node to
+ *     `dangerouslySetInnerHTML={{ __html: t.raw(key) }}` (legacy per-run
+ *     `{t('id__rN')}` calls resolved into the seed and into every locale that
+ *     had run translations, then their `__r` keys deleted), seed the default,
+ *     write messages/{locale}.json. */
+export function commitRichTranslation(opts: {
+  filePath: string; nodeId: string; locale: string; defaultLocale: string; html: string;
+}): void {
+  const { filePath, nodeId, locale, defaultLocale } = opts;
+  const html = sanitizeRichMessage(opts.html);
+  const namespace = filePathToSlug(filePath);
+  const key = nodeId;
+  trace.fn('commitRichTranslation', { nodeId, locale, html: html.slice(0, 60) });
+  ensureIntlScaffold();
+  const readMsgs = (loc: string) => projectFS.readFile(`messages/${loc}.json`) ?? '{}';
+  const writeMsg = (loc: string, k: string, v: string) => projectFS.writeFile(`messages/${loc}.json`, setMessageValue(readMsgs(loc), namespace, k, v));
+  const code0 = projectFS.readFile(filePath) ?? '';
+  const transformed = !!code0 && nodeHasRichTranslation(code0, nodeId);
+  if (locale === defaultLocale) {
+    if (transformed) {
+      writeMsg(defaultLocale, key, html);
+      // The default owns the run STYLES — re-bake every other locale's
+      // translation so a font-size / colour change follows (Framer parity).
+      for (const loc of readI18nLocales()) {
+        if (loc === defaultLocale) continue;
+        const cur = getMessageValue(readMsgs(loc), namespace, key);
+        if (cur === null) continue;
+        const synced = syncRunStyles(html, cur);
+        if (synced !== cur) writeMsg(loc, key, synced);
+      }
+      trace.action('commitRichTranslation:default-message', { nodeId });
+    } else {
+      modifyProjectFile(filePath, (code) => updateNodeChildrenFromHTML(code, nodeId, html));
+      trace.action('commitRichTranslation:default-jsx', { nodeId });
+    }
+    return;
+  }
+  if (!transformed) {
+    const locales = readI18nLocales();
+    const legacyKeys = new Set<string>();
+    modifyProjectFile(filePath, (currentCode) => {
+      const span = nodeInnerSpan(currentCode, nodeId);
+      const inner = span ? currentCode.slice(span.start, span.end) : '';
+      for (const run of extractTextRuns(inner)) if (run.key) legacyKeys.add(run.key);
+      const defaultRaw = readMsgs(defaultLocale);
+      const result = transformRichTextToTranslation(currentCode, nodeId, key, namespace,
+        (k) => getMessageValue(defaultRaw, namespace, k) ?? '');
+      if (!result.changed) return currentCode;
+      try {
+        const kind = /LayoutClient\.tsx$/.test(filePath) ? 'template' as const : 'page' as const;
+        const before = new Set(checkFile(currentCode, { kind, path: filePath }).map((x) => `${x.code}::${x.elementId ?? ''}`));
+        const introduced = checkFile(result.code, { kind, path: filePath }).filter((x) => !before.has(`${x.code}::${x.elementId ?? ''}`));
+        if (introduced.length > 0) {
+          trace.error('commitRichTranslation:transform-blocked-by-oracle', { nodeId, codes: introduced.map((x) => x.code).slice(0, 6) });
+          return currentCode;
+        }
+      } catch { /* diagnostics never block */ }
+      if (result.originalHtml && getMessageValue(defaultRaw, namespace, key) === null) writeMsg(defaultLocale, key, result.originalHtml);
+      // Legacy per-run translations: fold each locale's run values into ONE
+      // rich message for that locale, then drop the run keys everywhere.
+      if (legacyKeys.size > 0) {
+        for (const loc of locales) {
+          const raw = readMsgs(loc);
+          const hasAny = [...legacyKeys].some((k) => getMessageValue(raw, namespace, k) !== null);
+          if (loc !== defaultLocale && hasAny && getMessageValue(raw, namespace, key) === null) {
+            const folded = innerJsxToRichMessage(substituteRichTextRuns(inner, (k) =>
+              getMessageValue(raw, namespace, k) ?? getMessageValue(defaultRaw, namespace, k) ?? ''));
+            writeMsg(loc, key, folded);
+          }
+          let next = readMsgs(loc);
+          for (const k of legacyKeys) next = deleteMessageValue(next, namespace, k);
+          projectFS.writeFile(`messages/${loc}.json`, next);
+        }
+        trace.action('commitRichTranslation:legacy-runs-folded', { nodeId, runs: legacyKeys.size });
+      }
+      return result.code;
+    });
+  }
+  // A translation inherits the default's run styles; only its text and
+  // structural marks are its own.
+  const defaultHtml = getMessageValue(readMsgs(defaultLocale), namespace, key) ?? '';
+  writeMsg(locale, key, defaultHtml ? syncRunStyles(defaultHtml, html) : html);
+  trace.action('commitRichTranslation:locale-message', { nodeId, locale });
+}
+
+/** Locale codes from i18n/config.json (default first), [] when absent. */
+function readI18nLocales(): string[] {
+  try {
+    const raw = projectFS.readFile('i18n/config.json');
+    if (!raw) return [];
+    const cfg = JSON.parse(raw) as { defaultLocale?: string; locales?: Array<{ code: string }> };
+    const codes = (cfg.locales ?? []).map((l) => l.code);
+    if (cfg.defaultLocale && !codes.includes(cfg.defaultLocale)) codes.unshift(cfg.defaultLocale);
+    return codes;
+  } catch { return []; }
 }
 
 /** Rich-text RUN commit — see the dispatch note in commitTranslationText. */

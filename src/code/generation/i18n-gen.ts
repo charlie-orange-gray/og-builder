@@ -20,6 +20,7 @@ import { generate } from './generator-utils';
 
 const traverseAst = (typeof _traverse === 'function' ? _traverse : (_traverse as any).default) as typeof _traverse;
 import { trace } from '@/shared/debug-trace';
+import { innerJsxToRichMessage } from '@/shared/rich-message';
 
 interface TransformResult {
   code: string;
@@ -265,6 +266,64 @@ export function transformTextToTranslation(
  * child elements). A run already carrying `key` reports changed:false.
  * `originalText` = the replaced run's trimmed text (default-message seed).
  */
+/** RICH transform: the node's WHOLE inner content (marks included) moves into
+ *  messages as sanitized HTML and the JSX becomes
+ *  `<tag … dangerouslySetInnerHTML={{ __html: t.raw('key') }} />` (no children).
+ *  Idempotent. `originalHtml` = the default-locale seed (the inner JSX as the
+ *  canvas paints it). Legacy per-run `{t('id__rN')}` calls inside the inner JSX
+ *  are resolved by `resolveRun` BEFORE serialising, so nothing translated is lost. */
+export function transformRichTextToTranslation(
+  code: string,
+  nodeId: string,
+  key: string,
+  namespace: string,
+  resolveRun?: (runKey: string) => string,
+): { code: string; changed: boolean; originalHtml: string } {
+  trace.fn('i18n-gen.transformRichTextToTranslation', { nodeId, key, namespace });
+  const ast = parseJSX(code);
+  if (!ast) return { code, changed: false, originalHtml: '' };
+  let changed = false;
+  let originalHtml = '';
+  const hookVarName = ensureTranslationsScaffold(ast, namespace);
+  findFirstElementByDataId(ast, nodeId, (path) => {
+    const opening = path.node.openingElement;
+    if (richTranslationKeyOf(opening) !== null) { path.stop(); return; }
+    const closing = path.node.closingElement;
+    let inner = '';
+    if (closing && opening.end != null && closing.start != null) inner = code.slice(opening.end, closing.start);
+    if (resolveRun) {
+      inner = inner.replace(/\{\s*\w+\((['"])([^'"]+)\1\)\s*\}/g, (_m, _q: string, k: string) =>
+        resolveRun(k).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+    }
+    originalHtml = innerJsxToRichMessage(inner);
+    // Drop children, self-close, add the attribute.
+    path.node.children = [];
+    path.node.closingElement = null;
+    opening.selfClosing = true;
+    opening.attributes = opening.attributes.filter((a: any) => !(a.type === 'JSXAttribute' && a.name?.name === 'dangerouslySetInnerHTML'));
+    opening.attributes.push(
+      t.jsxAttribute(
+        t.jsxIdentifier('dangerouslySetInnerHTML'),
+        t.jsxExpressionContainer(t.objectExpression([
+          t.objectProperty(
+            t.identifier('__html'),
+            t.callExpression(t.memberExpression(t.identifier(hookVarName), t.identifier('raw')), [t.stringLiteral(key)]),
+          ),
+        ])),
+      ),
+    );
+    changed = true;
+    path.stop();
+  });
+  if (!changed) return { code, changed: false, originalHtml };
+  try {
+    return { code: generate(ast, { retainLines: false, concise: false }, code).code, changed: true, originalHtml };
+  } catch (err) {
+    trace.error('i18n-gen:rich-transform-generate-failed', { nodeId, error: err instanceof Error ? err.message : String(err) });
+    return { code, changed: false, originalHtml: '' };
+  }
+}
+
 export function transformRunToTranslation(
   code: string,
   nodeId: string,
@@ -417,11 +476,42 @@ export function transformAttrToTranslation(
  *   - migrated → write to messages/{locale}.json (no JSX touch)
  *   - plain text → JSX update (default locale) OR migrate (non-default)
  */
+/** Is this element's `dangerouslySetInnerHTML` the RICH translation shape
+ *  (`{ __html: <hook>.raw('key') }`)? Returns the key or null. */
+export function richTranslationKeyOf(opening: any): string | null {
+  const dsAttr = (opening?.attributes ?? []).find((a: any) => a.type === 'JSXAttribute' && a.name?.name === 'dangerouslySetInnerHTML');
+  const obj = dsAttr?.value?.type === 'JSXExpressionContainer' ? dsAttr.value.expression : null;
+  if (!obj || obj.type !== 'ObjectExpression') return null;
+  const prop = obj.properties.find((pr: any) => pr.type === 'ObjectProperty'
+    && ((pr.key.type === 'Identifier' && pr.key.name === '__html') || (pr.key.type === 'StringLiteral' && pr.key.value === '__html')));
+  const call = prop?.value;
+  if (call?.type === 'CallExpression' && call.callee?.type === 'MemberExpression'
+      && call.callee.property?.type === 'Identifier' && call.callee.property.name === 'raw'
+      && call.callee.object?.type === 'Identifier'
+      && call.arguments?.length === 1 && call.arguments[0]?.type === 'StringLiteral') {
+    return call.arguments[0].value as string;
+  }
+  return null;
+}
+
+/** Does the node carry the RICH translation attribute? */
+export function nodeHasRichTranslation(code: string, nodeId: string): boolean {
+  const ast = parseJSX(code);
+  if (!ast) return false;
+  let found = false;
+  findFirstElementByDataId(ast, nodeId, (path) => {
+    found = richTranslationKeyOf(path.node.openingElement) !== null;
+    path.stop();
+  });
+  return found;
+}
+
 export function nodeHasTranslationCall(code: string, nodeId: string): boolean {
   const ast = parseJSX(code);
   if (!ast) return false;
   let found = false;
   findFirstElementByDataId(ast, nodeId, (path) => {
+    if (richTranslationKeyOf(path.node.openingElement) !== null) { found = true; path.stop(); return; }
     found = path.node.children.some((child: any) => {
       if (child.type !== 'JSXExpressionContainer') return false;
       const expr = child.expression;

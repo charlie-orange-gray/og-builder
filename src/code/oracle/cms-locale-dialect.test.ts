@@ -194,6 +194,59 @@ export default function Page() {
   });
 });
 
+describe('INLINE_MAP_UNSUPPORTED — the retired local-array repeater (tier 3)', () => {
+  const LOCAL_ARRAY = `'use client';
+export default function Page() {
+  const items = [{ label: 'a' }, { label: 'b' }];
+  return (<div data-id="root" style={{ position: 'relative', width: '100%' }}>
+    <div data-id="row" style={{ display: 'flex' }}>{items.map((i, idx) => (<span data-id="cell" key={idx} style={{ fontSize: '12px' }}>{i.label}</span>))}</div>
+  </div>);
+}
+`;
+
+  it('REJECTS a local array mapped to JSX', () => {
+    const out = checkFile(LOCAL_ARRAY, { kind: 'page' });
+    const hit = out.find((x) => x.code === 'INLINE_MAP_UNSUPPORTED');
+    expect(hit).toBeDefined();
+    expect(hit!.tier).toBe(3);
+    expect(hit!.elementId).toBe('row');
+    expect(hit!.message).toContain("use a CMS collection list (import from '@/cms/<name>.json')");
+  });
+
+  it('flags it on a component too', () => {
+    expect(codesOf(LOCAL_ARRAY, 'component')).toContain('INLINE_MAP_UNSUPPORTED');
+  });
+
+  it('ACCEPTS a CMS-import map', () => {
+    expect(codesOf(NATIVE)).not.toContain('INLINE_MAP_UNSUPPORTED');
+    const plain = page(`  return (
+    <div data-id="root" data-name="Root" style={{ position: 'relative', width: '100%' }}>
+      <div data-id="prog-row" data-name="List" style={{ display: 'flex' }}>
+        {programme.map((row, idx) => (
+          <div data-id="prog-card" data-name="Card" key={idx} style={{ width: '100px', height: '100px' }}>
+            <h3 data-id="prog-title" data-name="Title" style={{ fontSize: '16px' }}>{row.title}</h3>
+          </div>
+        ))}
+      </div>
+    </div>
+  );`);
+    expect(codesOf(plain)).not.toContain('INLINE_MAP_UNSUPPORTED');
+  });
+
+  it('ignores a .map() whose callback does not render JSX (building strings)', () => {
+    const code = `'use client';
+export default function Page() {
+  const words = ['a', 'b'];
+  const joined = words.map((w) => w.toUpperCase()).join(' ');
+  return (<div data-id="root" style={{ position: 'relative', width: '100%' }}>
+    <p data-id="text" style={{ fontSize: '12px' }}>{joined}</p>
+  </div>);
+}
+`;
+    expect(codesOf(code)).not.toContain('INLINE_MAP_UNSUPPORTED');
+  });
+});
+
 describe('the real customer page (2026-08-10)', () => {
   // Verbatim shape of what shipped: duplicate rows per locale, a language
   // filter, an `…Locale.length > 0 ? … : …Fallback` ternary, and a map over the

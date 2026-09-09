@@ -1,12 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   getEnclosingMapParamsForNode,
-  addMapItemInCode,
-  removeMapItemInCode,
-  updateMapItemInCode,
-  addMapFieldInCode,
-  makeIntoMapInCode,
-  bindStyleToMapInCode,
   bindPropToMapInCode,
   unbindPropFromMapInCode,
   bindToCmsCollectionInCode,
@@ -15,22 +9,13 @@ import {
   bindCmsNavLinkOnDropInCode,
   setCmsNavHrefInCode,
 } from './map-gen';
-import { propagateToGhosts } from './map-ghost-propagate';
 import { parseJSXToNodes } from '../parsing/parser';
-import { queueMutation } from '../mutation/mutation-queue';
-
-vi.mock('../mutation/mutation-queue', () => ({
-  queueMutation: vi.fn(),
-}));
-const mockQueueMutation = vi.mocked(queueMutation);
 
 // ─── Test Fixtures ──────────────────────────────────────────────────────────
+// Every list here is a CMS collection list (`import x from '@/cms/x.json'`).
 
-const CODE_WITH_MAP = `export default function Page() {
-  const cardData = [
-    {"title":"Hello","desc":"World"},
-    {"title":"Foo","desc":"Bar"},
-  ];
+const CODE_WITH_MAP = `import cardData from '@/cms/cardData.json';
+export default function Page() {
 
   return (
     <div data-id="root">
@@ -43,396 +28,6 @@ const CODE_WITH_MAP = `export default function Page() {
     </div>
   );
 }`;
-
-// ─── addMapItemInCode ─────────────────────────────────────────────────────────
-
-describe('addMapItemInCode', () => {
-  it('adds a new item to the data array', () => {
-    const result = addMapItemInCode(CODE_WITH_MAP, 'cardData', { title: 'New', desc: 'Item' });
-    expect(result).toContain('{"title":"New","desc":"Item"}');
-    // Original items preserved
-    expect(result).toContain('"title":"Hello"');
-    expect(result).toContain('"title":"Foo"');
-  });
-
-  it('returns unchanged code when varName not found', () => {
-    const result = addMapItemInCode(CODE_WITH_MAP, 'nonExistent', { x: '1' });
-    expect(result).toBe(CODE_WITH_MAP);
-  });
-});
-
-// ─── removeMapItemInCode ──────────────────────────────────────────────────────
-
-describe('removeMapItemInCode', () => {
-  it('removes item at index 0', () => {
-    const result = removeMapItemInCode(CODE_WITH_MAP, 'cardData', 0);
-    expect(result).not.toContain('"title":"Hello"');
-    expect(result).toContain('"title":"Foo"');
-  });
-
-  it('removes item at index 1', () => {
-    const result = removeMapItemInCode(CODE_WITH_MAP, 'cardData', 1);
-    expect(result).toContain('"title":"Hello"');
-    expect(result).not.toContain('"title":"Foo"');
-  });
-
-  it('returns unchanged code for out-of-bounds index', () => {
-    const result = removeMapItemInCode(CODE_WITH_MAP, 'cardData', 5);
-    expect(result).toBe(CODE_WITH_MAP);
-  });
-});
-
-// ─── updateMapItemInCode ──────────────────────────────────────────────────────
-
-describe('updateMapItemInCode', () => {
-  it('updates item at index 0', () => {
-    const result = updateMapItemInCode(CODE_WITH_MAP, 'cardData', 0, { title: 'Updated', desc: 'Content' });
-    expect(result).toContain('{"title":"Updated","desc":"Content"}');
-    // Second item unchanged
-    expect(result).toContain('"title":"Foo"');
-    expect(result).not.toContain('"title":"Hello"');
-  });
-
-  it('updates item at index 1', () => {
-    const result = updateMapItemInCode(CODE_WITH_MAP, 'cardData', 1, { title: 'Changed', desc: 'Baz' });
-    expect(result).toContain('{"title":"Changed","desc":"Baz"}');
-    // First item unchanged
-    expect(result).toContain('"title":"Hello"');
-    expect(result).not.toContain('"title":"Foo"');
-  });
-
-  it('returns unchanged code for out-of-bounds index', () => {
-    const result = updateMapItemInCode(CODE_WITH_MAP, 'cardData', 10, { title: 'X', desc: 'Y' });
-    expect(result).toBe(CODE_WITH_MAP);
-  });
-
-  it('returns unchanged code when varName not found', () => {
-    const result = updateMapItemInCode(CODE_WITH_MAP, 'noSuch', 0, { x: '1' });
-    expect(result).toBe(CODE_WITH_MAP);
-  });
-
-  it('updated code at index 0 still parses correctly', () => {
-    const result = updateMapItemInCode(CODE_WITH_MAP, 'cardData', 0, { title: 'New Title', desc: 'New Desc' });
-    const nodes = parseJSXToNodes(result);
-    const root = nodes.get('root');
-    expect(root).toBeDefined();
-    expect(root!.inlineMapData).toBeDefined();
-    expect(root!.inlineMapData!.length).toBe(2);
-    expect(root!.inlineMapData![0].title).toBe('New Title');
-    expect(root!.inlineMapData![0].desc).toBe('New Desc');
-    // Item 1 should be unchanged
-    expect(root!.inlineMapData![1].title).toBe('Foo');
-    expect(root!.inlineMapData![1].desc).toBe('Bar');
-  });
-
-  it('updates ghost item (index > 0) without affecting template item', () => {
-    const result = updateMapItemInCode(CODE_WITH_MAP, 'cardData', 1, { title: 'Ghost Updated', desc: 'Ghost Desc' });
-    const nodes = parseJSXToNodes(result);
-    const root = nodes.get('root');
-    expect(root).toBeDefined();
-    expect(root!.inlineMapData).toBeDefined();
-    expect(root!.inlineMapData!.length).toBe(2);
-    // Item 0 (template) should be unchanged
-    expect(root!.inlineMapData![0].title).toBe('Hello');
-    expect(root!.inlineMapData![0].desc).toBe('World');
-    // Item 1 (ghost) should have new values
-    expect(root!.inlineMapData![1].title).toBe('Ghost Updated');
-    expect(root!.inlineMapData![1].desc).toBe('Ghost Desc');
-  });
-
-  it('can add fields to items via update', () => {
-    const result = updateMapItemInCode(CODE_WITH_MAP, 'cardData', 0, { title: 'Hello', desc: 'World', icon: 'star' });
-    const nodes = parseJSXToNodes(result);
-    const root = nodes.get('root');
-    expect(root!.inlineMapData![0].icon).toBe('star');
-    // Item 1 does NOT get the new field — update replaces only the targeted item
-    expect(root!.inlineMapData![1].icon).toBeUndefined();
-  });
-
-  it('can update with 3+ items in the array', () => {
-    // First add a third item, then update it
-    let result = addMapItemInCode(CODE_WITH_MAP, 'cardData', { title: 'Third', desc: 'Entry' });
-    result = updateMapItemInCode(result, 'cardData', 2, { title: 'Updated Third', desc: 'Updated Entry' });
-    const nodes = parseJSXToNodes(result);
-    const root = nodes.get('root');
-    expect(root!.inlineMapData!.length).toBe(3);
-    expect(root!.inlineMapData![0].title).toBe('Hello');
-    expect(root!.inlineMapData![1].title).toBe('Foo');
-    expect(root!.inlineMapData![2].title).toBe('Updated Third');
-    expect(root!.inlineMapData![2].desc).toBe('Updated Entry');
-  });
-});
-
-// ─── addMapFieldInCode ────────────────────────────────────────────────────────
-
-describe('addMapFieldInCode', () => {
-  it('adds a new field to all items', () => {
-    const result = addMapFieldInCode(CODE_WITH_MAP, 'cardData', 'link', 'https://example.com');
-    // Both items should now have the link field
-    expect(result).toContain('"link":"https://example.com"');
-    // Should appear twice (once per item)
-    const matches = result.match(/"link":"https:\/\/example\.com"/g);
-    expect(matches?.length).toBe(2);
-    // Original fields preserved
-    expect(result).toContain('"title":"Hello"');
-    expect(result).toContain('"title":"Foo"');
-  });
-
-  it('adds field with empty default value', () => {
-    const result = addMapFieldInCode(CODE_WITH_MAP, 'cardData', 'image');
-    expect(result).toContain('"image":""');
-    const matches = result.match(/"image":""/g);
-    expect(matches?.length).toBe(2);
-  });
-
-  it('returns unchanged code when varName not found', () => {
-    const result = addMapFieldInCode(CODE_WITH_MAP, 'noSuch', 'field');
-    expect(result).toBe(CODE_WITH_MAP);
-  });
-});
-
-// ─── Round-trip: code → parse → verify inlineMapData ─────────────────────────
-
-describe('parser round-trip for inline maps', () => {
-  it('parses .map() and finds inlineMapData on parent node', () => {
-    const nodes = parseJSXToNodes(CODE_WITH_MAP);
-    const root = nodes.get('root');
-    expect(root).toBeDefined();
-    expect(root!.collectionList).toBeDefined();
-    expect(root!.collectionList!.source).toBe('__inline:cardData');
-    expect(root!.inlineMapData).toBeDefined();
-    expect(root!.inlineMapData!.length).toBe(2);
-    expect(root!.inlineMapData![0].title).toBe('Hello');
-    expect(root!.inlineMapData![1].title).toBe('Foo');
-  });
-
-  it('addMapItem produces code that parses with 3 items', () => {
-    const newCode = addMapItemInCode(CODE_WITH_MAP, 'cardData', { title: 'New', desc: 'Item' });
-    const nodes = parseJSXToNodes(newCode);
-    const root = nodes.get('root');
-    expect(root!.inlineMapData!.length).toBe(3);
-    expect(root!.inlineMapData![2].title).toBe('New');
-    expect(root!.inlineMapData![2].desc).toBe('Item');
-  });
-
-  it('removeMapItem produces code that parses with 1 item', () => {
-    const newCode = removeMapItemInCode(CODE_WITH_MAP, 'cardData', 0);
-    const nodes = parseJSXToNodes(newCode);
-    const root = nodes.get('root');
-    expect(root!.inlineMapData!.length).toBe(1);
-    expect(root!.inlineMapData![0].title).toBe('Foo');
-  });
-
-  it('template children have bindings detected', () => {
-    const nodes = parseJSXToNodes(CODE_WITH_MAP);
-    const card = nodes.get('card');
-    expect(card).toBeDefined();
-    expect(card!.isCollectionTemplate).toBe(true);
-  });
-
-  it('parses inline map mixed with sibling elements', () => {
-    const code = `export default function Page() {
-    const card1Data = [
-    {"title":"Code First","desc":"JSX is the source of truth."},
-    {"title":"zegzegzeg","desc":"zegzegzegge"},];
-
-  return (
-<div data-id="root" style={{position: 'relative'}}>
-  <div data-id="features" style={{display: 'flex', gap: '32px'}}>
-    {card1Data.map((item, idx) => (
-      <div data-id="card1" key={idx} style={{width: '320px'}}>
-        <p data-id="card1-title">{item.title}</p>
-        <p data-id="card1-desc">{item.desc}</p>
-      </div>
-    ))}
-    <div data-id="card2" style={{width: '320px'}}>
-      <p data-id="card2-title">Visual Canvas</p>
-    </div>
-  </div>
-</div>
-  );
-}`;
-    const nodes = parseJSXToNodes(code);
-    const features = nodes.get('features');
-    expect(features).toBeDefined();
-    expect(features!.collectionList).toBeDefined();
-    expect(features!.collectionList!.source).toBe('__inline:card1Data');
-    expect(features!.collectionList!.templateIds['default']).toBe('card1');
-    expect(features!.inlineMapData).toBeDefined();
-    expect(features!.inlineMapData!.length).toBe(2);
-    expect(features!.inlineMapData![0].title).toBe('Code First');
-    expect(features!.inlineMapData![1].title).toBe('zegzegzeg');
-    // card1 should be a collection template
-    const card1 = nodes.get('card1');
-    expect(card1).toBeDefined();
-    expect(card1!.isCollectionTemplate).toBe(true);
-    // card2 should NOT be a collection template (sibling, outside .map())
-    const card2 = nodes.get('card2');
-    expect(card2).toBeDefined();
-    expect(card2!.isCollectionTemplate).toBeFalsy();
-  });
-});
-
-// ─── makeIntoMapInCode: unique variable names ─────────────────────────────────
-
-describe('makeIntoMapInCode variable name collision', () => {
-  const CODE_TWO_CARDS = `export default function Page() {
-  return (
-    <div data-id="root">
-      <div data-id="features" style={{display: 'flex'}}>
-        <div data-id="card-1" style={{width: '320px'}}>
-          <h3 data-id="card-1-title">First</h3>
-        </div>
-        <div data-id="card-2" style={{width: '320px'}}>
-          <h3 data-id="card-2-title">Second</h3>
-        </div>
-      </div>
-    </div>
-  );
-}`;
-
-  it('generates unique var names for siblings with similar IDs', () => {
-    // Make card-1 into a map
-    const step1 = makeIntoMapInCode(CODE_TWO_CARDS, 'card-1');
-    expect(step1).toContain('const card1Data');
-    // Make card-2 into a map — should NOT collide
-    const step2 = makeIntoMapInCode(step1, 'card-2');
-    expect(step2).toContain('card2Data');
-    // Both const declarations should exist
-    expect(step2).toContain('const card1Data');
-    expect(step2).toContain('const card2Data');
-  });
-});
-
-// ─── bindStyleToMapInCode ─────────────────────────────────────────────────────
-
-describe('bindStyleToMapInCode', () => {
-  const CODE_WITH_STYLE = `export default function Page() {
-  const cardData = [
-    {"title":"Hello"},
-    {"title":"World"},
-  ];
-
-  return (
-    <div data-id="root">
-      {cardData.map((item, idx) => (
-        <div data-id="card" key={idx} style={{backgroundColor: '#ff0000', borderRadius: '8px'}}>
-          <p>{item.title}</p>
-        </div>
-      ))}
-    </div>
-  );
-}`;
-
-  it('replaces inline style with iterator reference', () => {
-    const result = bindStyleToMapInCode(CODE_WITH_STYLE, 'card', 'cardData', 'backgroundColor', 'backgroundColor', '#ff0000');
-    expect(result).toContain('backgroundColor: item.backgroundColor');
-    expect(result).not.toContain("backgroundColor: '#ff0000'");
-  });
-
-  it('adds field to all data items', () => {
-    const result = bindStyleToMapInCode(CODE_WITH_STYLE, 'card', 'cardData', 'backgroundColor', 'bgColor', '#ff0000');
-    const nodes = parseJSXToNodes(result);
-    const root = nodes.get('root');
-    expect(root!.inlineMapData![0].bgColor).toBe('#ff0000');
-    expect(root!.inlineMapData![1].bgColor).toBe('#ff0000');
-  });
-
-  it('uses correct iterator variable name (not hardcoded "item")', () => {
-    const codeWithPlan = CODE_WITH_STYLE.replace('(item, idx)', '(plan, idx)').replace('item.title', 'plan.title');
-    const result = bindStyleToMapInCode(codeWithPlan, 'card', 'cardData', 'backgroundColor', 'bgColor', '#ff0000');
-    expect(result).toContain('plan.bgColor');
-    expect(result).not.toContain('item.bgColor');
-  });
-
-  it('only modifies template INSIDE .map() body', () => {
-    const result = bindStyleToMapInCode(CODE_WITH_STYLE, 'card', 'cardData', 'backgroundColor', 'bgColor', '#ff0000');
-    // The .map() should still be intact
-    expect(result).toContain('cardData.map(');
-    // Parse should succeed without errors
-    const nodes = parseJSXToNodes(result);
-    expect(nodes.size).toBeGreaterThan(0);
-  });
-
-  it('adds new property with binding when property does not exist in style block', () => {
-    // 'background' does not exist in the template style — should be ADDED
-    const result = bindStyleToMapInCode(CODE_WITH_STYLE, 'card', 'cardData', 'background', 'background', 'linear-gradient(red, blue)');
-    // Should add the binding inside the style block (before inner })
-    expect(result).toContain('background: item.background');
-    // Original style properties should still be intact
-    expect(result).toContain("backgroundColor: '#ff0000'");
-    expect(result).toContain("borderRadius: '8px'");
-    // The code should still parse without errors
-    const nodes = parseJSXToNodes(result);
-    expect(nodes.size).toBeGreaterThan(0);
-    // Data should have the field added
-    const root = nodes.get('root');
-    expect(root!.inlineMapData![0].background).toBe('linear-gradient(red, blue)');
-  });
-
-  it('adds multiple new properties without breaking the style block', () => {
-    // Simulate gradient text: add background, WebkitBackgroundClip, color
-    let result = bindStyleToMapInCode(CODE_WITH_STYLE, 'card', 'cardData', 'background', 'background', 'linear-gradient(red, blue)');
-    result = bindStyleToMapInCode(result, 'card', 'cardData', 'WebkitBackgroundClip', 'WebkitBackgroundClip', 'text');
-    result = bindStyleToMapInCode(result, 'card', 'cardData', 'WebkitTextFillColor', 'WebkitTextFillColor', 'transparent');
-    expect(result).toContain('background: item.background');
-    expect(result).toContain('WebkitBackgroundClip: item.WebkitBackgroundClip');
-    expect(result).toContain('WebkitTextFillColor: item.WebkitTextFillColor');
-    // Should still parse
-    const nodes = parseJSXToNodes(result);
-    expect(nodes.size).toBeGreaterThan(0);
-  });
-
-  it('sequential bindings preserve all data fields across items', () => {
-    // Bind 3 properties sequentially (background, WebkitBackgroundClip, color)
-    // After each bind, code should still parse
-    // All 3 bindings should appear in the style block AND data items
-    let result = bindStyleToMapInCode(CODE_WITH_STYLE, 'card', 'cardData', 'background', 'bg', 'linear-gradient(red, blue)');
-    let nodes = parseJSXToNodes(result);
-    expect(nodes.size).toBeGreaterThan(0);
-    expect(nodes.get('root')!.inlineMapData![0].bg).toBe('linear-gradient(red, blue)');
-    expect(nodes.get('root')!.inlineMapData![1].bg).toBe('linear-gradient(red, blue)');
-
-    result = bindStyleToMapInCode(result, 'card', 'cardData', 'WebkitBackgroundClip', 'clip', 'text');
-    nodes = parseJSXToNodes(result);
-    expect(nodes.size).toBeGreaterThan(0);
-    // Previous field should still be present
-    expect(nodes.get('root')!.inlineMapData![0].bg).toBe('linear-gradient(red, blue)');
-    expect(nodes.get('root')!.inlineMapData![0].clip).toBe('text');
-
-    result = bindStyleToMapInCode(result, 'card', 'cardData', 'color', 'textColor', 'transparent');
-    nodes = parseJSXToNodes(result);
-    expect(nodes.size).toBeGreaterThan(0);
-    // All 3 fields should be present on both items
-    const item0 = nodes.get('root')!.inlineMapData![0];
-    const item1 = nodes.get('root')!.inlineMapData![1];
-    expect(item0.bg).toBe('linear-gradient(red, blue)');
-    expect(item0.clip).toBe('text');
-    expect(item0.textColor).toBe('transparent');
-    expect(item1.bg).toBe('linear-gradient(red, blue)');
-    expect(item1.clip).toBe('text');
-    expect(item1.textColor).toBe('transparent');
-    // All 3 bindings in the style block
-    expect(result).toContain('background: item.bg');
-    expect(result).toContain('WebkitBackgroundClip: item.clip');
-    expect(result).toContain('color: item.textColor');
-  });
-
-  it('replaces existing property then adds new property in same style block', () => {
-    // First bind replaces an existing prop, second adds a new one
-    let result = bindStyleToMapInCode(CODE_WITH_STYLE, 'card', 'cardData', 'backgroundColor', 'bgColor', '#ff0000');
-    result = bindStyleToMapInCode(result, 'card', 'cardData', 'padding', 'pad', '16px');
-    expect(result).toContain('backgroundColor: item.bgColor');
-    expect(result).toContain('padding: item.pad');
-    // borderRadius should remain untouched
-    expect(result).toContain("borderRadius: '8px'");
-    // Code should still be parseable
-    const nodes = parseJSXToNodes(result);
-    expect(nodes.size).toBeGreaterThan(0);
-  });
-});
-
-// ─── getEnclosingMapParamsForNode ────────────────────────────────────────────
 
 describe('getEnclosingMapParamsForNode', () => {
   it('returns both callback params for a two-param map (chained slice)', () => {
@@ -454,11 +49,8 @@ describe('getEnclosingMapParamsForNode', () => {
 // ─── bindPropToMapInCode ──────────────────────────────────────────────────────
 
 describe('bindPropToMapInCode', () => {
-  const CODE_WITH_CODE_COMPONENT = `export default function Page() {
-  const statData = [
-    {"label":"Users"},
-    {"label":"Revenue"},
-  ];
+  const CODE_WITH_CODE_COMPONENT = `import statData from '@/cms/statData.json';
+export default function Page() {
 
   return (
     <div data-id="root">
@@ -482,11 +74,6 @@ describe('bindPropToMapInCode', () => {
     const result = bindPropToMapInCode(CODE_WITH_CODE_COMPONENT, 'stat-counter', 'statData', 'endValue', 'value', '500');
     // Iterator is 'stat' from statData.map((stat, idx))
     expect(result).toContain('stat.value');
-  });
-
-  it('adds field to data array', () => {
-    const result = bindPropToMapInCode(CODE_WITH_CODE_COMPONENT, 'stat-counter', 'statData', 'endValue', 'value', '500');
-    expect(result).toContain('"value":"500"');
   });
 
   it('handles string prop values', () => {
@@ -516,12 +103,9 @@ describe('bindPropToMapInCode', () => {
   // An image prop whose master binds it BARE (`backgroundImage: coverImage`) —
   // the CMS field holds a plain URL, so the binding wraps at the instance:
   // `coverImage={`url(${item.coverImage})`}` (the Make Component / AboutPoint
-  // convention).
-  const CODE_WITH_IMAGE_PROP = `export default function Page() {
-  const works = [
-    {"coverImage":"https://pic/1.jpg"},
-    {"coverImage":"https://pic/2.jpg"},
-  ];
+  // convention). Fields are seeded in the collection, never in code.
+  const CODE_WITH_IMAGE_PROP = `import works from '@/cms/works.json';
+export default function Page() {
 
   return (
     <div data-id="root">
@@ -536,12 +120,6 @@ describe('bindPropToMapInCode', () => {
     const result = bindPropToMapInCode(CODE_WITH_IMAGE_PROP, 'card', 'works', 'coverImage', 'coverImage', 'url(https://picsum.photos/seed/x/1400/1000)', true);
     expect(result).toContain('coverImage={`url(${item.coverImage})`}');
     expect(result).not.toContain('coverImage="url(');
-  });
-
-  it('urlWrap: seeds the data field UNWRAPPED (CMS fields hold plain urls)', () => {
-    const result = bindPropToMapInCode(CODE_WITH_IMAGE_PROP, 'card', 'works', 'coverImage', 'cover2', 'url(https://picsum.photos/seed/x/1400/1000)', true);
-    expect(result).toContain('"cover2":"https://picsum.photos/seed/x/1400/1000"');
-    expect(result).not.toContain('"cover2":"url(');
   });
 
   it('urlWrap: REBINDS an existing whole-value binding without corrupting (template pattern runs before the generic one)', () => {
@@ -572,8 +150,8 @@ describe('bindPropToMapInCode', () => {
     // binding `ergerg` must rewrite ITS attr, not `ergergerg` (whose tail is
     // "ergerg="). This was the user-reported bug: setting the color var
     // overrode the image var above it.
-    const code = `export default function Page() {
-  const teamData = [{"a":1}];
+    const code = `import teamData from '@/cms/teamData.json';
+export default function Page() {
   return (<div data-id="root">{teamData.map((item, idx) => (
     <Card data-id="card" key={idx} ergergerg={item.image} ergerg="#fff" />
   ))}</div>);
@@ -585,102 +163,6 @@ describe('bindPropToMapInCode', () => {
   });
 });
 
-// ─── propagateToGhosts ───────────────────────────────────────────────────────
-
-describe('propagateToGhosts', () => {
-  beforeEach(() => {
-    mockQueueMutation.mockClear();
-  });
-
-  it('propagates to ghosts that match oldVal', () => {
-    const mapData: Record<string, string>[] = [
-      { title: 'Original', desc: 'Template' },
-      { title: 'Original', desc: 'Ghost 1' },
-      { title: 'Original', desc: 'Ghost 2' },
-    ];
-    propagateToGhosts('cardData', 'title', 'Original', 'Updated', mapData);
-    // Should queue mutations for items 1 and 2 (ghosts that match oldVal)
-    expect(mockQueueMutation).toHaveBeenCalledTimes(2);
-    expect(mockQueueMutation).toHaveBeenCalledWith({
-      type: 'updateMapItem',
-      varName: 'cardData',
-      index: 1,
-      item: { title: 'Updated', desc: 'Ghost 1' },
-    });
-    expect(mockQueueMutation).toHaveBeenCalledWith({
-      type: 'updateMapItem',
-      varName: 'cardData',
-      index: 2,
-      item: { title: 'Updated', desc: 'Ghost 2' },
-    });
-  });
-
-  it('skips ghosts with different values (overridden)', () => {
-    const mapData: Record<string, string>[] = [
-      { title: 'Original', desc: 'Template' },
-      { title: 'Custom Override', desc: 'Ghost 1' },  // overridden — different from oldVal
-      { title: 'Original', desc: 'Ghost 2' },           // matches oldVal — should propagate
-    ];
-    propagateToGhosts('cardData', 'title', 'Original', 'Updated', mapData);
-    // Only item 2 matches oldVal; item 1 has been overridden
-    expect(mockQueueMutation).toHaveBeenCalledTimes(1);
-    expect(mockQueueMutation).toHaveBeenCalledWith({
-      type: 'updateMapItem',
-      varName: 'cardData',
-      index: 2,
-      item: { title: 'Updated', desc: 'Ghost 2' },
-    });
-  });
-
-  it('propagates to ghosts with undefined field values (inheriting)', () => {
-    const mapData: Record<string, string>[] = [
-      { title: 'Original', desc: 'Template', icon: 'star' },
-      { title: 'Original', desc: 'Ghost 1' },  // icon is undefined → inheriting → should update
-      { title: 'Original', desc: 'Ghost 2', icon: 'star' },  // icon matches oldVal → should update
-      { title: 'Original', desc: 'Ghost 3', icon: 'custom' },  // icon overridden → skip
-    ];
-    propagateToGhosts('cardData', 'icon', 'star', 'heart', mapData);
-    // Items 1 (undefined) and 2 (matches 'star') should be updated; item 3 is overridden
-    expect(mockQueueMutation).toHaveBeenCalledTimes(2);
-    expect(mockQueueMutation).toHaveBeenCalledWith({
-      type: 'updateMapItem',
-      varName: 'cardData',
-      index: 1,
-      item: { title: 'Original', desc: 'Ghost 1', icon: 'heart' },
-    });
-    expect(mockQueueMutation).toHaveBeenCalledWith({
-      type: 'updateMapItem',
-      varName: 'cardData',
-      index: 2,
-      item: { title: 'Original', desc: 'Ghost 2', icon: 'heart' },
-    });
-  });
-
-  it('does not propagate to item 0 (template)', () => {
-    const mapData: Record<string, string>[] = [
-      { title: 'Original' },
-      { title: 'Original' },
-    ];
-    propagateToGhosts('data', 'title', 'Original', 'New', mapData);
-    // Should only affect index 1, never index 0
-    expect(mockQueueMutation).toHaveBeenCalledTimes(1);
-    expect(mockQueueMutation).toHaveBeenCalledWith(
-      expect.objectContaining({ index: 1 }),
-    );
-  });
-
-  it('handles single-item array (no ghosts)', () => {
-    const mapData: Record<string, string>[] = [
-      { title: 'Only Item' },
-    ];
-    propagateToGhosts('data', 'title', 'Only Item', 'New', mapData);
-    // No ghosts to propagate to
-    expect(mockQueueMutation).not.toHaveBeenCalled();
-  });
-});
-
-// ─── Parser: binding detection ────────────────────────────────────────────────
-
 describe('parser binding detection', () => {
   it('detects text bindings ({item.title})', () => {
     const nodes = parseJSXToNodes(CODE_WITH_MAP);
@@ -690,8 +172,8 @@ describe('parser binding detection', () => {
   });
 
   it('detects style bindings (style={{ bg: item.color }})', () => {
-    const code = `export default function Page() {
-  const data = [{"color":"red"}];
+    const code = `import data from '@/cms/data.json';
+export default function Page() {
   return <div data-id="root">{data.map((item, idx) =>
     <div data-id="card" key={idx} style={{backgroundColor: item.color}}>text</div>
   )}</div>;
@@ -706,8 +188,8 @@ describe('parser binding detection', () => {
   });
 
   it('detects prop bindings (endValue={item.value})', () => {
-    const code = `export default function Page() {
-  const data = [{"value":"100"}];
+    const code = `import data from '@/cms/data.json';
+export default function Page() {
   return <div data-id="root">{data.map((item, idx) =>
     <Counter data-id="ctr" key={idx} endValue={item.value} />
   )}</div>;
@@ -722,8 +204,8 @@ describe('parser binding detection', () => {
   });
 
   it('detects multiple attribute bindings (src + alt on same element)', () => {
-    const code = `export default function Page() {
-  const data = [{"img":"https://example.com/photo.jpg","caption":"A photo"}];
+    const code = `import data from '@/cms/data.json';
+export default function Page() {
   return <div data-id="root">{data.map((item, idx) =>
     <img data-id="photo" key={idx} src={item.img} alt={item.caption} />
   )}</div>;
@@ -742,8 +224,8 @@ describe('parser binding detection', () => {
   });
 
   it('isMapTemplateSelected: only true for template descendants, not siblings', () => {
-    const code = `export default function Page() {
-  const data = [{"title":"A"}];
+    const code = `import data from '@/cms/data.json';
+export default function Page() {
   return <div data-id="root">
     <div data-id="container" style={{display: 'flex'}}>
       {data.map((item, idx) => <div data-id="tmpl" key={idx}>{item.title}</div>)}
@@ -759,8 +241,8 @@ describe('parser binding detection', () => {
   });
 
   it('detects map with custom iterator name', () => {
-    const code = `export default function Page() {
-  const plans = [{"name":"Free","price":"0"}];
+    const code = `import plans from '@/cms/plans.json';
+export default function Page() {
   return <div data-id="root">{plans.map((plan, idx) =>
     <div data-id="plan-card" key={idx}>
       <h3>{plan.name}</h3>
@@ -772,7 +254,7 @@ describe('parser binding detection', () => {
     const root = nodes.get('root');
     expect(root!.collectionList).toBeDefined();
     expect(root!.collectionList!.itemVar).toBe('plan');
-    expect(root!.collectionList!.source).toBe('__inline:plans');
+    expect(root!.collectionList!.source).toBe('plans');
   });
 });
 
@@ -1338,12 +820,6 @@ export default function Page() {
 }`;
     const out = bindPropToMapInCode(plain, 'c-1', 'blog', 'title', 'heading', '');
     expect(out).toContain('title={item.heading}');
-  });
-
-  it('binding a STYLE inside a hyphenated collection lands in the JSX too', () => {
-    const out = bindStyleToMapInCode(pageWithStyleBlock(), 'RoJiKu-1', 'collection-1', 'order', 'rank', '0');
-    expect(out).toContain('[data-id="RoJiKu-1"]::after');
-    expect(out).toContain('order: item.rank');
   });
 
   it('unbind finds the JSX occurrence, not the selector', () => {

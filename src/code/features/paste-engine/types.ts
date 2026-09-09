@@ -279,6 +279,12 @@ export interface PasteResult {
   success: boolean;
   createdIds: string[];
   message?: string;
+  /** `message` is written for the USER (a refusal they should read — e.g. a
+   *  component cycle), not a diagnostic; the UI path toasts it. */
+  userFacing?: boolean;
+  /** Set when a copied overlay was ATTACHED to the selected node: the UI
+   *  enters overlay edit mode on it (same follow-up as the Overlay tool's Add). */
+  attachedOverlayId?: string;
 }
 
 export interface CopyResult {

@@ -1500,3 +1500,70 @@ export default withResponsiveProps(Card);
     expect(title1).not.toBe(title2);
   });
 });
+
+// ─── default-only variant values survive expansion ──────────────────────────
+// The builder's FormSubmit keeps the root's backgroundColor ONLY in
+// rootVariants.default (the base style has none). Live paints it through
+// animate={['default', variant]}; the expansion cleared motionVariants for a
+// parent-driven instance without baking the default entry, so the canvas
+// showed a native grey <button> while live was blue (2026-09-08).
+const SUBMIT_TSX = `'use client';
+import React, { useState } from 'react';
+import { motion, LayoutGroup } from 'framer-motion';
+import { withResponsiveProps } from '@revyme/runtime';
+const variantConfig = [
+  { name: 'default', label: 'Default', x: 0, y: 0, isPrimary: true },
+  { name: 'loading', label: 'Loading', x: 320, y: 0 },
+];
+const rootVariants = {
+  default: { backgroundColor: '#3b82f6', opacity: 1, pointerEvents: 'auto' },
+  'loading': { backgroundColor: '#3b82f6', opacity: 1, pointerEvents: 'none' },
+};
+function FormSubmit({ style, label = 'Submit', initialVariant = 'default', ...rest }) {
+  const [variant, setVariant] = useState(initialVariant);
+  return <LayoutGroup>
+    <motion.button layout={true} data-id="formsubmit-root" {...rest} type="submit"
+      variants={rootVariants} initial={['default', initialVariant]} animate={['default', variant]}
+      style={{ position: 'relative', width: '200px', padding: '12px 24px', border: 'none', display: 'flex', ...style }}>
+      <p data-id="formsubmit-label" style={{ color: '#ffffff', position: 'relative' }}>{label}</p>
+    </motion.button>
+  </LayoutGroup>;
+}
+export default withResponsiveProps(FormSubmit);
+`;
+const SUBMIT_PAGE_TSX = `'use client';
+import React, { useState } from 'react';
+import FormSubmit from '@/components/FormSubmit';
+export default function Page() {
+  const [fs, setFs] = useState('idle');
+  return <div data-id="root" style={{ position: 'relative', width: '100%' }}>
+    <form data-id="form-1" style={{ display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      <FormSubmit initialVariant={fs === 'loading' ? 'loading' : 'default'} data-id="button-1" label={"Send"} style={{ width: "100%", order: '0' }} />
+      <FormSubmit initialVariant="loading" data-id="button-2" label={"Go"} style={{ width: "100%", order: '1' }} />
+    </form>
+  </div>;
+}
+`;
+describe('project-parser: default variant entry is baked into the expanded instance root', () => {
+  const fs = () => new InMemoryProjectFS(new Map([
+    ['app/page.tsx', SUBMIT_PAGE_TSX],
+    ['components/FormSubmit.tsx', SUBMIT_TSX],
+  ]));
+  it('a page-state-driven instance paints the default entry (blue), not the native grey', () => {
+    const nodes = parseProjectFile('app/page.tsx', fs());
+    const root = nodes.get('button-1:formsubmit-root')!;
+    expect(root).toBeDefined();
+    expect(root.styles.backgroundColor).toBe('#3b82f6');
+    expect(root.styles.pointerEvents).toBe('auto');
+    // the instance's own style override still wins over the master
+    expect(root.styles.width).toBe('100%');
+    // parent-driven instance: variants stay cleared (no accidental name-match)
+    expect(Object.keys(root.motionVariants ?? {})).toEqual([]);
+  });
+  it('a plain non-default initialVariant bakes default ⊕ chosen (framer animate order)', () => {
+    const nodes = parseProjectFile('app/page.tsx', fs());
+    const root = nodes.get('button-2:formsubmit-root')!;
+    expect(root.styles.backgroundColor).toBe('#3b82f6');
+    expect(root.styles.pointerEvents).toBe('none');
+  });
+});

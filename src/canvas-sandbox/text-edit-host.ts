@@ -44,6 +44,7 @@ import { getScreenCorners } from '@/canvas/resize/geometry-utils';
 import { findElByNodeId, nodeIdSelector } from './sandbox-dom-utils';
 import { measureFitRefit } from '@/shared/fit-measure';
 import { trace } from '@/shared/debug-trace';
+import { flattenPastedRichHtml } from '@/shared/rich-message';
 
 // Properties tracked at the textStyle (per-portion, mark-level) layer.
 const MARK_PROPS = [
@@ -480,6 +481,15 @@ export function startTextEdit(
     parseOptions: { preserveWhitespace: 'full' },
     autofocus: 'all',
     editorProps: {
+      // PASTE: a text node is one paragraph. Block HTML from Google Docs / Word
+      // (<h1>, <p>, lists, 22pt Noto…) is flattened to inline runs + <br> with
+      // only structural marks kept, BEFORE ProseMirror parses it — so the
+      // editor shows what will be committed (Framer behaviour).
+      transformPastedHTML: (html: string) => {
+        const flat = flattenPastedRichHtml(html);
+        if (flat !== html) trace.action('text-edit-host:paste-flattened', { from: html.length, to: flat.length });
+        return flat;
+      },
       // Match the non-edit wrap behavior: don't override word-wrap /
       // overflow-wrap / white-space / word-break. The element's own inline
       // styles (e.g. `overflow-wrap: break-word` from TextCreator) decide

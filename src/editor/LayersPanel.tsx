@@ -6,7 +6,7 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect, useDeferredValue } from 'react';
 import { useAtomValue, useSetAtom, useAtom } from 'jotai';
 import { overlayEditingIdAtom } from '@/code/stores/overlay-store';
-import { nodesAtom, selectedNodeAtom, selectedIdsAtom, isMapTemplateSelectedAtom, layerDropTargetAtom, nodeTreeStructureVersionAtom, getCachedNodesMap } from '@/code/stores/store';
+import { nodesAtom, selectedNodeAtom, selectedIdsAtom, layerDropTargetAtom, nodeTreeStructureVersionAtom, getCachedNodesMap } from '@/code/stores/store';
 import { activeFilePathAtom, isComponentFilePath, isComponentLikeFilePath, isIconSetFilePath, getLayoutForPage, getLayoutClientPath } from '@/code/project/active-file-store';
 import { flushNow } from '@/code/mutation/mutation-queue';
 import { visibleViewportsAtom, interactingViewportIdAtom, viewportsConfigAtom, viewportWidthsAtom } from '@/code/stores/viewport-store';
@@ -81,7 +81,6 @@ export default function LayersPanel() {
   // tool's chip); an overlay's children only show in the tree while its
   // overlay is the one being edited.
   const [editingOverlayId, setOverlayEditingId] = useAtom(overlayEditingIdAtom);
-  const isMapTemplate = useAtomValue(isMapTemplateSelectedAtom);
   const activeFilePath = useAtomValue(activeFilePathAtom);
   const setActiveFile = useSetAtom(activeFilePathAtom);
   const isCompMode = isComponentFilePath(activeFilePath);
@@ -1107,7 +1106,6 @@ export default function LayersPanel() {
               layerFlexDirection={layerFlexDir}
               presetTokens={presetTokens}
               isSelected={layer.id === selectedLayerId || (layer.nodeId != null && selectedIds.includes(layer.nodeId) && layer.viewportId === interactingVpId)}
-              isMapTemplate={isMapTemplate}
               isChildOfSelected={childOfSelectedSet.has(layer.id)}
               hasHighlightedChildren={highlightedChildrenSet.has(layer.id)}
               isLastHighlightedChild={lastHighlightedChildSet.has(layer.id)}

@@ -134,6 +134,9 @@ export interface CanvasNode {
    * never keep another locale's stale paint. Undefined = untranslated node.
    */
   translationKey?: string;
+  /** RICH translation: the node renders `dangerouslySetInnerHTML={{ __html: t.raw(key) }}` and
+   *  its whole content (inline marks included) lives in messages as sanitized HTML. */
+  richTranslation?: boolean;
   /** `data-i18n-orphan="key"` — the translation key stashed when this node was
    *  dragged onto module-scope `canvasNodes` and its `{t('key')}` call was
    *  baked to a literal (`t` doesn't exist there). A first-class field rather
@@ -411,7 +414,7 @@ export interface CanvasNode {
   } | null;
   // CMS Collection support
   collectionList?: {
-    source: string;           // CMS slug ('team') or inline prefix ('__inline:varName')
+    source: string;           // CMS slug ('team')
     itemVar: string;          // .map() parameter name ('item', 'post', etc.)
     templateIds: Record<string, string>;  // layout ID → data-id of template node
     /** Parsed from `slug.filter(item => ...).map(...)` — null when no .filter(). */
@@ -436,7 +439,6 @@ export interface CanvasNode {
   };
   isCollectionTemplate?: boolean;  // true if inside a .map() callback
   // Inline .map() data (const array defined in same file)
-  inlineMapData?: Record<string, string>[];
   // Data binding support (single primary binding — backward compat)
   binding?: {
     field: string;            // collection field ID ('name', 'role', 'photo')
@@ -1756,68 +1758,6 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
     }
   }
 
-  // Detect const array declarations: const faqData = [{ question: '...', answer: '...' }, ...]
-  // These are used to detect inline .map() patterns (not CMS imports)
-  const constArrays = new Map<string, Record<string, string>[]>();
-  for (const stmt of ast.program.body) {
-    // Handle: export default function Page() { const faqData = [...]; ... }
-    // Also handle top-level const: const faqData = [...];
-    const declarations: any[] = [];
-    if (stmt.type === 'VariableDeclaration') {
-      declarations.push(...stmt.declarations);
-    }
-    // Also scan inside the default export function body
-    if (stmt.type === 'ExportDefaultDeclaration' && stmt.declaration) {
-      const decl = stmt.declaration as any;
-      if (decl.type === 'FunctionDeclaration' && decl.body?.body) {
-        for (const bodyStmt of decl.body.body) {
-          if (bodyStmt.type === 'VariableDeclaration') {
-            declarations.push(...bodyStmt.declarations);
-          }
-        }
-      }
-    }
-    // Also scan top-level function declarations (function Page() { ... })
-    if (stmt.type === 'FunctionDeclaration' && stmt.body?.body) {
-      for (const bodyStmt of (stmt as any).body.body) {
-        if (bodyStmt.type === 'VariableDeclaration') {
-          declarations.push(...bodyStmt.declarations);
-        }
-      }
-    }
-
-    for (const declarator of declarations) {
-      if (declarator.type !== 'VariableDeclarator') continue;
-      if (declarator.id?.type !== 'Identifier') continue;
-      if (declarator.init?.type !== 'ArrayExpression') continue;
-
-      const varName = declarator.id.name;
-      const elements = declarator.init.elements;
-      const items: Record<string, string>[] = [];
-      let allObjects = true;
-
-      for (const elem of elements) {
-        if (!elem || elem.type !== 'ObjectExpression') { allObjects = false; break; }
-        const obj: Record<string, string> = {};
-        for (const prop of elem.properties) {
-          if (prop.type !== 'ObjectProperty') continue;
-          const key = prop.key.type === 'Identifier' ? prop.key.name :
-                      prop.key.type === 'StringLiteral' ? prop.key.value : null;
-          if (!key) continue;
-          if (prop.value.type === 'StringLiteral') obj[key] = prop.value.value;
-          else if (prop.value.type === 'NumericLiteral') obj[key] = String(prop.value.value);
-          // Skip non-literal values but still include the object
-        }
-        items.push(obj);
-      }
-
-      if (allObjects && items.length > 0) {
-        constArrays.set(varName, items);
-        trace.action('parser:const-array-detected', { varName, itemCount: items.length, fields: Object.keys(items[0]) });
-      }
-    }
-  }
-
   traverse(ast, {
     JSXElement: {
       enter(path) {
@@ -2017,6 +1957,24 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
         let binding: CanvasNode['binding'] | undefined;
         let textVariable: string | undefined;
         let translationKey: string | undefined;
+        // RICH translation shape: `dangerouslySetInnerHTML={{ __html: <hook>.raw('key') }}`
+        // on a text tag (no children). The key is the message; the value is
+        // sanitized inline HTML — see shared/rich-message.ts.
+        let richTranslation = false;
+        {
+          const dsAttr = (opening.attributes as any[]).find((a: any) => a.type === 'JSXAttribute' && a.name?.name === 'dangerouslySetInnerHTML');
+          const obj = dsAttr?.value?.type === 'JSXExpressionContainer' ? dsAttr.value.expression : null;
+          const prop = obj?.type === 'ObjectExpression' ? obj.properties.find((pr: any) => pr.type === 'ObjectProperty' && ((pr.key.type === 'Identifier' && pr.key.name === '__html') || (pr.key.type === 'StringLiteral' && pr.key.value === '__html'))) : null;
+          const call = prop?.value;
+          if (call?.type === 'CallExpression' && call.callee?.type === 'MemberExpression'
+              && call.callee.property?.type === 'Identifier' && call.callee.property.name === 'raw'
+              && call.callee.object?.type === 'Identifier'
+              && call.arguments?.length === 1 && call.arguments[0]?.type === 'StringLiteral') {
+            translationKey = call.arguments[0].value as string;
+            richTranslation = true;
+            trace.action('parser:rich-translation-key', { nodeId: id, translationKey });
+          }
+        }
         // Per-variant text from a `{variant === 'x' ? 'a' : 'b'}` child.
         let conditionalText: Record<string, string> | null = null;
         let conditionalTextRich: Record<string, true> | null = null;
@@ -2273,9 +2231,12 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
         // Detection is SHARED with the canvasNodes walker; the raw-source slice
         // into textContent below is main-walker-only (preserved difference).
         let hasMixedContent = false;
+        // A rich-translated node has NO children — its marks live in the message.
+        // Flag it mixed so the renderer takes the innerHTML path for the override.
+        if (richTranslation) hasMixedContent = true;
         // A wrapped text-anim node takes this path: its inner is real text (+ <br />), so
         // textContent becomes a genuine string instead of a tag-strip of N spans.
-        if ((!hasTextAnim || splitWrapper) && !isTextOverridesContainer && isAllInlineMixedContent(contentEl)) {
+        if (!richTranslation && (!hasTextAnim || splitWrapper) && !isTextOverridesContainer && isAllInlineMixedContent(contentEl)) {
           hasMixedContent = true;
           // Extract full inner content via Babel's ABSOLUTE node offsets —
           // never a (line, column) walk over code.split('\n'). Babel counts
@@ -2362,6 +2323,7 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
         // into node.textContent once we have the function param defaults.
         if (textVariable) node.textVariable = textVariable;
         if (translationKey) node.translationKey = translationKey;
+        if (richTranslation) node.richTranslation = true;
         if (attrTranslationKeys) node.attrTranslationKeys = attrTranslationKeys;
         if (textOverrides) node.textOverrides = textOverrides;
 
@@ -2556,8 +2518,10 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
         if (!cursor || cursor.type !== 'Identifier') return;
         const sourceVarName = cursor.name;
         const cmsSlug = cmsImports.get(sourceVarName);
-        const inlineItems = constArrays.get(sourceVarName);
-        if (!cmsSlug && !inlineItems) return; // Not a known variable — ignore
+        // Inline (non-CMS) `.map()` repeaters were retired 2026-09-07: only a
+        // CMS import resolves to a collection list. Anything else is ignored by
+        // the parser and rejected by the oracle (CMS_MAP_UNRESOLVED).
+        if (!cmsSlug) return;
 
         // Extract the map callback parameter name
         const args = callNode.arguments;
@@ -2570,9 +2534,9 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
         const itemVar = params[0].name;
 
         // Determine source string
-        const source = cmsSlug ?? `__inline:${sourceVarName}`;
+        const source = cmsSlug;
 
-        trace.action('parser:map-detected', { sourceVar: sourceVarName, source, itemVar, isCms: !!cmsSlug, isInline: !!inlineItems });
+        trace.action('parser:map-detected', { sourceVar: sourceVarName, source, itemVar });
 
         // Push collection context so nested JSXElements get isCollectionTemplate + binding detection
         ctx.collectionContextStack.push({ itemVar, source });
@@ -2618,10 +2582,6 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
                 variantConfigs: responsiveCfg ? responsiveCfg.variants : null,
               };
               // For inline arrays, store the actual data on the parent node
-              if (inlineItems) {
-                parentNode.inlineMapData = inlineItems;
-                trace.action('parser:inline-map-data-set', { parentId: parentDataId, source, itemCount: inlineItems.length });
-              }
               trace.action('parser:collectionList-set', { parentId: parentDataId, source, itemVar, templateIds });
               // Stop ONLY once the REAL container is found. Glide ("Flow") and
               // motion inject TRANSPARENT wrapper JSXElements around a .map() —
@@ -2669,7 +2629,7 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
         }
         if (!cur || cur.type !== 'Identifier') return;
         const sourceVarName = cur.name;
-        if (!cmsImports.has(sourceVarName) && !constArrays.has(sourceVarName)) return;
+        if (!cmsImports.has(sourceVarName)) return;
         ctx.collectionContextStack.pop();
       },
     },
@@ -2944,7 +2904,6 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
       // its ghost rows exactly like one inside a viewport.
       if (existingCanvasNode?.collectionList) {
         node.collectionList = existingCanvasNode.collectionList;
-        if (existingCanvasNode.inlineMapData) node.inlineMapData = existingCanvasNode.inlineMapData;
         node.children = [...existingCanvasNode.children];
         trace.action('parser:canvasNodes-collectionList-preserved', { id, source: existingCanvasNode.collectionList.source, children: node.children });
       }

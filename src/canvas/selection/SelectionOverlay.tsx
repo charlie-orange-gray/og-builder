@@ -4,13 +4,13 @@
 
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useAtomValue, useSetAtom, getDefaultStore } from 'jotai';
-import { selectedNodeAtom, selectedIdsAtom, hoveredIdAtom, hoveredViewportIdAtom, hoveredNodeIdAtom, canvasInteractingAtom, isRotatingAtom, isComponentSelectedAtom, isMapTemplateSelectedAtom, isComponentFileAtom, nodesAtom, mapItemIndexAtom, marqueeViewportSpreadAtom } from '@/code/stores/store';
+import { selectedNodeAtom, selectedIdsAtom, hoveredIdAtom, hoveredViewportIdAtom, hoveredNodeIdAtom, canvasInteractingAtom, isRotatingAtom, isComponentSelectedAtom, isComponentFileAtom, nodesAtom, mapItemIndexAtom, marqueeViewportSpreadAtom } from '@/code/stores/store';
 import { useNodesComputed } from '@/code/stores/node-family';
 import { getNodeFromCache } from '@/code/stores/store';
 import { marqueeSelectionSig } from './SelectionBox';
 import { activeEditorAtom, suppressSelectionOverlayAtom, colorPickerOpenAtom } from '@/code/stores/editor-store';
 import { activeFilePathAtom } from '@/code/project/active-file-store';
-import { SELECTION_COLOR, COMPONENT_COLOR, MAP_TEMPLATE_COLOR, isTextTag, isFitSize } from '@/shared/constants';
+import { SELECTION_COLOR, COMPONENT_COLOR, isTextTag, isFitSize } from '@/shared/constants';
 import { interactingViewportIdAtom, viewportWidthsAtom, syncViewportWidths, viewportsConfigAtom, viewportPositionsAtom } from '@/code/stores/viewport-store';
 import { isDefaultLocaleAtom } from '@/code/stores/locale-store';
 import { applyViewportWidthChange } from '@/code/generation/viewport-width-rewrite';
@@ -113,7 +113,6 @@ export default function SelectionOverlay({ onGripDragStart, onSnapGuidesChange }
   // still keeps its useMemos cheap.
   const nodes = useAtomValue(nodesAtom);
   const isComponent = useAtomValue(isComponentSelectedAtom);
-  const isMapTemplate = useAtomValue(isMapTemplateSelectedAtom);
   const activeFilePath = useAtomValue(activeFilePathAtom);
   // True when the active file is a component master OR a TEMPLATE (LayoutClient).
   // Both are shared content that renders PURPLE (accent-secondary) — the user is
@@ -147,15 +146,14 @@ export default function SelectionOverlay({ onGripDragStart, onSnapGuidesChange }
       (spreadValid && marqueeSpread!.byNode[id]?.length ? marqueeSpread!.byNode[id]! : [vpId]);
     return topLevelIds.flatMap(id => vpsFor(id).map(v => ({ id, vpId: v })));
   }, [selectedIds, nodes, marqueeSpread, vpId]);
-  // CMS-collection-template counterpart of `isMapTemplate`. Same shape
-  // (selected node lives inside a `.map()` callback) — different source.
-  // Drives the ghost-outline + arrow-connector overlay below.
+  // True when the selected node lives inside a CMS collection list's
+  // `.map()` callback. Drives the ghost-outline + arrow-connector overlay below.
   const isCmsCollectionTemplate = useMemo(() => {
     if (!selectedId) return false;
     let current = nodes.get(selectedId);
     while (current) {
       const parent = current.parentId ? nodes.get(current.parentId) : null;
-      if (parent?.collectionList && !parent.collectionList.source.startsWith('__inline:')) return true;
+      if (parent?.collectionList) return true;
       current = parent ?? undefined;
     }
     return false;
@@ -172,15 +170,12 @@ export default function SelectionOverlay({ onGripDragStart, onSnapGuidesChange }
   const allViewportConfigs = useAtomValue(viewportsConfigAtom);
   // Master files: ALWAYS purple regardless of what's selected — the
   // user is editing shared component content, the colour-coding is the
-  // safety cue. Map templates stay green (they're a different kind of
-  // shared content). Pages: blue unless the selection is itself a
+  // safety cue. Pages: blue unless the selection is itself a
   // component instance, in which case purple (already handled by
   // `isComponent`).
-  const selectionColor = isMapTemplate
-    ? MAP_TEMPLATE_COLOR
-    : (isComponent || isInComponentMaster)
-      ? COMPONENT_COLOR
-      : SELECTION_COLOR;
+  const selectionColor = (isComponent || isInComponentMaster)
+    ? COMPONENT_COLOR
+    : SELECTION_COLOR;
   const activeGradient = useAtomValue(activeGradientAtom);
   const selectedGradientStop = useAtomValue(selectedGradientStopAtom);
   const gradientCallback = useAtomValue(gradientUpdateCallbackAtom);
@@ -990,15 +985,13 @@ export default function SelectionOverlay({ onGripDragStart, onSnapGuidesChange }
       )}
 
       {/* Collection ghost outlines + arrow connectors — shows when the
-          selected node is inside ANY `.map()` (inline array OR CMS slug).
-          Color tracks the selection: orange for inline maps (matches the
-          map template selection treatment), blue for CMS (matches the
-          CMS pill / accent). */}
-      {selectedId && (isMapTemplate || isCmsCollectionTemplate) && (
+          selected node is inside a CMS collection list's `.map()`. Blue
+          matches the CMS pill / accent. */}
+      {selectedId && isCmsCollectionTemplate && (
         <MapGhostOverlay
           nodeId={selectedId}
           vpId={vpId}
-          color={isMapTemplate ? MAP_TEMPLATE_COLOR : SELECTION_COLOR}
+          color={SELECTION_COLOR}
         />
       )}
 
@@ -1018,10 +1011,7 @@ function MapGhostOverlay({ nodeId, vpId, color }: { nodeId: string; vpId: string
   const [ghostCorners, setGhostCorners] = useState<ScreenCorners[]>([]);
 
   // Find the template root: walk up to find the node whose parent has
-  // ANY collectionList. The same overlay serves both inline `.map()`
-  // arrays and CMS-backed collections — the only difference is the
-  // colour passed in by the caller, which is also why we don't filter
-  // by `source.startsWith('__inline:')` here anymore.
+  // a collectionList (CMS-backed collection).
   // Per-computation subscription — the walk re-runs per commit but this
   // small overlay only re-renders when the template-root RESULT changes.
   const templateRootId = useNodesComputed((nodes) => {

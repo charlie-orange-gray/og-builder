@@ -24,7 +24,6 @@ export const DOUBLE_CLICK_THRESHOLD = 400; // ms
 
 // ─── Visual Helpers ────────────────────────────────────────────────────────
  // pink — distinct snap-guide helper
-export const MAP_TEMPLATE_COLOR = '#f97316';  // orange — inline .map() template selection
 
 // ── Token-driven canvas overlay colors ─────────────────────────────────────
 // These tint the selection box, resize handles, borders, hover outline, drop

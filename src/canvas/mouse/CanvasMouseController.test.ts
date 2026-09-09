@@ -371,3 +371,32 @@ describe('CanvasMouseController — multi-select descendants', () => {
     expect(store.get(selectedIdsAtom)).toEqual(['tileA', 'tileB']);
   });
 });
+
+
+// ─── FIT text double-click (bug-hunt #12 side-find, 2026-09-07) ─────────────
+// A FIT wrapper is an <svg> around <foreignObject> → <p>. Double-clicking it
+// used to enter SHAPE edit on the wrapper (no geometry → crash). It must open
+// text edit on the inner <p> instead.
+describe('CanvasMouseController — FIT text double-click', () => {
+  test('enters text edit on the inner text, never shape edit', () => {
+    const { controller, store, opts } = makeController();
+    vi.mocked(redirectLayoutNodeToViewport).mockReturnValue(null);
+    vi.mocked(redirectToComponentInstance).mockReturnValue(null as any);
+    vi.mocked(redirectToFitTextWrapper).mockImplementation((id: string) => (id === 'fit-p' ? 'fit-svg' : null));
+    store.set(nodesAtom, new Map([
+      ['root', { id: 'root', parentId: null, type: 'div', children: ['fit-svg'], styles: {}, name: 'Root', isCanvasNode: false }],
+      ['fit-svg', { id: 'fit-svg', parentId: 'root', type: 'svg', children: ['fit-fo'], styles: { position: 'absolute' }, name: 'FIT', attrs: { 'data-name': 'FIT' } }],
+      ['fit-fo', { id: 'fit-fo', parentId: 'fit-svg', type: 'foreignObject', children: ['fit-p'], styles: {}, name: 'fo' }],
+      ['fit-p', { id: 'fit-p', parentId: 'fit-fo', type: 'p', children: [], styles: {}, name: 'Text', textContent: 'hello' }],
+    ]) as any);
+    // Second click of a double-click: the controller compares against the
+    // remembered first click (same node, same vp, 50ms < dt < threshold, same spot).
+    (controller as any).lastClick = { nodeId: 'fit-p', vpId: 'desktop', time: Date.now() - 120, x: 10, y: 10 };
+    const ev2 = makeMouseEvent({ button: 0, clientX: 10, clientY: 10 } as any);
+    controller.handleNodeMouseDown('fit-p', ev2, 'desktop');
+    expect(store.get(shapeEditingIdAtom)).toBeNull();
+    expect(opts.setShapeEditingId).not.toHaveBeenCalledWith('fit-svg');
+    expect(opts.startTextEdit).toHaveBeenCalled();
+    expect((opts.startTextEdit as any).mock.calls[0][0]).toBe('fit-p');
+  });
+});

@@ -21,7 +21,8 @@
 //     row-gap drop (avoids ambiguity at row-end cells).
 //   • Empty grid → no line, return index 0.
 
-import { findVisibleChildRects, findNodeRect } from '@/canvas/node-ops';
+import { findNodeRect, findVisibleChildRects } from '@/canvas/node-ops';
+import { getLayoutLocalFrame, findVisibleChildLocalRects, type LayoutLocalFrame } from './layout-local-frame';
 
 /** Grid-cell info bundled per visible child for the drop-target picker. */
 interface GridChild {
@@ -41,9 +42,10 @@ interface GridRow {
 
 /** Inter-cell gap descriptor — fed straight into the drop-line indicator
  *  so it renders right in the gap (no need to re-derive from cell rects). */
-interface GridDropLine {
+export interface GridDropLine {
   axis: 'vertical' | 'horizontal';
-  /** Screen-space x (axis='vertical') or y (axis='horizontal'). */
+  /** Parent-LOCAL x (axis='vertical') or y (axis='horizontal') — equal to
+   *  screen space for an axis-aligned parent. */
   position: number;
   /** Screen-space y-start (vertical) / x-start (horizontal). */
   start: number;
@@ -103,17 +105,27 @@ function groupIntoRows(children: GridChild[]): GridRow[] {
 
 /** Compute the drop position + indicator line for a grid parent.
  *
- *  `mouseScreen` is in screen pixels (same space as `findNodeRect`).
+ *  `mouseInput` is in screen pixels (same space as `findNodeRect`).
  *  `excludeIds` removes children that shouldn't count as drop targets —
  *  typically the dragged element itself + any descendants. */
 export function calculateGridDrop(
-  mouseScreen: { x: number; y: number },
+  mouseInput: { x: number; y: number },
   parentId: string,
   vpId: string,
   excludeIds: Set<string> = new Set(),
+  frameOverride?: LayoutLocalFrame | null,
 ): GridDropResult {
-  const parentRect = findNodeRect(parentId, vpId);
-  const visibleRects = findVisibleChildRects(parentId, vpId);
+  // Rotated parent: everything below runs in the parent's LOCAL frame
+  // (see layout-local-frame.ts) — the returned `line` is local too, and
+  // the DropLineIndicator maps it back through the same frame. Identity
+  // frame for an axis-aligned parent keeps screen-space semantics.
+  const screenParentRect = findNodeRect(parentId, vpId);
+  const frame = frameOverride === undefined ? getLayoutLocalFrame(parentId, vpId, screenParentRect) : frameOverride;
+  const parentRect = frame ? frame.parentRect : screenParentRect;
+  const mouseScreen = frame ? frame.toLocal(mouseInput) : mouseInput;
+  const visibleRects = frame
+    ? findVisibleChildLocalRects(parentId, vpId, frame)
+    : findVisibleChildRects(parentId, vpId);
   // Children carry their source-order index for the insertIndex return.
   // We filter AFTER assigning sourceIndex so excluded items don't shift
   // the remaining ones' indices.

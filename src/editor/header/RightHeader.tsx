@@ -186,6 +186,18 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
       // live site doesn't have it" report).
       const { flushNow } = await import('@/code/mutation/mutation-queue');
       flushNow();
+      // Tier-3 pre-flight: the backend ships the source verbatim (no oracle at
+      // publish), so a file that parses but crashes React — a string style
+      // attribute, an undeclared identifier — used to reach production as a
+      // white page (bug-hunt 22). Refuse here, with file + line.
+      const { runPublishPreflight, formatPreflightIssues } = await import('@/code/oracle/publish-preflight');
+      const preflight = runPublishPreflight();
+      if (preflight.length > 0) {
+        trace.error('header:publish-preflight-blocked', { issues: preflight });
+        setProgress(0);
+        setPublishError({ message: formatPreflightIssues(preflight), upgradable: false });
+        return;
+      }
       const { flushSaveNow } = await import('@/backend/autosave');
       await flushSaveNow();
       const res = await fetch(`/api/websites/${id}/publish`, { method: 'POST' });

@@ -1,5 +1,7 @@
-// map-gen.ts — Code generation for inline .map() repeater system.
-// "Make into Map" converts a single element into a .map() with data array.
+// map-gen.ts — Code generation for CMS collection lists (`.map()` over an
+// imported `@/cms/<slug>.json` collection): bind/unbind an element to a
+// collection, change the source, bind component-instance props to row fields,
+// CMS-nav links, and the enclosing-map lookups shared with the detach path.
 
 import { trace } from '@/shared/debug-trace';
 import { findJSXDataIdIndex, findJSXDataIdIndexFrom } from './generator-utils';
@@ -8,151 +10,6 @@ import { findTagClose, findMatchingCloseTagIndex } from './generator-utils';
 import { findMatchingParen } from '../parsing/parse-utils';
 import { COLLECTION_MAP_CALL_RE, extractCollectionSlugSpan, itemVarFromCallbackParam } from './cms-gen';
 import { parseJSXToNodes } from '../parsing/parser';
-
-/**
- * Convert an element into an inline .map() repeater.
- *
- * Given an element like:
- *   <div data-id="card-1" style={{padding: '24px'}}>
- *     <h3 data-id="card-title">Hello World</h3>
- *     <p data-id="card-desc">Some description</p>
- *   </div>
- *
- * Produces:
- *   const card1Data = [
- *     { title: 'Hello World', desc: 'Some description' },
- *   ];
- *   ...
- *   {card1Data.map((item, idx) => (
- *     <div data-id={`card-${idx}`} key={idx} style={{padding: '24px'}}>
- *       <h3 data-id={`card-title-${idx}`}>{item.title}</h3>
- *       <p data-id={`card-desc-${idx}`}>{item.desc}</p>
- *     </div>
- *   ))}
- */
-export function makeIntoMapInCode(
-  code: string,
-  nodeId: string,
-  varName?: string,
-): string {
-  trace.fn('map-gen:makeIntoMap', { nodeId, varName });
-
-  // Find the element in JSX
-  const idIndex = findJSXDataIdIndex(code, nodeId);
-  if (idIndex === -1) {
-    trace.error('map-gen:makeIntoMap', { message: 'Element not found', nodeId });
-    return code;
-  }
-
-  // Find the opening < before the data-id
-  const openStart = code.lastIndexOf('<', idIndex);
-  if (openStart === -1) {
-    trace.error('map-gen:makeIntoMap', { message: 'Opening tag not found', nodeId });
-    return code;
-  }
-
-  // Extract tag name
-  const tagMatch = code.slice(openStart + 1, idIndex).match(/^(\S+)/);
-  if (!tagMatch) {
-    trace.error('map-gen:makeIntoMap', { message: 'Tag name not found', nodeId });
-    return code;
-  }
-  const tagName = tagMatch[1];
-
-  // Find the full element (opening tag to closing tag)
-  const elementJSX = extractFullElement(code, openStart, tagName);
-  if (!elementJSX) {
-    trace.error('map-gen:makeIntoMap', { message: 'Could not extract full element', nodeId, tagName });
-    return code;
-  }
-
-  const { jsx: originalJSX, endIndex } = elementJSX;
-
-  // Parse the element to extract text content for data fields
-  const nodes = parseJSXToNodes(`export default function X() { return ${originalJSX}; }`);
-  const rootNode = nodes.get(nodeId);
-  if (!rootNode) {
-    trace.error('map-gen:makeIntoMap', { message: 'Root node not found in parsed JSX', nodeId });
-    return code;
-  }
-
-  // Generate variable name from data-id, ensuring no collision with existing const names
-  const safeVarName = varName || generateUniqueVarName(nodeId, code);
-
-  // Extract bindable text fields from children
-  const dataItem: Record<string, string> = {};
-  const bindings: { childId: string; field: string; text: string }[] = [];
-
-  for (const childId of rootNode.children) {
-    const child = nodes.get(childId);
-    if (!child) continue;
-    if (child.textContent && !child.textContent.includes('<')) {
-      // Simple text content — make it a data field
-      const fieldName = generateFieldName(childId, nodeId);
-      dataItem[fieldName] = child.textContent.trim();
-      bindings.push({ childId, field: fieldName, text: child.textContent.trim() });
-    }
-  }
-
-  // If no bindable children found, create a minimal data item
-  if (Object.keys(dataItem).length === 0) {
-    dataItem['label'] = nodeId;
-  }
-
-  // Build the template JSX with bindings
-  let templateJSX = originalJSX;
-
-  // Keep the STATIC data-id on the template root — parser needs it to find the template.
-  // Add key={idx} for React reconciliation.
-  templateJSX = templateJSX.replace(
-    `data-id="${nodeId}"`,
-    `data-id="${nodeId}" key={idx}`,
-  );
-
-  // Bind text content: replace static text with {item.field} expressions
-  for (const { childId, field, text } of bindings) {
-    // Replace static text with binding expression
-    // Text in JSX may have surrounding whitespace/newlines — use regex to match
-    const escapedText = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const textRegex = new RegExp(`>\\s*${escapedText}\\s*<`);
-    templateJSX = templateJSX.replace(textRegex, `>{item.${field}}<`);
-  }
-
-  // Build the const declaration
-  const dataDecl = `const ${safeVarName} = [\n    ${JSON.stringify(dataItem)},\n  ];\n`;
-
-  // Build the .map() expression
-  const mapExpr = `{${safeVarName}.map((item, idx) => (\n      ${templateJSX}\n    ))}`;
-
-  // Find the return statement to insert the const before it
-  const returnIdx = code.lastIndexOf('return', openStart);
-  if (returnIdx === -1) {
-    trace.error('map-gen:makeIntoMap', { message: 'Return statement not found', nodeId });
-    return code;
-  }
-
-  // Insert const declaration before return, replace element with .map()
-  let result = code;
-
-  // First: replace the original element with the .map() expression
-  result = result.slice(0, openStart) + mapExpr + result.slice(endIndex);
-
-  // Then: insert the data array const before the return statement
-  // (need to recalculate returnIdx since we changed the code)
-  const newReturnIdx = result.lastIndexOf('return', result.indexOf(mapExpr));
-  if (newReturnIdx !== -1) {
-    const indent = '  ';
-    result = result.slice(0, newReturnIdx) + indent + dataDecl + '\n  ' + result.slice(newReturnIdx);
-  }
-
-  trace.action('map-gen:makeIntoMap:done', {
-    nodeId, varName: safeVarName,
-    fields: Object.keys(dataItem),
-    bindingCount: bindings.length,
-  });
-
-  return result;
-}
 
 /**
  * Wrap a single element in a `.map()` bound to a CMS collection (in
@@ -479,260 +336,6 @@ function findInsertionPointForImport(code: string): number {
 }
 
 /**
- * Add an item to an existing inline .map() data array.
- */
-export function addMapItemInCode(
-  code: string,
-  varName: string,
-  newItem: Record<string, string>,
-): string {
-  trace.fn('map-gen:addMapItem', { varName });
-
-  const decl = findArrayDecl(code, varName);
-  if (!decl) {
-    trace.error('map-gen:addMapItem', { message: 'Array declaration not found', varName });
-    return code;
-  }
-
-  // Ensure trailing comma after last existing item before inserting
-  const beforeClose = decl.arrayContent.trimEnd();
-  let result = code;
-  if (beforeClose.length > 0 && !beforeClose.endsWith(',')) {
-    // Find the last non-whitespace char before ];
-    const lastNonWs = code.slice(0, decl.closingBracket).search(/\S\s*$/);
-    if (lastNonWs >= 0) {
-      const insertCommaAt = lastNonWs + 1;
-      result = code.slice(0, insertCommaAt) + ',' + code.slice(insertCommaAt);
-    }
-  }
-
-  // Re-find closing bracket (may have shifted by 1 if comma was inserted)
-  const freshDecl = findArrayDecl(result, varName);
-  if (!freshDecl) return result;
-
-  // Insert new item before the closing bracket
-  const itemStr = `\n    ${JSON.stringify(newItem)},`;
-  const out = result.slice(0, freshDecl.closingBracket) + itemStr + result.slice(freshDecl.closingBracket);
-  trace.action('map-gen:addMapItem:done', { varName, fields: Object.keys(newItem) });
-  return out;
-}
-
-/**
- * Remove an item from an existing inline .map() data array by index.
- */
-export function removeMapItemInCode(
-  code: string,
-  varName: string,
-  itemIndex: number,
-): string {
-  trace.fn('map-gen:removeMapItem', { varName, itemIndex });
-
-  const decl = findArrayDecl(code, varName);
-  if (!decl) {
-    trace.error('map-gen:removeMapItem', { message: 'Array declaration not found', varName });
-    return code;
-  }
-
-  const items = parseArrayItemRanges(decl.arrayContent);
-
-  if (itemIndex < 0 || itemIndex >= items.length) {
-    trace.error('map-gen:removeMapItem', { message: 'Index out of bounds', itemIndex, itemCount: items.length });
-    return code;
-  }
-
-  // Remove the item (including trailing comma and whitespace)
-  const item = items[itemIndex];
-  let removeEnd = item.end;
-  // Skip trailing comma and whitespace
-  while (removeEnd < decl.arrayContent.length && (decl.arrayContent[removeEnd] === ',' || decl.arrayContent[removeEnd] === ' ' || decl.arrayContent[removeEnd] === '\n')) {
-    removeEnd++;
-  }
-
-  const newArrayContent = decl.arrayContent.slice(0, item.start) + decl.arrayContent.slice(removeEnd);
-  const out = code.slice(0, decl.arrayStart) + newArrayContent + code.slice(decl.closingBracket);
-  trace.action('map-gen:removeMapItem:done', { varName, itemIndex, remainingCount: items.length - 1 });
-  return out;
-}
-
-/**
- * Update a single item in an existing inline .map() data array by index.
- * Replaces the entire item object at the given index.
- */
-export function updateMapItemInCode(
-  code: string,
-  varName: string,
-  itemIndex: number,
-  updatedItem: Record<string, string>,
-): string {
-  trace.fn('map-gen:updateMapItem', { varName, itemIndex, fields: Object.keys(updatedItem) });
-
-  const decl = findArrayDecl(code, varName);
-  if (!decl) {
-    trace.error('map-gen:updateMapItem', { message: 'Array declaration not found', varName });
-    return code;
-  }
-
-  const items = parseArrayItemRanges(decl.arrayContent);
-
-  if (itemIndex < 0 || itemIndex >= items.length) {
-    trace.error('map-gen:updateMapItem', { message: 'Index out of bounds', itemIndex, itemCount: items.length });
-    return code;
-  }
-
-  const item = items[itemIndex];
-  const newItemStr = JSON.stringify(updatedItem);
-  const newArrayContent = decl.arrayContent.slice(0, item.start) + newItemStr + decl.arrayContent.slice(item.end);
-  const out = code.slice(0, decl.arrayStart) + newArrayContent + code.slice(decl.closingBracket);
-  trace.action('map-gen:updateMapItem:done', { varName, itemIndex });
-  return out;
-}
-
-/**
- * Add a new field to ALL items in an existing inline .map() data array.
- * Each item gets the field with a default empty string value.
- */
-export function addMapFieldInCode(
-  code: string,
-  varName: string,
-  fieldName: string,
-  defaultValue: string = '',
-): string {
-  trace.fn('map-gen:addMapField', { varName, fieldName, defaultValue });
-
-  const decl = findArrayDecl(code, varName);
-  if (!decl) {
-    trace.error('map-gen:addMapField', { message: 'Array declaration not found', varName });
-    return code;
-  }
-
-  const items = parseArrayItemRanges(decl.arrayContent);
-
-  if (items.length === 0) {
-    trace.error('map-gen:addMapField', { message: 'No items found in array', varName });
-    return code;
-  }
-
-  // Process items in reverse order to preserve indices
-  let newArrayContent = decl.arrayContent;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    const itemStr = newArrayContent.slice(item.start, item.end);
-    try {
-      const parsed = JSON.parse(itemStr);
-      parsed[fieldName] = defaultValue;
-      const newItemStr = JSON.stringify(parsed);
-      newArrayContent = newArrayContent.slice(0, item.start) + newItemStr + newArrayContent.slice(item.end);
-    } catch {
-      // If parse fails, skip this item
-      trace.error('map-gen:addMapField', { message: 'Failed to parse item', index: i });
-    }
-  }
-
-  const out = code.slice(0, decl.arrayStart) + newArrayContent + code.slice(decl.closingBracket);
-  trace.action('map-gen:addMapField:done', { varName, fieldName, itemCount: items.length });
-  return out;
-}
-
-/**
- * Bind a style property to the map data: converts an inline style value to item.fieldName
- * in the template JSX, and adds the field (with the current value) to all items in the data array.
- *
- * e.g. backgroundColor: '#80aa53' → backgroundColor: item.bgColor
- *      + adds bgColor: '#80aa53' to all data items
- */
-export function bindStyleToMapInCode(
-  code: string,
-  nodeId: string,
-  varName: string,
-  styleProp: string,
-  fieldName: string,
-  currentValue: string,
-): string {
-  trace.fn('map-gen:bindStyle', { nodeId, varName, styleProp, fieldName, currentValue });
-
-  // Callers pass the SLUG; the array is imported under its camel-cased name.
-  const arrayVar = resolveCollectionVar(code, varName);
-  // Detect the iterator variable name from the .map() callback
-  const iterVar = detectIteratorVar(code, arrayVar);
-
-  // Find the .map() call range so we only modify the template INSIDE it (not duplicates outside)
-  const mapCallIdx = code.indexOf(`${arrayVar}.map(`);
-  const searchStart = mapCallIdx >= 0 ? mapCallIdx : 0;
-
-  // Find data-id INSIDE the .map() body. findJSXDataIdIndex, never a raw
-  // indexOf: the page's <style> block carries `[data-id="…"]::after` selectors
-  // that PRECEDE the JSX, so any search that starts before the map body would
-  // land in CSS and splice the binding into a selector.
-  const idIdx = findJSXDataIdIndexFrom(code, nodeId, searchStart);
-  if (idIdx === -1) {
-    trace.error('map-gen:bindStyle', { message: 'Node not found in .map() body', nodeId });
-    return code;
-  }
-
-  // Find the style={{ ... }} block for this element
-  const styleStart = code.indexOf('style={{', idIdx);
-  if (styleStart === -1 || styleStart > idIdx + 2000) {
-    trace.error('map-gen:bindStyle', { message: 'Style block not found near node', nodeId });
-    return code;
-  }
-
-  // Find the matching }}
-  let braceDepth = 0;
-  let styleEnd = styleStart + 7;
-  for (; styleEnd < code.length; styleEnd++) {
-    if (code[styleEnd] === '{') braceDepth++;
-    else if (code[styleEnd] === '}') {
-      if (braceDepth === 0) break;
-      braceDepth--;
-    }
-  }
-  const styleBlock = code.slice(styleStart, styleEnd + 2);
-
-  // Find and replace the property value in the style block
-  const propPatterns = [
-    new RegExp(`(${styleProp}\\s*:\\s*)(['"])([^'"]*?)\\2`),
-    new RegExp(`(${styleProp}\\s*:\\s*)(\\d[\\d.]*)`),
-    new RegExp(`(${styleProp}\\s*:\\s*)([a-zA-Z_][a-zA-Z0-9_.]*)`),
-  ];
-
-  let newStyleBlock = styleBlock;
-  let replaced = false;
-  for (const pattern of propPatterns) {
-    if (pattern.test(newStyleBlock)) {
-      newStyleBlock = newStyleBlock.replace(pattern, `$1${iterVar}.${fieldName}`);
-      replaced = true;
-      break;
-    }
-  }
-
-  if (!replaced) {
-    // Property doesn't exist in the style block yet — add it with the binding.
-    // styleBlock = "style={{ ... }}" — insert before the inner } of the closing }}.
-    // styleEnd points at the OUTER } (where braceDepth first hits 0 in the scan loop).
-    // The inner } is one position before that.
-    const innerBracePos = styleEnd - styleStart - 1;
-    if (innerBracePos <= 0) {
-      trace.error('map-gen:bindStyle', { message: 'Style block closing not found', nodeId, styleProp });
-      return code;
-    }
-    // Check if we need a comma after the last property
-    const beforeClose = styleBlock.slice(0, innerBracePos).trimEnd();
-    const needsComma = beforeClose.length > 0 && !beforeClose.endsWith(',') && !beforeClose.endsWith('{');
-    const comma = needsComma ? ',' : '';
-    newStyleBlock = styleBlock.slice(0, innerBracePos) + `${comma} ${styleProp}: ${iterVar}.${fieldName}` + styleBlock.slice(innerBracePos);
-    trace.action('map-gen:bindStyle:added-new-prop', { nodeId, styleProp, fieldName });
-  }
-
-  let result = code.slice(0, styleStart) + newStyleBlock + code.slice(styleStart + styleBlock.length);
-
-  // Step 2: Add the field to all items in the data array
-  result = addMapFieldInCode(result, arrayVar, fieldName, currentValue);
-
-  trace.action('map-gen:bindStyle:done', { nodeId, styleProp, fieldName, currentValue, iterVar });
-  return result;
-}
-
-/**
  * Unbind a style property from map data: converts item.fieldName back to an inline value
  * and removes the field from all items in the data array.
  */
@@ -771,6 +374,8 @@ export function unbindStyleFromMapInCode(
  */
 export function unbindPropFromMapInCode(code: string, nodeId: string, propName: string): string {
   trace.fn('map-gen:unbindProp', { nodeId, propName });
+  // findJSXDataIdIndex lands on the JSX tag, never on a `[data-id="…"]` CSS
+  // selector inside a <style> block that happens to precede the element.
   const idIdx = findJSXDataIdIndex(code, nodeId);
   if (idIdx === -1) {
     trace.error('map-gen:unbindProp', { message: 'Node not found', nodeId });
@@ -783,8 +388,9 @@ export function unbindPropFromMapInCode(code: string, nodeId: string, propName: 
   // template-shaped pattern (backtick-delimited, no nested backticks) FIRST.
   const regionStart = Math.max(0, idIdx - 200);
   const region = code.slice(regionStart, idIdx + 2000);
-  const m = new RegExp(`\\s${propName}=\\{\`[^\`]*\`\\}`).exec(region)
-    ?? new RegExp(`\\s${propName}=\\{[^{}]*\\}`).exec(region);
+  const safe = escapeRegExp(propName);
+  const m = new RegExp(`\\s${safe}=\\{\`[^\`]*\`\\}`).exec(region)
+    ?? new RegExp(`\\s${safe}=\\{[^{}]*\\}`).exec(region);
   if (!m) return code;
   const absIdx = regionStart + m.index;
   const result = code.slice(0, absIdx) + code.slice(absIdx + m[0].length);
@@ -793,12 +399,15 @@ export function unbindPropFromMapInCode(code: string, nodeId: string, propName: 
 }
 
 /**
- * Bind a component prop to map data: converts a static prop to item.fieldName.
- * e.g. glowColor="#df2b2b" → glowColor={item.glowColor}
- *      + adds glowColor: '#df2b2b' to all data items
+ * Bind a component-instance prop (inside a CMS collection list) to a row field:
+ * e.g. glowColor="#df2b2b" → glowColor={item.glowColor}. When the prop is not on
+ * the instance yet (a freshly dropped component uses the master default), the
+ * binding attribute is INSERTED right after `data-id`.
+ * `varName` is the collection slug (trace only — the iterator is resolved from
+ * the `.map()` that actually ENCLOSES the node, so a camel-cased import of a
+ * hyphenated slug and a custom iterator name both work).
  * `urlWrap` = whole-value IMAGE prop (master binds it bare, values carry the
- * url() wrap): the binding becomes `propName={`url(${item.field})`}` and the
- * seeded data value is UNWRAPPED to a plain URL (the CMS field convention).
+ * url() wrap): the binding becomes `propName={`url(${item.field})`}`.
  */
 export function bindPropToMapInCode(
   code: string,
@@ -811,40 +420,32 @@ export function bindPropToMapInCode(
 ): string {
   trace.fn('map-gen:bindProp', { nodeId, varName, propName, fieldName, currentValue, urlWrap });
 
-  // Callers pass the SLUG (`collection-1`); the array is imported under its
-  // camel-cased name (`collection1`), so match on the resolved identifier.
-  const arrayVar = resolveCollectionVar(code, varName);
-  // Detect the iterator variable name from the .map() callback: arrayVar.map((iterVar, idx) => ...)
-  const iterVar = detectIteratorVar(code, arrayVar);
-
-  // Find the .map() call range so we only modify the template INSIDE it
-  const mapCallIdx = code.indexOf(`${arrayVar}.map(`);
-  const searchStart = mapCallIdx >= 0 ? mapCallIdx : 0;
-
-  // findJSXDataIdIndex, never a raw indexOf — see bindStyleToMapInCode.
-  const idIdx = findJSXDataIdIndexFrom(code, nodeId, searchStart);
+  const idPattern = `data-id="${nodeId}"`;
+  const idIdx = findJSXDataIdIndex(code, nodeId);
   if (idIdx === -1) {
-    trace.error('map-gen:bindProp', { message: 'Node not found in .map() body', nodeId });
+    trace.error('map-gen:bindProp', { message: 'Node not found', nodeId });
     return code;
   }
-  const idPattern = `data-id="${nodeId}"`;
+  const iterVar = getEnclosingMapIteratorForNode(code, nodeId) ?? 'item';
 
   // Search near the data-id for the prop — within the opening tag.
   // `\b` before the prop name is CRITICAL: a shorter prop must NOT match inside a
   // longer sibling. e.g. binding `ergerg` would otherwise rewrite `ergergerg={…}`
   // (the tail "ergerg=" sits inside "ergergerg=" with no word boundary) — the
   // user-reported bug where setting the color var overrode the image var above it.
-  const searchRegion = code.slice(Math.max(0, idIdx - 200), idIdx + 2000);
+  const regionStart = Math.max(0, idIdx - 200);
+  const searchRegion = code.slice(regionStart, idIdx + 2000);
+  const safe = escapeRegExp(propName);
   const patterns = [
-    new RegExp(`\\b(${propName}=)"([^"]*?)"`),       // propName="value"
-    new RegExp(`\\b(${propName}=)\\{'([^']*?)'\\}`),  // propName={'value'}
-    new RegExp(`\\b(${propName}=)\\{(\\d[\\d.]*)\\}`), // propName={123}
+    new RegExp(`\\b(${safe}=)"([^"]*?)"`),       // propName="value"
+    new RegExp(`\\b(${safe}=)\\{'([^']*?)'\\}`),  // propName={'value'}
+    new RegExp(`\\b(${safe}=)\\{(\\d[\\d.]*)\\}`), // propName={123}
     // propName={`…`} — a template-literal value (an existing whole-value image
     // binding being REBOUND to another field). Must run BEFORE the generic
     // pattern: `[^}]+` stops at the template's nested `${…}` close brace and
     // would splice mid-expression, leaving a dangling ``)`}`` → corrupt JSX.
-    new RegExp(`\\b(${propName}=)\\{\`[^\`]*\`\\}`),
-    new RegExp(`\\b(${propName}=)\\{([^}]+)\\}`),      // propName={expr} (generic)
+    new RegExp(`\\b(${safe}=)\\{\`[^\`]*\`\\}`),
+    new RegExp(`\\b(${safe}=)\\{([^}]+)\\}`),      // propName={expr} (generic)
   ];
 
   // Whole-value image binding wraps the plain-URL field at the binding site.
@@ -852,102 +453,24 @@ export function bindPropToMapInCode(
     ? `${propName}={\`url(\${${iterVar}.${fieldName}})\`}`
     : `${propName}={${iterVar}.${fieldName}}`;
 
-  let replaced = false;
   let result = code;
-  const regionStart = Math.max(0, idIdx - 200);
-
   for (const pattern of patterns) {
     const match = pattern.exec(searchRegion);
     if (match) {
-      const fullMatch = match[0];
       const absIdx = regionStart + match.index;
-      result = result.slice(0, absIdx) + bindingExpr + result.slice(absIdx + fullMatch.length);
-      replaced = true;
-      break;
+      result = result.slice(0, absIdx) + bindingExpr + result.slice(absIdx + match[0].length);
+      trace.action('map-gen:bindProp:done', { nodeId, propName, fieldName, iterVar, urlWrap });
+      return result;
     }
   }
 
-  if (!replaced) {
-    // The prop isn't on the instance yet — a freshly dropped component uses the
-    // component's DEFAULT value, so there's no `propName=` attribute to rewrite.
-    // Binding must ADD it: insert `propName={iterVar.field}` right after this
-    // instance's `data-id` so it lands inside the correct opening tag (works for
-    // self-closing `<Comp … />` and `<Comp …>…</Comp>` alike). Without this the
-    // bind was a silent no-op for components dropped into a collection-list item.
-    const insertAt = idIdx + idPattern.length;
-    result = result.slice(0, insertAt) + ` ${bindingExpr}` + result.slice(insertAt);
-    trace.action('map-gen:bindProp:inserted', { nodeId, propName, fieldName, iterVar, urlWrap });
-  }
-
-  // Add the field to all data items (inline arrays only; CMS-sourced lists already
-  // have the field in their schema, so addMapFieldInCode no-ops there). Image
-  // fields hold PLAIN urls — unwrap a url(...)-wrapped current value before seeding.
-  const seedValue = urlWrap ? currentValue.replace(/^url\((['"]?)(.*?)\1\)$/i, '$2') : currentValue;
-  result = addMapFieldInCode(result, arrayVar, fieldName, seedValue);
-
-  trace.action('map-gen:bindProp:done', { nodeId, propName, fieldName, currentValue, iterVar });
+  // The prop isn't on the instance yet — insert `propName={iterVar.field}` right
+  // after this instance's `data-id` so it lands inside the correct opening tag
+  // (works for self-closing `<Comp … />` and `<Comp …>…</Comp>` alike).
+  const insertAt = idIdx + idPattern.length;
+  result = result.slice(0, insertAt) + ` ${bindingExpr}` + result.slice(insertAt);
+  trace.action('map-gen:bindProp:inserted', { nodeId, propName, fieldName, iterVar, urlWrap });
   return result;
-}
-
-// ─── Shared Helpers ──────────────────────────────────────────────────────────
-
-/**
- * Find the array declaration for `const varName = [...]` in code.
- * Returns the character positions needed to manipulate the array contents,
- * or null if the declaration is not found.
- */
-function findArrayDecl(
-  code: string,
-  varName: string,
-): { arrayStart: number; closingBracket: number; arrayContent: string } | null {
-  const declPattern = `const ${varName} = [`;
-  const declIdx = code.indexOf(declPattern);
-  if (declIdx === -1) return null;
-
-  const arrayStart = declIdx + declPattern.length;
-  const closingBracket = code.indexOf('];', declIdx);
-  if (closingBracket === -1) return null;
-
-  return {
-    arrayStart,
-    closingBracket,
-    arrayContent: code.slice(arrayStart, closingBracket),
-  };
-}
-
-/**
- * Parse `{ }` brace pairs in array content to find the start/end of each
- * object literal item. Handles nested braces correctly.
- */
-function parseArrayItemRanges(
-  arrayContent: string,
-): { start: number; end: number }[] {
-  const items: { start: number; end: number }[] = [];
-  let depth = 0;
-  let itemStart = -1;
-  for (let i = 0; i < arrayContent.length; i++) {
-    if (arrayContent[i] === '{') {
-      if (depth === 0) itemStart = i;
-      depth++;
-    } else if (arrayContent[i] === '}') {
-      depth--;
-      if (depth === 0 && itemStart >= 0) {
-        items.push({ start: itemStart, end: i + 1 });
-        itemStart = -1;
-      }
-    }
-  }
-  return items;
-}
-
-/**
- * Detect the iterator variable name from a `.map()` callback.
- * e.g. `cardData.map((item, idx) => ...)` → `'item'`
- * Falls back to `'item'` if no match is found.
- */
-function detectIteratorVar(code: string, varName: string): string {
-  const mapCallMatch = code.match(new RegExp(`${varName}\\.map\\(\\(([a-zA-Z_$][a-zA-Z0-9_$]*)`));
-  return mapCallMatch ? mapCallMatch[1] : 'item';
 }
 
 /**

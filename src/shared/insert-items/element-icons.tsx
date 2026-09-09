@@ -847,6 +847,415 @@ function ShaderCard({ children, bg }: { children?: React.ReactNode; bg: string }
   );
 }
 
+// ── New shader backgrounds ─────────────────────────────────────────────────
+// Each preview is CSS only — gradients that mirror the component's defaults so
+// the tile reads as the same effect without a second WebGL context per card.
+
+function BgSilkIcon() {
+  return (
+    <ShaderCard bg="#0b0b14">
+      <div className="absolute inset-0" style={{ background:
+        'linear-gradient(105deg, #c6d4ff 0%, #f5c8e4 28%, #fff0d0 48%, #c6d4ff 72%, #f5c8e4 100%)',
+        filter: 'blur(1px)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgLightPillarIcon() {
+  return (
+    <ShaderCard bg="#07060f">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(ellipse 12% 90% at 50% 50%, rgba(233,220,255,0.95) 0%, rgba(124,58,237,0.45) 38%, transparent 72%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgIridescenceIcon() {
+  return (
+    <ShaderCard bg="#08070d">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(ellipse 70% 80% at 25% 40%, rgba(34,211,238,0.75) 0%, transparent 60%), ' +
+        'radial-gradient(ellipse 60% 70% at 70% 60%, rgba(217,70,239,0.65) 0%, transparent 60%), ' +
+        'radial-gradient(ellipse 50% 60% at 50% 20%, rgba(163,230,53,0.55) 0%, transparent 60%)',
+        filter: 'blur(2px)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgGodRaysIcon() {
+  return (
+    <ShaderCard bg="#0a0806">
+      <div className="absolute inset-0" style={{ background:
+        'conic-gradient(from 200deg at 50% 92%, transparent 0deg, rgba(255,217,160,0.55) 8deg, transparent 16deg, ' +
+        'transparent 26deg, rgba(255,217,160,0.42) 34deg, transparent 42deg, transparent 54deg, ' +
+        'rgba(255,217,160,0.5) 62deg, transparent 70deg, transparent 110deg, rgba(255,217,160,0.4) 118deg, transparent 126deg)' }} />
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(circle 14px at 50% 92%, rgba(255,244,224,0.95) 0%, transparent 70%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgGrainFieldIcon() {
+  return (
+    <ShaderCard bg="#1b1035">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(ellipse 90% 80% at 35% 55%, #c2410c 0%, transparent 65%), ' +
+        'radial-gradient(ellipse 60% 60% at 85% 85%, #f5b942 0%, transparent 60%)' }} />
+      <div className="absolute inset-0 opacity-40" style={{ background:
+        'repeating-conic-gradient(#fff 0% 0.0006%, transparent 0% 0.0012%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgNebulaIcon() {
+  return (
+    <ShaderCard bg="#04030a">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(ellipse 65% 70% at 30% 45%, rgba(59,29,110,0.9) 0%, transparent 62%), ' +
+        'radial-gradient(ellipse 55% 60% at 72% 60%, rgba(217,79,160,0.75) 0%, transparent 60%)',
+        filter: 'blur(1.5px)' }} />
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(circle 1.2px at 20% 30%, #fff 99%, transparent 100%), ' +
+        'radial-gradient(circle 1.2px at 62% 22%, #fff 99%, transparent 100%), ' +
+        'radial-gradient(circle 1px at 80% 70%, #fff 99%, transparent 100%), ' +
+        'radial-gradient(circle 1px at 40% 78%, #fff 99%, transparent 100%), ' +
+        'radial-gradient(circle 0.8px at 52% 58%, #fff 99%, transparent 100%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgDotWaveIcon() {
+  return (
+    <ShaderCard bg="#05070f">
+      <div className="absolute inset-0" style={{
+        backgroundImage: 'radial-gradient(circle 1.4px, #67e8f9 99%, transparent 100%)',
+        backgroundSize: '7px 7px',
+        maskImage: 'radial-gradient(ellipse 60% 70% at 50% 50%, #000 20%, transparent 78%)',
+        WebkitMaskImage: 'radial-gradient(ellipse 60% 70% at 50% 50%, #000 20%, transparent 78%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgContoursIcon() {
+  return (
+    <ShaderCard bg="#050810">
+      <div className="absolute inset-0" style={{ background:
+        'repeating-radial-gradient(ellipse 120% 70% at 35% 60%, transparent 0 5px, rgba(34,211,238,0.75) 5px 6px), ' +
+        'repeating-radial-gradient(ellipse 90% 60% at 78% 30%, transparent 0 6px, rgba(168,85,247,0.6) 6px 7px)' }} />
+    </ShaderCard>
+  );
+}
+
+
+// ── WebGL background pack, batch 2 ─────────────────────────────────────────
+function BgFluidGradientIcon() {
+  return (
+    <ShaderCard bg="#1e1b4b">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(ellipse 70% 90% at 20% 30%, #7c3aed 0%, transparent 62%), ' +
+        'radial-gradient(ellipse 65% 80% at 78% 40%, #ec4899 0%, transparent 60%), ' +
+        'radial-gradient(ellipse 60% 70% at 50% 95%, #22d3ee 0%, transparent 62%)',
+        filter: 'blur(2px)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgCyberGridIcon() {
+  return (
+    <ShaderCard bg="#0a0418">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(circle 13px at 50% 58%, #ffb03a 0 100%, transparent 100%)' }} />
+      <div className="absolute inset-x-0 top-0" style={{ height: '58%', background:
+        'repeating-linear-gradient(#0a0418 0 1.5px, transparent 1.5px 4px)' }} />
+      <div className="absolute inset-x-0 bottom-0" style={{ height: '42%', background:
+        'repeating-linear-gradient(#ff2fb9 0 1px, transparent 1px 5px), ' +
+        'linear-gradient(90deg, transparent 0, #ff2fb9 49.5%, #ff2fb9 50.5%, transparent 100%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgRippleGridIcon() {
+  return (
+    <ShaderCard bg="#04040c">
+      <div className="absolute inset-x-0 bottom-0" style={{ height: '62%', background:
+        'repeating-linear-gradient(#22d3ee 0 1px, transparent 1px 4px)',
+        maskImage: 'linear-gradient(#000 0%, transparent 92%)',
+        WebkitMaskImage: 'linear-gradient(#000 0%, transparent 92%)', opacity: 0.9 }} />
+      <div className="absolute inset-x-0 bottom-0" style={{ height: '62%', background:
+        'conic-gradient(from 155deg at 50% -30%, transparent 0deg, #a855f7 7deg, transparent 8deg, ' +
+        'transparent 14deg, #a855f7 21deg, transparent 22deg, transparent 28deg, #a855f7 35deg, ' +
+        'transparent 36deg, transparent 42deg, #a855f7 49deg, transparent 50deg)', opacity: 0.9 }} />
+    </ShaderCard>
+  );
+}
+
+function BgVoronoiIcon() {
+  return (
+    <ShaderCard bg="#0f172a">
+      <svg viewBox="0 0 60 48" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+        <g stroke="#67e8f9" strokeWidth="0.8" fill="#1d4ed8" fillOpacity="0.35">
+          <polygon points="0,0 18,0 24,14 8,22 0,14" />
+          <polygon points="18,0 40,0 44,10 24,14" />
+          <polygon points="40,0 60,0 60,16 44,10" />
+          <polygon points="8,22 24,14 34,26 20,38 4,32" />
+          <polygon points="24,14 44,10 60,16 56,30 34,26" />
+          <polygon points="4,32 20,38 16,48 0,48" />
+          <polygon points="20,38 34,26 56,30 52,48 16,48" />
+        </g>
+      </svg>
+    </ShaderCard>
+  );
+}
+
+function BgMetaballFieldIcon() {
+  return (
+    <ShaderCard bg="#06060f">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(circle 11px at 28% 38%, #7c3aed 0 78%, transparent 100%), ' +
+        'radial-gradient(circle 9px at 52% 55%, #a855f7 0 78%, transparent 100%), ' +
+        'radial-gradient(circle 12px at 76% 34%, #22d3ee 0 78%, transparent 100%), ' +
+        'radial-gradient(circle 7px at 40% 78%, #22d3ee 0 78%, transparent 100%)',
+        filter: 'blur(2px) contrast(2.2)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgHalftoneScreenIcon() {
+  return (
+    <ShaderCard bg="#0c0a09">
+      <div className="absolute inset-0" style={{
+        backgroundImage: 'radial-gradient(circle 2px, #f43f5e 98%, transparent 100%)',
+        backgroundSize: '5px 5px',
+        maskImage: 'linear-gradient(115deg, transparent 8%, #000 62%)',
+        WebkitMaskImage: 'linear-gradient(115deg, transparent 8%, #000 62%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgCrtIcon() {
+  return (
+    <ShaderCard bg="#05070a">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(ellipse 80% 70% at 45% 45%, #a3e635 0%, #0ea5e9 55%, transparent 85%)',
+        filter: 'blur(2px)' }} />
+      <div className="absolute inset-0" style={{ background:
+        'repeating-linear-gradient(rgba(0,0,0,0.55) 0 1px, transparent 1px 3px)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgSmokeIcon() {
+  return (
+    <ShaderCard bg="#08080b">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(ellipse 45% 60% at 34% 72%, rgba(228,228,231,0.85) 0%, transparent 62%), ' +
+        'radial-gradient(ellipse 40% 55% at 58% 45%, rgba(161,161,170,0.75) 0%, transparent 62%), ' +
+        'radial-gradient(ellipse 35% 45% at 44% 22%, rgba(228,228,231,0.45) 0%, transparent 65%)',
+        filter: 'blur(3px)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgMarbleIcon() {
+  return (
+    <ShaderCard bg="#0b1020">
+      <svg viewBox="0 0 60 48" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+        <rect width="60" height="48" fill="#233047" />
+        <rect width="60" height="48" fill="url(#marbleStone)" />
+        <defs>
+          <radialGradient id="marbleStone" cx="0.35" cy="0.3" r="0.8">
+            <stop offset="0" stopColor="#41526f" />
+            <stop offset="1" stopColor="#0b1020" />
+          </radialGradient>
+        </defs>
+        {[0, 1, 2, 3].map(i => (
+          <path key={i} d={`M${-6 + i * 17} 48 Q ${2 + i * 17} 32 ${-2 + i * 17} 22 T ${8 + i * 17} 0`}
+            stroke="#e2c887" strokeWidth={i % 2 ? 0.7 : 1.3} fill="none" strokeOpacity={i % 2 ? 0.55 : 0.95} />
+        ))}
+      </svg>
+    </ShaderCard>
+  );
+}
+
+function BgWarpTunnelIcon() {
+  return (
+    <ShaderCard bg="#03030a">
+      <div className="absolute inset-0" style={{ background:
+        'repeating-radial-gradient(circle at 50% 50%, #22d3ee 0 1px, transparent 1px 5px)',
+        maskImage: 'radial-gradient(circle at 50% 50%, transparent 8%, #000 22%, #000 70%, transparent 95%)',
+        WebkitMaskImage: 'radial-gradient(circle at 50% 50%, transparent 8%, #000 22%, #000 70%, transparent 95%)' }} />
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(circle 8px at 50% 50%, #000 0 100%, transparent 100%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgStarWarpIcon() {
+  return (
+    <ShaderCard bg="#02030a">
+      <svg viewBox="0 0 60 48" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+        {[8, 44, 96, 140, 190, 232, 280, 320].map((deg, i) => {
+          const a = (deg * Math.PI) / 180;
+          const r0 = 6 + (i % 3) * 4;
+          const r1 = r0 + 8 + (i % 4) * 4;
+          return (
+            <line key={i} x1={30 + Math.cos(a) * r0} y1={24 + Math.sin(a) * r0 * 0.8}
+              x2={30 + Math.cos(a) * r1} y2={24 + Math.sin(a) * r1 * 0.8}
+              stroke="#dbeafe" strokeWidth="1.4" strokeLinecap="round" strokeOpacity={0.5 + (i % 3) * 0.22} />
+          );
+        })}
+        <circle cx="30" cy="24" r="3" fill="#93c5fd" fillOpacity="0.45" />
+      </svg>
+    </ShaderCard>
+  );
+}
+
+function BgHexGridIcon() {
+  return (
+    <ShaderCard bg="#04060e">
+      <svg viewBox="0 0 60 48" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+        {[0, 1, 2, 3].map(row => [0, 1, 2, 3, 4].map(col => {
+          const cx = col * 15 + (row % 2 ? 7.5 : 0);
+          const cy = row * 13 + 2;
+          const pts = [0, 1, 2, 3, 4, 5].map(k => {
+            const a = ((60 * k - 30) * Math.PI) / 180;
+            return `${cx + Math.cos(a) * 8},${cy + Math.sin(a) * 8}`;
+          }).join(' ');
+          return <polygon key={`${row}-${col}`} points={pts} fill="none"
+            stroke={(row + col) % 2 ? '#a855f7' : '#0891b2'} strokeWidth="0.8" strokeOpacity="0.85" />;
+        }))}
+      </svg>
+    </ShaderCard>
+  );
+}
+
+function BgLightningIcon() {
+  return (
+    <ShaderCard bg="#05040d">
+      <svg viewBox="0 0 60 48" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+        <path d="M26 0 L21 13 L28 16 L20 30 L26 33 L18 48" stroke="#e0f2fe" strokeWidth="1.4" fill="none" />
+        <path d="M40 6 L36 17 L42 21 L35 34 L39 48" stroke="#8b5cf6" strokeWidth="1" fill="none" strokeOpacity="0.8" />
+      </svg>
+    </ShaderCard>
+  );
+}
+
+function BgLiquidChromeIcon() {
+  return (
+    <ShaderCard bg="#0b0f1a">
+      <div className="absolute inset-0" style={{ background:
+        'repeating-linear-gradient(178deg, #0b0f1a 0 4px, #64748b 5px 7px, #f8fafc 8px 10px, #64748b 11px 13px, #0b0f1a 14px 18px)',
+        filter: 'blur(0.6px)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgBokehIcon() {
+  return (
+    <ShaderCard bg="#07060e">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(circle 9px at 22% 32%, rgba(249,168,212,0.55) 0 72%, rgba(249,168,212,0.9) 78%, transparent 82%), ' +
+        'radial-gradient(circle 6px at 62% 22%, rgba(125,211,252,0.5) 0 72%, rgba(125,211,252,0.85) 78%, transparent 82%), ' +
+        'radial-gradient(circle 11px at 76% 66%, rgba(125,211,252,0.4) 0 72%, rgba(125,211,252,0.8) 78%, transparent 82%), ' +
+        'radial-gradient(circle 5px at 38% 74%, rgba(249,168,212,0.5) 0 72%, rgba(249,168,212,0.85) 78%, transparent 82%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgRainGlassIcon() {
+  return (
+    <ShaderCard bg="#050a10">
+      <div className="absolute inset-0" style={{ background:
+        'linear-gradient(160deg, #164e63 0%, #0e7490 55%, #050a10 100%)', filter: 'blur(1px)' }} />
+      <div className="absolute inset-0" style={{
+        backgroundImage: 'radial-gradient(circle 1.6px, rgba(224,251,255,0.9) 96%, transparent 100%)',
+        backgroundSize: '9px 12px' }} />
+      <div className="absolute inset-0" style={{
+        backgroundImage: 'radial-gradient(circle 1px, rgba(224,251,255,0.65) 96%, transparent 100%)',
+        backgroundSize: '6px 7px', backgroundPosition: '3px 4px' }} />
+    </ShaderCard>
+  );
+}
+
+function BgFirefliesIcon() {
+  return (
+    <ShaderCard bg="#050806">
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(circle 5px at 26% 34%, rgba(253,230,138,0.9) 0%, transparent 70%), ' +
+        'radial-gradient(circle 4px at 62% 22%, rgba(163,230,53,0.85) 0%, transparent 70%), ' +
+        'radial-gradient(circle 6px at 78% 62%, rgba(253,230,138,0.8) 0%, transparent 70%), ' +
+        'radial-gradient(circle 3px at 40% 74%, rgba(163,230,53,0.8) 0%, transparent 70%), ' +
+        'radial-gradient(circle 3px at 14% 66%, rgba(253,230,138,0.7) 0%, transparent 70%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgVortexIcon() {
+  return (
+    <ShaderCard bg="#04030b">
+      <div className="absolute inset-0" style={{ background:
+        'conic-gradient(from 0deg at 50% 50%, #4c1d95 0deg, #f472b6 70deg, #4c1d95 140deg, ' +
+        '#f472b6 210deg, #4c1d95 280deg, #f472b6 350deg, #4c1d95 360deg)',
+        filter: 'blur(2px)' }} />
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(circle 7px at 50% 50%, rgba(253,232,255,0.95) 0%, transparent 75%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgSunsetIcon() {
+  return (
+    <ShaderCard bg="#1e1b4b">
+      <div className="absolute inset-x-0 top-0" style={{ height: '55%', background:
+        'linear-gradient(#1e1b4b 0%, #f97316 100%)' }} />
+      <div className="absolute inset-x-0 bottom-0" style={{ height: '45%', background:
+        'linear-gradient(#f97316 0%, #0c1129 100%)' }} />
+      <div className="absolute inset-0" style={{ background:
+        'radial-gradient(circle 11px at 50% 55%, #fde68a 0 100%, transparent 100%)' }} />
+      <div className="absolute inset-x-0 bottom-0" style={{ height: '45%', background:
+        'repeating-linear-gradient(rgba(12,17,41,0.55) 0 1.5px, transparent 1.5px 4px)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgDunesIcon() {
+  return (
+    <ShaderCard bg="#7c2d12">
+      <div className="absolute inset-0" style={{ background:
+        'repeating-linear-gradient(168deg, #7c2d12 0 3px, #c2703c 4px 8px, #fed7aa 9px 12px, #c2703c 13px 16px)',
+        filter: 'blur(0.7px)' }} />
+      <div className="absolute inset-0" style={{ background:
+        'linear-gradient(#fca5a5 0%, transparent 45%)', opacity: 0.35 }} />
+    </ShaderCard>
+  );
+}
+
+function BgOilSlickIcon() {
+  return (
+    <ShaderCard bg="#05060a">
+      <div className="absolute inset-0" style={{ background:
+        'conic-gradient(from 40deg at 35% 60%, #ef4444, #eab308, #22c55e, #06b6d4, #6366f1, #d946ef, #ef4444)',
+        filter: 'blur(3px)',
+        maskImage: 'radial-gradient(ellipse 65% 70% at 40% 55%, #000 10%, transparent 72%)',
+        WebkitMaskImage: 'radial-gradient(ellipse 65% 70% at 40% 55%, #000 10%, transparent 72%)' }} />
+    </ShaderCard>
+  );
+}
+
+function BgWaveStackIcon() {
+  return (
+    <ShaderCard bg="#020617">
+      <svg viewBox="0 0 60 48" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+        {[0, 1, 2, 3, 4].map(i => (
+          <path key={i}
+            d={`M0 ${16 + i * 7} Q 15 ${11 + i * 7} 30 ${16 + i * 7} T 60 ${15 + i * 7} L60 48 L0 48 Z`}
+            fill={['#0c4a6e', '#0e7490', '#0891b2', '#22d3ee', '#a5f3fc'][i]} />
+        ))}
+      </svg>
+    </ShaderCard>
+  );
+}
+
 function ShaderWaveLinesIcon() {
   return (
     <ShaderCard bg="#0F0F1A">
@@ -1404,6 +1813,36 @@ export const ELEMENT_ICON_MAP: Record<string, React.FC> = {
   shaderLiquidMetal: ShaderLiquidMetalIcon,
   shaderCaustics: ShaderCausticsIcon,
   shaderAurora: ShaderAuroraIcon,
+  bgSilk: BgSilkIcon,
+  bgLightPillar: BgLightPillarIcon,
+  bgIridescence: BgIridescenceIcon,
+  bgGodRays: BgGodRaysIcon,
+  bgGrainField: BgGrainFieldIcon,
+  bgNebula: BgNebulaIcon,
+  bgDotWave: BgDotWaveIcon,
+  bgContours: BgContoursIcon,
+  bgFluidGradient: BgFluidGradientIcon,
+  bgCyberGrid: BgCyberGridIcon,
+  bgRippleGrid: BgRippleGridIcon,
+  bgVoronoi: BgVoronoiIcon,
+  bgMetaballField: BgMetaballFieldIcon,
+  bgHalftoneScreen: BgHalftoneScreenIcon,
+  bgCrt: BgCrtIcon,
+  bgSmoke: BgSmokeIcon,
+  bgMarble: BgMarbleIcon,
+  bgWarpTunnel: BgWarpTunnelIcon,
+  bgStarWarp: BgStarWarpIcon,
+  bgHexGrid: BgHexGridIcon,
+  bgLightning: BgLightningIcon,
+  bgLiquidChrome: BgLiquidChromeIcon,
+  bgBokeh: BgBokehIcon,
+  bgRainGlass: BgRainGlassIcon,
+  bgFireflies: BgFirefliesIcon,
+  bgVortex: BgVortexIcon,
+  bgSunset: BgSunsetIcon,
+  bgDunes: BgDunesIcon,
+  bgOilSlick: BgOilSlickIcon,
+  bgWaveStack: BgWaveStackIcon,
   shaderMatrixRain: ShaderMatrixRainIcon,
   shaderWaveDistortion: ShaderWaveDistortionIcon,
   // CMS — collection-stack vs. single-field glyph

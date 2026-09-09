@@ -31,6 +31,8 @@ import EditAssetPresetPanel from '../../../ui/EditAssetPresetPanel';
 import ColorPresetEditPanel from '../../../ui/ColorPresetEditPanel';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
 import { isComponentFileAtom, selectedIdsAtom } from '@/code/stores/store';
+import { isComponentVariantViewportAtom, activeComponentVariantAtom } from '@/code/stores/viewport-store';
+import { fillClearStyles, isTransparentColor } from './fill-clear';
 import { getContentRoot, updateNodeStyles } from '@/canvas/node-ops';
 import { activeCodeAtom } from '@/code/project/active-file-store';
 import { getPropType } from '@/code/components/prop-meta';
@@ -1219,6 +1221,11 @@ function FillAtom() {
   // the menu items + bound pill.
   const isComponentFile = useAtomValue(isComponentFileAtom);
   const fillHoverColor: 'accent' | 'accent-secondary' = isComponentFile ? 'accent-secondary' : 'accent';
+  // A NON-default variant tile: the × must write explicit neutrals, not ''
+  // (which means "inherit default" there) — see fill-clear.ts.
+  const isVariantTile = useAtomValue(isComponentVariantViewportAtom);
+  const activeVariant = useAtomValue(activeComponentVariantAtom);
+  const onNonDefaultVariant = !!isVariantTile && !!activeVariant && activeVariant !== 'default';
   // Locale `:lang()` overrides on the fill → blue Locale pill (Phase 4).
   const fillLocaleOverrides = useLocaleStyleOverrides('backgroundColor', node?.id ?? null);
   // Active file code — used to read a bound Fill variable's @propMeta TYPE so an
@@ -1474,7 +1481,10 @@ function FillAtom() {
   // True when ANY fill is present — drives the empty alpha-checker placeholder
   // and gates the × clear button. A live color drag counts as a fill so the
   // row doesn't flash to the "Add" placeholder mid-drag.
-  const hasAnyFill = livePreviewColor != null || isMulti || isPresetRef || hasGradient || hasImage || hasVideo || !!bgColor;
+  // A fully transparent colour (the frame creator's `rgba(0, 0, 0, 0)`, or a
+  // variant's cleared fill) is NO fill: placeholder + "Add", not a swatch.
+  const hasSolidColor = !!bgColor && !isTransparentColor(bgColor);
+  const hasAnyFill = livePreviewColor != null || isMulti || isPresetRef || hasGradient || hasImage || hasVideo || hasSolidColor;
 
   // Click-handler for the × on the Fill row — wipes EVERY background-related
   // value (color, gradient, image, multi-layer extras, AND the bg-video
@@ -1486,20 +1496,11 @@ function FillAtom() {
   // normal render → "Rendered fewer hooks than expected" crash.
   const handleClearAll = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onChangeMultiple({
-      backgroundColor: '',
-      background: '',
-      backgroundImage: '',
-      backgroundSize: '',
-      backgroundPosition: '',
-      backgroundRepeat: '',
-      backgroundAttachment: '',
-      backgroundBlendMode: '',
-    });
+    onChangeMultiple(fillClearStyles(onNonDefaultVariant, styles));
     if (node?.id && node.bgVideo) {
       queueMutation({ type: 'removeVideoFill', nodeId: node.id });
     }
-    trace.action('fill:clear-all', { nodeId: node?.id });
+    trace.action('fill:clear-all', { nodeId: node?.id, onNonDefaultVariant });
   };
 
   // Empty state defaults — alpha-checker swatch + "Add" label. Each branch
@@ -1557,7 +1558,7 @@ function FillAtom() {
     // Raw bg-video URL with no matching preset.
     swatchStyle = { background: '#000' };
     labelText = 'Video';
-  } else if (bgColor) {
+  } else if (hasSolidColor) {
     const displayColor = bgColor.startsWith('#') && bgColor.length === 4
       ? `#${bgColor[1]}${bgColor[1]}${bgColor[2]}${bgColor[2]}${bgColor[3]}${bgColor[3]}`
       : bgColor;

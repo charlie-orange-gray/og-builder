@@ -31,8 +31,6 @@ export const hoveredViewportIdAtom = { init: 'desktop' };
 export const canvasInteractingAtom = { init: false };
 export const pendingFileSwitchAtom = { init: null };
 export const mapItemIndexAtom = { init: null };
-export const mapContextAtom = { init: null };
-export const isMapTemplateSelectedAtom = { init: false };
 export const isComponentSelectedAtom = { init: false };
 
 export function getAllCachedNodes() { return []; }

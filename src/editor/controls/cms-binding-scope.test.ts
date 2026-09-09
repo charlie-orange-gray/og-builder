@@ -56,15 +56,6 @@ describe('findCmsListScope', () => {
     expect(findCmsListScope(container, nodes)).toBeNull();
   });
 
-  it('an inline (non-CMS) source never binds — no schema to bind against', () => {
-    const container = n('c', {
-      collectionList: { source: '__inline:rows', itemVar: 'item', templateIds: {} } as CanvasNode['collectionList'],
-    });
-    const row = n('r', { parentId: 'c', isCollectionTemplate: true });
-    const nodes = new Map([[container.id, container], [row.id, row]]);
-    expect(findCmsListScope(row, nodes)).toBeNull();
-  });
-
   it('carries the collection\'s own item variable name, not a hardcoded "item"', () => {
     const container = n('c', {
       collectionList: { source: 'posts', itemVar: 'post', templateIds: {} } as CanvasNode['collectionList'],

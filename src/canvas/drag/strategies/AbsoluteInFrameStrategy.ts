@@ -3339,16 +3339,21 @@ export class AbsoluteInFrameStrategy implements DragStrategy {
     }
 
     // Commit a pending layout-sibling drop: insert the dragged element as a
-    // flex/grid child at the previewed insertion index. position/left/top are
-    // stripped — the element joins the layout flow. `flex: '0 0 auto'` is baked
-    // so the new flow child never inherits the CSS-default flex-shrink: 1,
-    // which collapses it to ~0 computed height in a height-constrained flex
-    // column (design-tool parity: flow children are always shrink: 0 / Fixed-Hug).
+    // flex/grid child at the previewed insertion index. The insets are
+    // stripped and `position` becomes `relative` — NOT deleted: every flow
+    // child carries an explicit position (the hard rule behind
+    // NODE_MISSING_POSITION; a position-less node breaks Make Component /
+    // detach transfer and reads as "unset" in the Position tool — bug-hunt
+    // #11, 2026-09-07). `flex: '0 0 auto'` is baked on FLEX targets so the
+    // new flow child never inherits flex-shrink: 1 (collapses to ~0 height in
+    // a constrained column); on a GRID target it is meaningless and omitted.
     if (this.pendingLayoutDrop && !this.exitedParent) {
       const { siblingId, insertIndex } = this.pendingLayoutDrop;
+      const targetDisplay = resolveParentDisplay(siblingId, this.vpId, context.nodes.get(siblingId));
+      const targetIsGrid = targetDisplay === 'grid' || targetDisplay === 'inline-grid';
       trace.action('abs-in-frame:commit-layout-sibling-drop', {
         nodeIds: context.draggedNodes.map(n => n.id),
-        siblingId, insertIndex,
+        siblingId, insertIndex, targetDisplay,
       });
       for (const node of context.draggedNodes) {
         updates.push({
@@ -3356,7 +3361,10 @@ export class AbsoluteInFrameStrategy implements DragStrategy {
           nodeId: node.id,
           newParentId: siblingId,
           newIndex: insertIndex,
-          styles: { position: '', left: '', top: '', right: '', bottom: '', flex: '0 0 auto' },
+          styles: {
+            position: 'relative', left: '', top: '', right: '', bottom: '',
+            ...(targetIsGrid ? {} : { flex: '0 0 auto' }),
+          },
         });
       }
       this.cleanup();

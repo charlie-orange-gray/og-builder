@@ -6,7 +6,7 @@ import { nextFrames } from '@/shared/dom-utils';
 import { getCanvasRenderer } from './CanvasRenderer';
 import { finishPendingRestore } from '@/code/mutation/history';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
-import { codeAtom, nodesAtom, selectedNodeAtom, selectedIdsAtom, hoveredIdAtom, hoveredNodeIdAtom, hoveredViewportIdAtom, canvasInteractingAtom, mapItemIndexAtom, mapContextAtom, updatingFromCanvasAtom, marqueeViewportSpreadAtom, getNodesSnapshot, getCachedNodesMap } from '../code/stores/store';
+import { codeAtom, nodesAtom, selectedNodeAtom, selectedIdsAtom, hoveredIdAtom, hoveredNodeIdAtom, hoveredViewportIdAtom, canvasInteractingAtom, mapItemIndexAtom, updatingFromCanvasAtom, marqueeViewportSpreadAtom, getNodesSnapshot, getCachedNodesMap } from '../code/stores/store';
 import type { CanvasNode } from '../code/parsing/parser';
 import { activeFilePathAtom, componentBreadcrumbAtom, isComponentFilePath, isIconSetFilePath } from '../code/project/active-file-store';
 // updateVariantPosition, updateIconPosition/Size, parseIconSetConfig
@@ -23,6 +23,8 @@ import { autoFocusLayersAtom } from '@/code/stores/user-preferences-store';
 import { snappedRulerGuideIdsAtom } from '@/code/stores/ruler-guides-store';
 import { overlayEditingIdAtom, overlayCallsAtom } from '@/code/stores/overlay-store';
 import { prePlaceOverlayForEdit, overlayShowRuleBody } from '@/canvas/overlay-preplace';
+import { setPasteUiHooks } from '@/code/features/paste-engine/execute-from-ui';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 import { useLiveNode } from '@/code/stores/node-family';
 import { setViewportHeaderOverlayEditMode } from './ViewportHeaderManager';
 import { activeLocaleAtom, isDefaultLocaleAtom, i18nConfigAtom, localeOverridesAtom } from '@/code/stores/locale-store';
@@ -56,7 +58,7 @@ import { trace } from '@/shared/debug-trace';
 import { CLOUD_ENABLED } from '@/shared/cloud-flag';
 import { preloadProjectFonts } from '@/code/project/font-preload';
 import { backfillCmsTimestamps } from '@/code/project/cms-ops';
-import { toolModeAtom, panHighlightAtom } from '@/code/stores/tool-store';
+import { toolModeAtom, panHighlightAtom, creatorToolsLockedAtom, isCreatorToolMode } from '@/code/stores/tool-store';
 import { commentModeActiveAtom } from '@/code/stores/comment-store';
 import { componentEditorFileAtom } from '@/code/stores/component-editor-store';
 import { isShapeMode, isLayoutMode } from '@/code/stores/tool-store';
@@ -201,6 +203,19 @@ export default function Canvas() {
   // Exit overlay-edit mode (shared by the per-viewport header's Done button AND the
   // component-master "Editing Overlay" banner below — component masters render NO
   // viewport headers, so the header affordance never appears there).
+  // Paste follow-up: an overlay ATTACHED to the selection by Cmd+V opens in
+  // overlay edit mode, exactly like the Overlay tool's Add (expedite the
+  // stable mirror first so the overlay panel reads the new call this tick).
+  useEffect(() => {
+    setPasteUiHooks({
+      enterOverlayEdit: (overlayId) => {
+        expediteStableAtomSync();
+        setOverlayEditingId(overlayId);
+        setSelectedIds([overlayId]);
+      },
+    });
+    return () => setPasteUiHooks(null);
+  }, [setOverlayEditingId, setSelectedIds]);
   const exitOverlayEdit = useCallback(() => {
     const oid = overlayEditingId;
     setOverlayEditingId(null);
@@ -313,11 +328,19 @@ export default function Canvas() {
   const isTextEditing = useAtomValue(isTextEditingAtom);
   const setMapItemIndex = useSetAtom(mapItemIndexAtom);
   const mapItemIndexVal = useAtomValue(mapItemIndexAtom);
-  const mapContextVal = useAtomValue(mapContextAtom);
-  // mapItemIndexRef / mapContextRef removed — controllers read jotaiStore.get(atom) directly.
+  // mapItemIndexRef removed — controllers read jotaiStore.get(atom) directly.
   // ghostClickHandledRef moved to CanvasMouseController (owns ghost detection state).
   const activeLocale = useAtomValue(activeLocaleAtom);
   const isDefaultLocale = useAtomValue(isDefaultLocaleAtom);
+  // Translation mode: lock the creator tools (toolbar greys them, shortcuts
+  // go inert) and drop an active creator tool back to Select.
+  useEffect(() => {
+    jotaiStore.set(creatorToolsLockedAtom, !isDefaultLocale);
+    if (!isDefaultLocale && isCreatorToolMode(jotaiStore.get(toolModeAtom))) {
+      trace.action('canvas:translation-mode-drops-creator-tool', { mode: jotaiStore.get(toolModeAtom) });
+      jotaiStore.set(toolModeAtom, 'select');
+    }
+  }, [isDefaultLocale]);
   const i18nConfig = useAtomValue(i18nConfigAtom);
   // localeOverrides / setLocaleOverrides — consumed by CanvasTextEditController via jotaiStore.
   // Canvas.tsx no longer reads localeOverrides directly; useRendererSync reads it from its own atom hook.

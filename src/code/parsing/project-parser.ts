@@ -366,6 +366,16 @@ function lowerResponsiveBindings(
  * Expand a component instance by parsing the component file
  * and flattening its nodes as children of the instance node.
  */
+/** The literal values of a variant entry — an unresolved `@@VARREF:` sentinel
+ *  (a prop-driven value with no page override yet) must never be baked. */
+function literalEntries(entry: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(entry)) {
+    if (typeof v === 'string' && !v.startsWith('@@VARREF:')) out[k] = v;
+  }
+  return out;
+}
+
 function expandComponent(
   instanceNode: CanvasNode,
   componentInfo: ComponentInfo,
@@ -857,10 +867,24 @@ function expandComponent(
     // a non-default child variant on the parent's primary (or via plain
     // initialVariant), merge those styles into the expanded base. Per-parent
     // overrides are handled below by remapping motionVariants.
-    if (defaultChildVariant && defaultChildVariant !== 'default' && node.motionVariants) {
-      const variantStyles = node.motionVariants[defaultChildVariant];
-      if (variantStyles) {
-        overriddenStyles = { ...overriddenStyles, ...variantStyles };
+    //
+    // The DEFAULT entry is baked FIRST, always. Live paints `animate={['default',
+    // variant]}` — default then the chosen variant — and the Renderer's own merge
+    // for un-expanded nodes is base ⊕ default ⊕ variant too. But this expansion
+    // CLEARS motionVariants below for a parent-driven instance, and a default-
+    // only value (the builder's FormSubmit keeps `backgroundColor: '#3b82f6'`
+    // solely in rootVariants.default) was then lost: the submit button rendered
+    // native-button grey on the canvas while live showed blue (2026-09-08).
+    if (node.motionVariants) {
+      const defaultEntry = node.motionVariants['default'];
+      if (defaultEntry && Object.keys(defaultEntry).length > 0) {
+        overriddenStyles = { ...overriddenStyles, ...literalEntries(defaultEntry) };
+      }
+      if (defaultChildVariant && defaultChildVariant !== 'default') {
+        const variantStyles = node.motionVariants[defaultChildVariant];
+        if (variantStyles) {
+          overriddenStyles = { ...overriddenStyles, ...variantStyles };
+        }
       }
     }
 

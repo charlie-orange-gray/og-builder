@@ -15,7 +15,6 @@ import {
   selectedIdsAtom,
   hoveredIdAtom,
   hoveredNodeIdAtom,
-  mapContextAtom,
   mapItemIndexAtom,
 } from '@/code/stores/store';
 import {
@@ -43,8 +42,10 @@ import {
 } from '@/code/generation/i18n-gen';
 import { projectFS } from '@/code/project/project-fs';
 import { modifyProjectFile } from '@/code/project/modify-file';
+import { commitRichTranslation } from '@/code/project/translation-ops';
+import { nodeHasRichTranslation } from '@/code/generation/i18n-gen';
+import { sanitizeRichMessage } from '@/shared/rich-message';
 import { queueMutation, flushNow } from '@/code/mutation/mutation-queue';
-import { propagateToGhosts } from '@/code/generation/map-ghost-propagate';
 import { removeNode, getContentRoot, getViewportPrefix } from '../node-ops';
 import { isEmptyTextEditHtml } from '@/shared/dom-utils';
 import { stripGhostSuffix } from '@/shared/ghost-id';
@@ -316,6 +317,26 @@ export class CanvasTextEditController {
         // gets seeded, the default locale renders EMPTY after the next full
         // rebuild (the "empty after page switch" half of the Peintre report).
         const preEditText = this.store.get(nodesAtom).get(nodeId)?.textContent ?? '';
+        // RICH text (marks) → ONE HTML message per node (see rich-message.ts).
+        // The per-run split is gone; the whole edited HTML is the translation.
+        {
+          const richNode = this.store.get(nodesAtom).get(nodeId);
+          if (richNode && (richNode.richTranslation || richNode.hasMixedContent)) {
+            const htmlMsg = sanitizeRichMessage(inner);
+            commitRichTranslation({ filePath, nodeId, locale: activeLocale, defaultLocale, html: htmlMsg });
+            this.store.set(localeOverridesAtom, prev => {
+              const next = new Map(prev);
+              const existing = next.get(nodeId) || {};
+              next.set(nodeId, { ...existing, innerJsx: htmlMsg });
+              return next;
+            });
+            pushHistory('');
+            trace.action('locale:rich-text-commit', { nodeId, locale: activeLocale, namespace, html: htmlMsg.slice(0, 60) });
+            this.renderer.setTextEditing(true);
+            requestAnimationFrame(() => { this.renderer.setTextEditing(false); });
+            return;
+          }
+        }
 
         // 1. Transform the JSX (idempotent) + capture the original text.
         modifyProjectFile(filePath, (currentCode) => {
@@ -411,45 +432,29 @@ export class CanvasTextEditController {
           const defaultLocale = i18nConfigVal?.defaultLocale ?? 'en';
           const namespace = filePathToSlug(filePath);
           const key = nodeId;
-          const msgPath = `messages/${defaultLocale}.json`;
-          const msgRaw = projectFS.readFile(msgPath) ?? '{}';
-          const updated = setMessageValue(msgRaw, namespace, key, inner);
-          projectFS.writeFile(msgPath, updated);
+          // RICH node: the message is inline HTML (marks kept), painted via innerJsx.
+          const isRichNode = nodeHasRichTranslation(sourceCode, nodeId);
+          const msgValue = isRichNode ? sanitizeRichMessage(inner) : inner;
+          if (isRichNode) {
+            // Writes the default message AND re-bakes every translation's run
+            // styles from it (the default owns styling — Framer parity).
+            commitRichTranslation({ filePath, nodeId, locale: defaultLocale, defaultLocale, html: msgValue });
+          } else {
+            const msgPath = `messages/${defaultLocale}.json`;
+            const msgRaw = projectFS.readFile(msgPath) ?? '{}';
+            projectFS.writeFile(msgPath, setMessageValue(msgRaw, namespace, key, msgValue));
+          }
           // Mirror to the override map so the canvas Renderer paints the
           // new text without waiting for a full re-render (the messages
           // path also requires the Renderer to apply via override).
           this.store.set(localeOverridesAtom, prev => {
             const next = new Map(prev);
             const existing = next.get(nodeId) || {};
-            next.set(nodeId, { ...existing, text: inner });
+            next.set(nodeId, isRichNode ? { ...existing, innerJsx: msgValue } : { ...existing, text: msgValue });
             return next;
           });
           pushHistory('');
           trace.action('default-locale:message-commit', { nodeId, locale: defaultLocale, namespace, key, text: inner.slice(0, 50) });
-          this.renderer.setTextEditing(true);
-          requestAnimationFrame(() => { this.renderer.setTextEditing(false); });
-          return;
-        }
-      }
-
-      // Map-aware text commit: if the node has a text binding ({item.desc}),
-      // update the map JSON data instead of writing JSX text content.
-      const mapCtx = this.store.get(mapContextAtom);
-      const mapIdx = this.store.get(mapItemIndexAtom);
-      if (mapCtx && mapIdx != null) {
-        // Find the text binding field for this node
-        const nodesForMap = this.store.get(nodesAtom);
-        const mapEditNode = nodesForMap.get(nodeId);
-        const textField = mapEditNode?.binding?.property === 'text' ? mapEditNode.binding.field : null;
-        if (textField) {
-          const itemData = { ...(mapCtx.mapData[mapIdx] || {}) };
-          const oldVal = itemData[textField];
-          itemData[textField] = inner;
-          queueMutation({ type: 'updateMapItem', varName: mapCtx.varName, index: mapIdx, item: itemData });
-          if (mapIdx === 0) {
-            propagateToGhosts(mapCtx.varName, textField, oldVal, inner, mapCtx.mapData);
-          }
-          trace.action('canvas:map-text-commit', { nodeId, mapIdx, textField, text: inner.slice(0, 50) });
           this.renderer.setTextEditing(true);
           requestAnimationFrame(() => { this.renderer.setTextEditing(false); });
           return;
@@ -706,6 +711,13 @@ export class CanvasTextEditController {
   // ─── startEdit ────────────────────────────────────────────────────────────
 
   startEdit(nodeId: string, textContent: string, vpId?: string): void {
+    // TRANSLATION MODE: the canvas is read-only for content — text is edited
+    // in the translation panel, not inline (double-click, Enter, creators all
+    // land here). Same rule as the creator-tool lock (2026-09-07).
+    if (this.store.get(isDefaultLocaleAtom) === false) {
+      trace.action('text-edit:blocked-translation-mode', { nodeId });
+      return;
+    }
     // Already editing? Commit current session first so we don't end up with
     // two editors live in the iframe.
     if (this.editingNodeId && this.editingNodeId !== nodeId) {

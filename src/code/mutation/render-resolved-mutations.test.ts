@@ -100,7 +100,6 @@ describe('RENDER_RESOLVED_MUTATIONS — CMS field bindings', () => {
   it.each([
     'bindField',
     'unbindField',
-    'bindStyleToMap',
     'bindPropToMap',
     'unbindPropFromMap',
     'setVariantCmsText',

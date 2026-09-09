@@ -8,18 +8,17 @@
 import { useCallback, useMemo, useEffect } from 'react';
 import { useLivePreview } from '../../hooks/useLivePreview';
 import { useAtomValue } from 'jotai';
-import { canvasInteractingAtom, getNodesSnapshot, getNodeFromCache } from '@/code/stores/store';
+import { canvasInteractingAtom, getNodeFromCache } from '@/code/stores/store';
 import { containerOverridesAtom } from '@/code/stores/container-query-store';
 import { viewportsConfigAtom } from '@/code/stores/viewport-store';
 import { ToolInput } from '../../controls';
 import { getPinState, parsePx, mergeVariantPinStyles, type PinSide } from '@/shared/pin-utils';
 import { isPrimaryViewport } from '@/shared/constants';
-import { findNodeRect, findNodeComputedStyles, findNodeParentInnerSize } from '@/canvas/node-ops';
-import { transformManager } from '@/canvas/transform';
 import { type VisualRect, toPercentageCenter, toFixedPin, toInsetMode, fromInsetMode, stripTranslateTransforms, buildAxisCenterTransform, centeringChannel, extractAxisTranslate } from '@/shared/position-utils';
 import { applyReplicaClearSemantics } from './replica-clears';
 import { trace } from '@/shared/debug-trace';
 import { captureVisualRect } from '@/canvas/visual-rect';
+import { livePinValues } from './live-pin-values';
 import { queueMutation } from '@/code/mutation/mutation-queue';
 
 /** Mark a node as user-pinned so AbsoluteInFrameStrategy stops auto-
@@ -67,38 +66,17 @@ export default function PinControl({ styles, nodeId, vpId, onUpdate, onUpdateMul
     if (!isInteracting) return;
     let rafId: number;
     const poll = () => {
-      const node = getNodesSnapshot().get(nodeId);
-      const parentId = node?.parentId ?? null;
-      const elScreen = findNodeRect(nodeId, vpId);
-      const parentScreen = parentId ? findNodeRect(parentId, vpId) : null;
-      if (elScreen && parentScreen && parentId) {
-        const scale = transformManager.getTransform().scale || 1;
-        // ALL dimensions derived from the live rectCache, NOT from
-        // computedCache. Reason: during inset resize the strategy
-        // writes `right`/`bottom` per frame; the rectCache picks that
-        // up immediately (it's polled from getBoundingClientRect every
-        // render cycle), but the computedCache only refreshes when
-        // canvasInteractingAtom releases — so `findNodeComputedStyles`
-        // returns the PRE-RESIZE width/height during the drag.
-        // Falling back to that stale width here meant `right = parentW
-        // - left - staleW` was wrong → the right/bottom inputs froze
-        // while only left/top updated. Using `elScreen.width / scale`
-        // gives the live width on every frame.
-        const elW = elScreen.width / scale;
-        const elH = elScreen.height / scale;
-        const parentInner = findNodeParentInnerSize(nodeId, vpId);
-        const parentW = parentInner.width || parentScreen.width / scale;
-        const parentH = parentInner.height || parentScreen.height / scale;
-        const parentBorders = findNodeComputedStyles(parentId, vpId, ['borderLeftWidth', 'borderTopWidth']);
-        const borderL = parseFloat(parentBorders.borderLeftWidth) || 0;
-        const borderT = parseFloat(parentBorders.borderTopWidth) || 0;
-        const left = Math.round((elScreen.left - parentScreen.left) / scale - borderL);
-        const top = Math.round((elScreen.top - parentScreen.top) / scale - borderT);
-        const right = Math.round(parentW - left - elW);
-        const bottom = Math.round(parentH - top - elH);
-        const pos = { left: `${left}px`, top: `${top}px`, right: `${right}px`, bottom: `${bottom}px` };
+      // Live position values: the LAYOUT box (rotation undone), each side in
+      // the SOURCE's own unit, only for the sides the source declares — so a
+      // pan shows the same numbers as rest and a drag ends where it lands
+      // (see live-pin-values.ts). Source styles are read from the cache so a
+      // mid-gesture inset write (resize) is reflected.
+      const liveStylesNow = getNodeFromCache(nodeId)?.styles ?? styles;
+      const rect = captureVisualRect(nodeId, vpId);
+      if (rect) {
+        const pos = livePinValues({ styles: liveStylesNow, rect, parentWidth: rect.parentWidth, parentHeight: rect.parentHeight });
         setLivePos((prev) =>
-          prev?.left === pos.left && prev?.top === pos.top && prev?.right === pos.right && prev?.bottom === pos.bottom
+          prev && prev.left === pos.left && prev.top === pos.top && prev.right === pos.right && prev.bottom === pos.bottom
             ? prev
             : pos,
         );
@@ -389,8 +367,11 @@ export default function PinControl({ styles, nodeId, vpId, onUpdate, onUpdateMul
       {/* Top input — centered, 80px */}
       <div className="flex justify-center mt-2">
         <div style={{ width: 80 }}>
+          {/* Whole numbers on display; the source keeps its precision (see
+              ToolInput.roundLengthForDisplay — these fields pass a bare number,
+              so they round here). */}
           <ToolInput
-            value={`${parsePx(displayTop)}`}
+            value={`${Math.round(parsePx(displayTop))}`}
             onChange={(v) => handleValueChange('top', v.includes('px') ? v : `${v}px`)}
           />
         </div>
@@ -401,7 +382,7 @@ export default function PinControl({ styles, nodeId, vpId, onUpdate, onUpdateMul
         {/* Left input */}
         <div style={{ width: 80 }}>
           <ToolInput
-            value={`${parsePx(displayLeft)}`}
+            value={`${Math.round(parsePx(displayLeft))}`}
             onChange={(v) => handleValueChange('left', v.includes('px') ? v : `${v}px`)}
           />
         </div>
@@ -426,7 +407,7 @@ export default function PinControl({ styles, nodeId, vpId, onUpdate, onUpdateMul
         {/* Right input */}
         <div style={{ width: 80 }}>
           <ToolInput
-            value={`${parsePx(displayRight)}`}
+            value={`${Math.round(parsePx(displayRight))}`}
             onChange={(v) => handleValueChange('right', v.includes('px') ? v : `${v}px`)}
           />
         </div>
@@ -436,7 +417,7 @@ export default function PinControl({ styles, nodeId, vpId, onUpdate, onUpdateMul
       <div className="flex justify-center">
         <div style={{ width: 80 }}>
           <ToolInput
-            value={`${parsePx(displayBottom)}`}
+            value={`${Math.round(parsePx(displayBottom))}`}
             onChange={(v) => handleValueChange('bottom', v.includes('px') ? v : `${v}px`)}
           />
         </div>

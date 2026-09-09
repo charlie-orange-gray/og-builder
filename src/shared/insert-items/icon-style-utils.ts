@@ -20,7 +20,10 @@ export function isPreviewIcon(iconKey: string): boolean {
     || iconKey.startsWith('pattern')
     || iconKey.startsWith('shader')
     || iconKey.startsWith('creative')
-    || iconKey.startsWith('effect');
+    || iconKey.startsWith('effect')
+    // `bg*` — the hand-written WebGL background pack (Silk, Nebula, …).
+    // Same wide CSS previews; without this they fall into the 44px circle.
+    || iconKey.startsWith('bg');
 }
 
 /** Hex `#RGB` / `#RRGGBB` → `rgba(r, g, b, alpha)`. */

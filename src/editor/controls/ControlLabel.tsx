@@ -39,7 +39,6 @@ import { queueMutation, flushNow } from '@/code/mutation/mutation-queue';
 import { extractStyleCSS } from '@/code/parsing/parser';
 import { extractBorderAfterRuleBody } from '../ui/border-utils';
 import { trace } from '@/shared/debug-trace';
-import { MAP_TEMPLATE_COLOR } from '@/shared/constants';
 import PresetPicker from '../ui/PresetPicker';
 import LocaleStylePopup from '../ui/LocaleStylePopup';
 import { useLocaleStyleState, localeScopeOf } from './LocaleBoundPill';
@@ -234,10 +233,8 @@ export default function ControlLabel({ label, property, plain, forceShow, hideCr
     nodeId, node, styles, vpId, isReplica, vpWidth,
     hasOverride, getValueSource,
     createVariable, removeVariable, updateStyle, updateStyleLive, updateMultipleStyles,
-    mapOverride, cmsBinding,
+    cmsBinding,
   } = useControl();
-
-  const isMapOverridden = mapOverride?.isOverridden(property) ?? false;
 
   // Custom in-memory style clipboard (Copy Style / Paste Style on the label menu).
   const copiedStyle = useAtomValue(copiedStyleAtom);
@@ -882,18 +879,6 @@ export default function ControlLabel({ label, property, plain, forceShow, hideCr
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </span>
-        )}
-
-        {/* Map item override dot — same +18px counter-shift as the chevron
-            so the dot stays at its original screen position despite the
-            button's hit-area negative margin. */}
-        {isMapOverridden && (
-          <button
-            onClick={(e) => { e.stopPropagation(); mapOverride?.resetOverride(property); trace.action('control-label:reset-map-override', { property }); }}
-            title="Reset map override"
-            className="absolute left-[10px] top-1/2 -translate-y-1/2 w-2 h-2 rounded-full shrink-0 cursor-pointer border-none p-0"
-            style={{ backgroundColor: MAP_TEMPLATE_COLOR }}
-          />
         )}
 
         {/* Label text. CMS bindings used to render `⚡ FieldName` above the
