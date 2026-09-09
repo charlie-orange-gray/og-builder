@@ -36,7 +36,7 @@ The feature branch's local development values are `VITE_SELF_HOSTED_PUBLISH=true
 
 ## Current Branch
 
-`feature/self-hosted-publish-ui`, integrating synchronized `origin/main` (`11e43f6`) without rebasing.
+`feature/self-hosted-project-persistence`, created from stable `origin/main` at `84181a3`.
 
 ## Completed Work
 
@@ -54,7 +54,9 @@ The synchronized main is merged into the Publish feature. Only `codex_handoff.md
 
 Feature validation passed fresh `npm ci`, TypeScript, all three builds, diff checks against `origin/main`, and scoped ESLint (zero errors; 29 existing warnings across RightHeader and Vite). The initial full test run had one failure in the unchanged 30 ms mounting test in `sandbox-code-host.test.ts`; isolated rerun passed all 17 tests. A complete confirmation run with `--maxWorkers=4` passed all 654 files: 10,307 passed, 1 skipped, 3 todo. No test or runtime code was changed for that failure. Logs: `/private/tmp/og-phase0-tests.log`, `/private/tmp/og-phase0-confirm-tests.log`, and `/private/tmp/og-phase0-build.log`.
 
-Next action: finish feature validation, create PR #2, and merge it if clean and mergeable as explicitly authorized. Then begin the separate control-plane persistence repository and editor adapter. No persistence, site Git publishing, Docker worker, or Debian deployment is implemented yet.
+Phase 0 is complete. [PR #2](https://github.com/charlie-orange-gray/og-builder/pull/2) merged with a normal merge commit as `84181a3` after successful confirmation validation and mergeability verification. `origin/main` contains both the latest validated upstream baseline (`e7b5b9f`) and the Publish capability feature (`74a3981`). Published feature history was not rebased. A fresh fetch at the start of persistence work found no newer upstream commit.
+
+Phase 1 is in progress on `feature/self-hosted-project-persistence`. The separate `/Users/chaz/og-control-plane` repository has been initialized for the API, PostgreSQL migrations, and snapshot storage. The editor will add a third backend provider and revision-aware persistence. Git publishing, Docker deployment, and Debian rollout remain later phases.
 
 ## Next Planned Milestones
 
