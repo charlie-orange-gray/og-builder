@@ -36,7 +36,7 @@ The feature branch's local development values are `VITE_SELF_HOSTED_PUBLISH=true
 
 ## Current Branch
 
-`chore/sync-upstream-2026-09-09` at `749e70c`. The local Orange & Gray feature branch is `feature/self-hosted-publish-ui` at `7a2ccae`; `f002dfb` is its implementation commit and `7a2ccae` is its separate handoff commit.
+`chore/sync-upstream-2026-09-09`. Upstream through `e7b5b9f` is integrated in merge commit `874eb39`; architecture documentation is committed as `0635787`. The Publish feature remains at `7a2ccae` pending integration.
 
 ## Completed Work
 
@@ -54,7 +54,9 @@ The sync branch contains one intentional 11-line lockfile correction, committed 
 
 `CHAZ-Architecture.md` now specifies the long-term platform, the detailed server-persistence boundary, and the future publish/deployment metadata model. No persistence service, Git publishing, or Docker deployment code has been added. A fresh fetch on 2026-09-09 confirmed that `origin/main` remains `a3ed7b5` and `upstream/main` remains `b3ed3d9`.
 
-Next recommended action: review the architecture documents and sync branch, then approve a controlled sync-branch PR followed by a non-rebase merge of the updated `origin/main` into the feature branch. Do not push, merge into `origin/main`, rebase, or merge the feature until approval.
+The implementation request on 2026-09-09 authorizes controlled PR integration and subsequent feature integration. A fresh fetch found one additional upstream commit, `e7b5b9f`, covering transformed drag/resize behavior with no overlap in Orange & Gray source files. It merged cleanly on this dedicated sync branch. Current sync validation: `npm ci`, TypeScript, 653 test files (10,303 passed, 1 skipped, 3 todo), all three builds, and `git diff --check` passed. Scoped RightHeader ESLint has zero errors and the same five hook warnings. Test-environment media/canvas warnings, SDK sourcemap warnings, and build chunk-size warnings remain non-fatal.
+
+Next action: integrate this validated sync through a merge PR preserving ancestry, merge updated `origin/main` into the Publish feature, resolve the handoff add/add conflict, verify preflight and capability gating, and rerun validation before merging the feature. Phase 1 begins only after Phase 0 is clean.
 
 ## Next Planned Milestones
 
