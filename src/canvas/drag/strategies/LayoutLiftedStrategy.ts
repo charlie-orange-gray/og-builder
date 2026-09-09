@@ -894,6 +894,17 @@ export class LayoutLiftedStrategy implements DragStrategy {
       for (const node of draggedNodes) {
         const ns0 = getNodeFromCache(node.id)?.styles ?? {};
         if (ns0.transform || ns0.rotate) continue;
+        // ANCESTOR rotation/skew too: a flow child of a `rotate(90deg)` flex
+        // frame carries no transform of its own, but getRectAsync still
+        // returns its PAINTED AABB — here the 120×40 chip's 40×120 box. The
+        // "correction" swapped the lifted overlay's width/height in place
+        // (left/top untouched), so its centre jumped 40px off the cursor
+        // for the whole drag (user repro 2026-09-09, transformed frame with
+        // layout). The cached css size from the lift is the right one.
+        if (nodeOrAncestorHasRotationOrSkewById(node.id, vpIdFromPrefix(vpPrefix))) {
+          trace.action('layout-lifted:live-size-skip-rotated-ancestor', { nodeId: node.id });
+          continue;
+        }
         // COLLECTION-LIST TEMPLATE rows are skipped. Dragging one hides its
         // ghost siblings (`setCollectionGhostsHidden`, below) so a single row
         // drags cleanly — which leaves the template as the ONLY flex child and

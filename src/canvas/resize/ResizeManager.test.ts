@@ -8,6 +8,7 @@ import {
   getResizeCommitProperties,
   parseDimUnit,
   formatResizeDimension,
+  quantizeResizeDimension,
   lockedShiftHeight,
 } from './ResizeManager';
 
@@ -624,5 +625,22 @@ describe('computeSiblingVariantShifts', () => {
   test('no delta, or resizing a NON-primary tile, moves nobody', () => {
     expect(computeSiblingVariantShifts(cfgs, {}, 'default', 0, 0)).toEqual([]);
     expect(computeSiblingVariantShifts(cfgs, {}, 'default-hover', -100, 0)).toEqual([]);
+  });
+});
+
+// ─── quantizeResizeDimension ─────────────────────────────────────────────────
+// The compensation must pin the opposite corner against the size the DOM will
+// actually get (whole % / whole vh), not the raw drag px.
+describe('quantizeResizeDimension', () => {
+  test('% snaps to the whole-percent grid of the parent; px is untouched', () => {
+    expect(quantizeResizeDimension(403.7, '%', 0, 1119)).toBeCloseTo(0.36 * 1119, 6); // 36.08% → 36%
+    expect(quantizeResizeDimension(403.7, 'px', 0, 1119)).toBe(403.7);
+  });
+  test('vh/rem snap to whole units via the start ratio', () => {
+    expect(quantizeResizeDimension(203, 'vh', 9, 0)).toBe(23 * 9); // 22.56vh → 23vh
+  });
+  test('agrees with formatResizeDimension (what the DOM receives)', () => {
+    const px = quantizeResizeDimension(403.7, '%', 0, 1119);
+    expect(formatResizeDimension(px, '%', 0, 1119, (n) => `${n}px`)).toBe('36%');
   });
 });

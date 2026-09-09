@@ -1208,6 +1208,35 @@ const canvasNodes = (<>
 </>);
 `);
 
+// ─────────────────────────────────────────────────────────────────────────
+// ROTATED_FLEX_FRAME — a 90°-rotated absolute frame with a COLUMN flex
+// layout and two flow children (user repro 2026-09-09: dragging a flex child
+// of a transformed frame left the lifted overlay offset from the cursor).
+export const ROTATED_FLEX_FRAME = project(`
+/** @canvas { "viewports": [{"id":"desktop","width":700}] } */
+'use client';
+export default function Page() {
+  return (
+    <div data-id="root" data-name="Page" style={{
+      position: 'relative', width: '700px', minHeight: '640px', background: '#0d0d1a',
+    }}>
+      <div data-id="spinframe" data-name="Frame" style={{
+        position: 'absolute', width: '260px', height: '400px', backgroundColor: '#7d7d7d',
+        left: '220px', top: '120px', transform: 'rotate(90deg)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px',
+      }}>
+        <div data-id="chip" data-name="Chip" style={{
+          position: 'relative', width: '120px', height: '40px', backgroundColor: '#ff6b6b', flex: '0 0 auto',
+        }}></div>
+        <div data-id="card" data-name="Card" style={{
+          position: 'relative', width: '120px', height: '160px', backgroundColor: '#baffc9', flex: '0 0 auto',
+        }}></div>
+      </div>
+    </div>
+  );
+}
+`);
+
 export const SEEDS = {
   REPLICA_EXIT_TO_FRAME,
   NEGATIVE_MARGIN_ROW,
@@ -1241,6 +1270,7 @@ export const SEEDS = {
   LOCALE_TEXT,
   COMPONENT_MASTER,
   REPLICA_ABSOLUTE_EXIT,
+  ROTATED_FLEX_FRAME,
 } as const;
 
 export type SeedName = keyof typeof SEEDS;

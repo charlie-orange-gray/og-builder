@@ -432,6 +432,19 @@ export function formatResizeDimension(
   return pxFormat(newPx);
 }
 
+/** The px size the browser will actually resolve from `formatResizeDimension`'s
+ *  string — i.e. `newPx` snapped to the unit's grid (whole %, whole vh/rem…;
+ *  px unchanged). The transform compensation must be computed from THIS
+ *  value, not the raw drag px: pinning the opposite corner against an
+ *  unquantised width while the DOM gets the rounded one left the corner
+ *  oscillating ±(half a unit step) on a rotated %-wide element, while the
+ *  Dimensions input — which writes exact values — was rock steady (2026-09-09). */
+export function quantizeResizeDimension(newPx: number, unit: string, pxPerUnit: number, parentCss: number): number {
+  if (unit === '%') return parentCss > 0 ? (Math.round((newPx / parentCss) * 100) / 100) * parentCss : newPx;
+  if (unit !== 'px' && pxPerUnit > 0) return Math.round(newPx / pxPerUnit) * pxPerUnit;
+  return newPx;
+}
+
 /**
  * Resolve a CSS position value (px, %, or opposite-side inset) to an absolute pixel value.
  * Used to compute startLeft/startTop from CSS properties (NOT getBoundingClientRect
@@ -2309,6 +2322,15 @@ export function startResize(
     } else {
       callbacks.onSnapGuidesChange?.([]);
     }
+
+    // Snap the size to what the unit can EXPRESS before pinning the corner:
+    // a %/vh width is written as a whole number, so the DOM box is the
+    // rounded size — the compensation below must pin against that box, or
+    // the fixed corner wobbles by up to half a unit step every tick (the
+    // rotated %-wide frame "oscillating 1–2px", 2026-09-09). Only for
+    // non-inset axes (inset axes derive their size from the pins).
+    if (hasTransform && !inset.horizontalInset) newWidth = quantizeResizeDimension(newWidth, origWidthUnit, widthPxPerUnit, parentCssWidth);
+    if (hasTransform && !inset.verticalInset) newHeight = quantizeResizeDimension(newHeight, origHeightUnit, heightPxPerUnit, parentCssHeight);
 
     // ─── Transform compensation: pin opposite corner ─────────────────
     // Skipped during a symmetric (Alt) resize — that pins the centre,
