@@ -4,6 +4,8 @@
 
 Orange & Gray is adapting Revyme into a self-hosted visual website platform. The intended platform provides server-backed project persistence, staging deployments, Git-backed version control, versioned Docker images, production promotion, and rollback.
 
+The authoritative long-term platform design is [CHAZ-Architecture.md](./CHAZ-Architecture.md). This file is the concise current-state engineering handoff and should not duplicate that specification.
+
 ## Upstream Repository
 
 https://github.com/revyme-web/builder.git
@@ -24,15 +26,17 @@ https://github.com/charlie-orange-gray/og-builder.git
 
 ## Current Architecture
 
-The editor exposes one publishing capability, `PUBLISH_ENABLED`, from `src/shared/publish-flag.ts`. Revyme Cloud enables it through `CLOUD_ENABLED`; standalone self-hosted publishing enables it with the exact environment value `VITE_SELF_HOSTED_PUBLISH=true` without enabling cloud authentication, billing, marketplace, collaboration, cloud persistence, or hosted services.
+On `feature/self-hosted-publish-ui`, the editor exposes one publishing capability, `PUBLISH_ENABLED`, from `src/shared/publish-flag.ts`. Revyme Cloud enables it through `CLOUD_ENABLED`; standalone self-hosted publishing enables it with the exact environment value `VITE_SELF_HOSTED_PUBLISH=true` without enabling cloud authentication, billing, marketplace, collaboration, cloud persistence, or hosted services.
 
 In self-hosted development, same-origin `/api/*` requests are proxied by Vite to `VITE_API_URL`. Production should route `/api/*` to the control-plane service at the reverse proxy. The current editor seam expects `/api/websites/:id` and `/api/websites/:id/publish`; the control plane is intentionally not part of this repository.
 
-Current local development values are `VITE_SELF_HOSTED_PUBLISH=true` and `VITE_API_URL=http://localhost:8090`. Node is pinned by `.nvmrc` to `22.23.2`.
+The target architecture, not yet implemented, makes Orange & Gray infrastructure authoritative for editable projects. Each site has one independent Git repository. Publish first freezes a server project revision, materialises the complete generated site and its design assets, commits and pushes Git, and then deploys the resulting SHA. Runtime uploads remain in persistent per-site storage. Staging and production use blue/green Docker deployment, and production promotes the exact staging Git revision and image that was tested.
+
+The feature branch's local development values are `VITE_SELF_HOSTED_PUBLISH=true` and `VITE_API_URL=http://localhost:8090`. That branch also pins Node with `.nvmrc` to `22.23.2`.
 
 ## Current Branch
 
-`chore/sync-upstream-2026-09-09` (the Orange & Gray feature branch remains `feature/self-hosted-publish-ui` at `f002dfb`, plus its separate handoff commit `7a2ccae`).
+`chore/sync-upstream-2026-09-09` at `749e70c`. The local Orange & Gray feature branch is `feature/self-hosted-publish-ui` at `7a2ccae`; `f002dfb` is its implementation commit and `7a2ccae` is its separate handoff commit.
 
 ## Completed Work
 
@@ -48,7 +52,9 @@ The sync branch fast-forwarded from `origin/main` to upstream commit `b3ed3d9` (
 
 The sync branch contains one intentional 11-line lockfile correction, committed as `b8f851a`: nested `@swc/helpers@0.5.23`, still required because upstream's `next-intl` dependency resolves `@swc/core@1.15.33` with an optional `@swc/helpers>=0.5.17` peer. `npm ci` is clean with that correction. The updated handoff is committed separately as `ecf5856`.
 
-Next recommended action: review this sync branch and approve or reject integrating it into the feature branch. Do not push, merge into `origin/main`, rebase, or merge the feature until approval.
+`CHAZ-Architecture.md` now specifies the long-term platform, the detailed server-persistence boundary, and the future publish/deployment metadata model. No persistence service, Git publishing, or Docker deployment code has been added. A fresh fetch on 2026-09-09 confirmed that `origin/main` remains `a3ed7b5` and `upstream/main` remains `b3ed3d9`.
+
+Next recommended action: review the architecture documents and sync branch, then approve a controlled sync-branch PR followed by a non-rebase merge of the updated `origin/main` into the feature branch. Do not push, merge into `origin/main`, rebase, or merge the feature until approval.
 
 ## Next Planned Milestones
 
