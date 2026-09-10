@@ -232,7 +232,7 @@ function EffectSubMenu({ label, desc, children, onSelect }: {
   );
 }
 
-export default function AddEffectDropdown({ onAdd, existing, isTextNode, isSketchNode, isComponentInstance, appearOnly, glideOnly, noGlide, onApplyKeyframe }: {
+export default function AddEffectDropdown({ onAdd, existing, isTextNode, isSketchNode, isComponentInstance, appearOnly, glideOnly, noGlide, onApplyKeyframe, pasteItem }: {
   onAdd: (t: AddActionType) => void;
   existing: Set<AnimEntryType>;
   isTextNode?: boolean;
@@ -261,6 +261,10 @@ export default function AddEffectDropdown({ onAdd, existing, isTextNode, isSketc
    *  the open/close animation). Everything else renders greyed. */
   appearOnly?: boolean;
   onApplyKeyframe?: (name: string) => void;
+  /** A copied animation that can land on this node → a "Paste <Kind>" row at
+   *  the top of the menu, above a separator (user request 2026-09-09: copy an
+   *  animation on one node, `+` on another, paste it in one click). */
+  pasteItem?: { label: string; onClick: () => void } | null;
 }) {
   // Estimated dropdown height 380 — flips above the trigger when it can't fit
   // below; menu mounts invisible, then fades in after the flip is applied.
@@ -348,6 +352,19 @@ export default function AddEffectDropdown({ onAdd, existing, isTextNode, isSketc
           <div className={`absolute right-[10px] bg-[var(--dropdown-bg)] shadow-md cut-corners cut-lg cut-border [--cut-border-color:var(--border-light)] py-1.5 z-[51] w-max max-h-[420px] overflow-y-auto border border-[var(--border-light)] space-y-0.5 transition-opacity duration-150 ${
             openDir === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'
           }`} style={{ opacity: visible ? 1 : 0, scrollbarWidth: 'none' }}>
+            {pasteItem && (
+              <>
+                <button type="button"
+                  title={`Paste the copied ${pasteItem.label} animation onto this element`}
+                  className="group flex items-center mx-1.5 px-2.5 py-1.5 cut-corners w-[calc(100%-12px)] text-left cursor-pointer bg-transparent hover:!bg-[var(--accent)] border-none whitespace-nowrap"
+                  onClick={() => { pasteItem.onClick(); setOpen(false); }}>
+                  <span className="text-xs font-medium text-[var(--text-primary)] group-hover:text-[var(--accent-fg)]">
+                    Paste {pasteItem.label}
+                  </span>
+                </button>
+                <div className="mx-3 my-1 border-t border-[var(--border-light)]" />
+              </>
+            )}
             {visibleOptions.length === 0 ? (
               <div className="px-3 py-2 text-xs text-[var(--text-secondary)]">
                 All animation types added

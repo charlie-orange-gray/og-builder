@@ -3,7 +3,7 @@
 // Content: flex column with consistent spacing, reused by every tool.
 // When hasContent=false (or collapsed): no bottom margin, no separator.
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { trace } from '@/shared/debug-trace';
 
 interface Props {
@@ -20,6 +20,21 @@ interface Props {
 
 export default function ToolSection({ title, children, defaultOpen = true, collapsible = true, action, hasContent = true }: Props) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const actionRef = useRef<HTMLSpanElement>(null);
+
+  // Right-click anywhere on the title row opens the SAME menu the `+` (or
+  // toggle) button opens — the action's first button is clicked
+  // programmatically, so every section's add-menu stays the single source of
+  // its items (user request 2026-09-09). No action → the native menu is left
+  // alone.
+  const onHeaderContextMenu = (e: React.MouseEvent) => {
+    const btn = actionRef.current?.querySelector('button');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    trace.action('tool-section:context-open-action', { title });
+    btn.click();
+  };
 
   const validChildren = React.Children.toArray(children).filter(Boolean);
   if (validChildren.length === 0) return null;
@@ -29,7 +44,7 @@ export default function ToolSection({ title, children, defaultOpen = true, colla
   return (
     <div className="px-2">
       {/* Title row: label + action */}
-      <div className={`${showContent ? 'mb-2' : 'mb-0'} flex items-center justify-between pt-3 pb-1.5`}>
+      <div className={`${showContent ? 'mb-2' : 'mb-0'} flex items-center justify-between pt-3 pb-1.5`} onContextMenu={onHeaderContextMenu}>
         <span
           onClick={() => { if (collapsible) { setIsOpen(!isOpen); trace.action('tool-section:toggle', { title, isOpen: !isOpen }); } }}
           // Eyebrow, not a heading. Bold sentence-case at body size makes the
@@ -51,7 +66,7 @@ export default function ToolSection({ title, children, defaultOpen = true, colla
         >
           {title}
         </span>
-        {action}
+        <span ref={actionRef} className="flex items-center">{action}</span>
       </div>
       {isOpen && showContent && (
         <div className="flex flex-col py-0.5 gap-[var(--control-gap)] pl-3">

@@ -58,6 +58,12 @@ export interface ClipboardNode {
    *  and seeds the messages, so the duplicate stays translated (the FR
    *  duplicate showed baked English, live find 2026-09-05). */
   translations?: Record<string, string>;
+  /** Text-effect config (`data-text-anim` + the `<RevymeSplitText>` wrapper)
+   *  read off the SOURCE at copy time. The clipboard node carries only the
+   *  plain `textContent`, so without this a duplicated / pasted text lost its
+   *  text effect (live find 2026-09-09). Paste re-applies it through
+   *  `addTextAnimInCode` on the new id. */
+  textAnim?: Record<string, unknown>;
   /** Same, per translatable ATTR: attr → locale → string. */
   attrTranslations?: Record<string, Record<string, string>>;
   /** Per-breakpoint style overrides captured from the source page's @media

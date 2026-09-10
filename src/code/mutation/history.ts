@@ -41,6 +41,10 @@ export interface UiLocation {
   /** Manage Translations overlay: the locale it was showing, or null/absent
    *  when it was closed. */
   localizationLocale?: string | null;
+  /** Component-editing breadcrumb trail (ancestor files above the active
+   *  master). Undo/redo of a navigation-changing op (nested Make Component,
+   *  file ops) must restore it with the active file or the bar goes stale. */
+  breadcrumb?: string[];
 }
 
 interface HistoryEntry {
@@ -67,6 +71,11 @@ interface HistoryEntry {
    *  BOTH undo and redo, exactly like `activeFile`: it records where the edit
    *  was made, which is where either direction should show it. */
   uiLocation?: UiLocation;
+  /** Editor chrome once the operation SETTLED — redo restores this (the
+   *  post-op trail, e.g. inside the component Make Component created),
+   *  while undo restores `uiLocation` (pre-op). Absent on old entries →
+   *  redo falls back to `uiLocation`. */
+  uiLocationAfter?: UiLocation;
 }
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -301,7 +310,7 @@ function commitPendingHistory(): void {
   const currentSnapshot = projectFS.getSnapshot();
   const finalDiffs = computeDiffs(lastSnapshot, currentSnapshot);
   if (finalDiffs.length > 0) {
-    undoStack.push({ diffs: finalDiffs, selBefore: pendingSelBefore ?? liveSelection(), selAfter: liveSelection(), activeFile: pendingActiveFile ?? liveActiveFile(), uiLocation: pendingUiLocation ?? liveUiLocation() });
+    undoStack.push({ diffs: finalDiffs, selBefore: pendingSelBefore ?? liveSelection(), selAfter: liveSelection(), activeFile: pendingActiveFile ?? liveActiveFile(), uiLocation: pendingUiLocation ?? liveUiLocation(), uiLocationAfter: liveUiLocation() });
     if (undoStack.length > MAX_HISTORY) undoStack.shift();
     lastSnapshot = currentSnapshot;
     redoStack = [];
@@ -353,7 +362,7 @@ export function pushHistoryImmediate(newCode: string): void {
   const diffs = computeDiffs(lastSnapshot, currentSnapshot);
   if (diffs.length === 0) return;
 
-  const entry: HistoryEntry = { diffs, selBefore: liveSelection(), selAfter: liveSelection(), activeFile: liveActiveFile(), uiLocation: liveUiLocation() };
+  const entry: HistoryEntry = { diffs, selBefore: liveSelection(), selAfter: liveSelection(), activeFile: liveActiveFile(), uiLocation: liveUiLocation(), uiLocationAfter: liveUiLocation() };
   undoStack.push(entry);
   if (undoStack.length > MAX_HISTORY) undoStack.shift();
   lastSnapshot = new Map(currentSnapshot);
@@ -362,7 +371,7 @@ export function pushHistoryImmediate(newCode: string): void {
   // post-flush `setSelectedIds([newId])` typically lands later in the same
   // call stack. Refresh `selAfter` on the next microtask so redo reselects
   // the created node, not the pre-op selection.
-  queueMicrotask(() => { entry.selAfter = liveSelection(); });
+  queueMicrotask(() => { entry.selAfter = liveSelection(); entry.uiLocationAfter = liveUiLocation(); });
   trace.action('history:push-immediate', { undoSize: undoStack.length, diffCount: diffs.length });
 }
 
@@ -400,6 +409,54 @@ export function pushHistoryFileOp(activeFileBefore: string): void {
     undoStack[undoStack.length - 1].activeFileBefore = activeFileBefore;
     trace.action('history:push-file-op', { activeFileBefore, activeFile: undoStack[undoStack.length - 1].activeFile });
   }
+}
+
+/**
+ * Record a pure NAVIGATION (no file changed) as its own history step.
+ *
+ * Clicking a breadcrumb segment moves the editor between a page and its
+ * component masters without touching a single file, so the diff-based pushes
+ * above produce nothing and Cmd+Z skipped straight past it — undoing an edit
+ * made minutes earlier on another file instead of walking the user back
+ * (report 2026-09-09). This entry carries no diffs at all: undo restores the
+ * `from` side (file + breadcrumb + selection), redo the `to` side, and the
+ * project content is untouched either way.
+ *
+ * Call AFTER the navigation has been applied, so the live state IS the
+ * destination. `from` describes where the user just left.
+ */
+export function pushHistoryNavigation(from: {
+  activeFile: string;
+  uiLocation?: UiLocation;
+  selection?: string[];
+}): void {
+  // Any pending edit seals as its OWN entry first — otherwise the navigation
+  // folds into it and one Cmd+Z would undo both.
+  sealPendingHistory();
+  const to = liveActiveFile();
+  const toUi = liveUiLocation();
+  if (from.activeFile === to
+    && JSON.stringify(from.uiLocation?.breadcrumb ?? []) === JSON.stringify(toUi.breadcrumb ?? [])) {
+    return; // went nowhere
+  }
+  const entry: HistoryEntry = {
+    diffs: [],
+    selBefore: from.selection ?? [],
+    selAfter: liveSelection(),
+    activeFile: to,
+    activeFileBefore: from.activeFile,
+    uiLocation: from.uiLocation ?? {},
+    uiLocationAfter: toUi,
+  };
+  undoStack.push(entry);
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  // A navigation changes no files, so the snapshot the next diff is measured
+  // against must stay exactly as it is.
+  redoStack = [];
+  trace.action('history:push-navigation', {
+    from: from.activeFile, to, undoSize: undoStack.length,
+    fromCrumb: from.uiLocation?.breadcrumb?.length ?? 0, toCrumb: toUi.breadcrumb?.length ?? 0,
+  });
 }
 
 /** Sync history when code changes from external source (Monaco typing) */
@@ -516,7 +573,7 @@ export function undo(): boolean {
   const forwardDiffs = applyDiffsReverse(entry.diffs);
   // Store forward diffs for redo — carry the SAME selection pair + page so
   // redo reselects `selAfter` on the right page and a later undo `selBefore`.
-  redoStack.push({ diffs: forwardDiffs, selBefore: entry.selBefore, selAfter: entry.selAfter, activeFile: entry.activeFile, activeFileBefore: entry.activeFileBefore, uiLocation: entry.uiLocation });
+  redoStack.push({ diffs: forwardDiffs, selBefore: entry.selBefore, selAfter: entry.selAfter, activeFile: entry.activeFile, activeFileBefore: entry.activeFileBefore, uiLocation: entry.uiLocation, uiLocationAfter: entry.uiLocationAfter });
   lastSnapshot = projectFS.getSnapshot();
 
   trace.action('history:undo', { undoSize: undoStack.length, redoSize: redoStack.length, diffCount: entry.diffs.length, paths: entry.diffs.map(d => d.path), activeFile: entry.activeFile, activeFileBefore: entry.activeFileBefore, hasBumpVersion: !!_bumpVersion });
@@ -547,13 +604,13 @@ export function redo(): boolean {
   // Apply diffs forward (restore new content)
   const reverseDiffs = applyDiffsForward(entry.diffs);
   // Store reverse diffs for undo — carry the selection pair + page forward.
-  undoStack.push({ diffs: reverseDiffs, selBefore: entry.selBefore, selAfter: entry.selAfter, activeFile: entry.activeFile, activeFileBefore: entry.activeFileBefore, uiLocation: entry.uiLocation });
+  undoStack.push({ diffs: reverseDiffs, selBefore: entry.selBefore, selAfter: entry.selAfter, activeFile: entry.activeFile, activeFileBefore: entry.activeFileBefore, uiLocation: entry.uiLocation, uiLocationAfter: entry.uiLocationAfter });
   lastSnapshot = projectFS.getSnapshot();
 
   trace.action('history:redo', { undoSize: undoStack.length, redoSize: redoStack.length, diffCount: entry.diffs.length, activeFile: entry.activeFile });
   // Navigate to the page the change belongs to, restore code, reselect the
   // post-op selection (e.g. the re-created node from a redone paste).
-  restoreUiLocation(entry.uiLocation);
+  restoreUiLocation(entry.uiLocationAfter ?? entry.uiLocation);
   restoreToFileAndSelection(entry.activeFile, entry.selAfter);
   return true;
 }
