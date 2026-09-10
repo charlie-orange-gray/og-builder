@@ -50,6 +50,7 @@ The ignored `.env.local` still contains the original Publish flag and API URL; i
 6. Completed Phase 0 through normal merge commits for PRs #1 and #2, preserving published feature history.
 7. Implemented the local Phase 1 persistence proof: project create/list/load/rename/autosave, revision conflicts, idempotent retries, load-failure protection, read-only access, and downloadable conflict recovery.
 8. Added PostgreSQL migrations, atomic compressed snapshot storage, API/session boundaries, real database tests, and an independent-browser editor proof.
+9. Added Phase 2 content-addressed design assets, exact frozen revisions, embedded-data-URL migration at freeze time, and deterministic website-tree materialization in the control plane.
 
 ## Current Work
 
@@ -61,25 +62,25 @@ Feature validation passed fresh `npm ci`, TypeScript, all three builds, diff che
 
 Phase 0 is complete. [PR #2](https://github.com/charlie-orange-gray/og-builder/pull/2) merged with a normal merge commit as `84181a3` after successful confirmation validation and mergeability verification. `origin/main` contains both the latest validated upstream baseline (`e7b5b9f`) and the Publish capability feature (`74a3981`). Published feature history was not rebased. A fresh fetch at the start of persistence work found no newer upstream commit.
 
-Phase 1's first local persistence proof is implemented and validated on `feature/self-hosted-project-persistence`; it has not been merged into stable main. `/Users/chaz/og-control-plane` is a separate local Git repository with no remote configured. These Phase 1 changes are kept local for review; no new website repository, Git publishing pipeline, Docker operation, or Debian deployment was performed.
+Phase 1 and the first Phase 2 asset/materialization proof are implemented and validated on `feature/self-hosted-project-persistence`; this branch has not been merged into stable main. `/Users/chaz/og-control-plane` is a separate local Git repository with no remote configured. These changes are kept local for review; no new website repository, Git publishing pipeline, Docker operation, or Debian deployment was performed.
 
 Local implementation commits: editor adapter `795c2c5`; control-plane initial commit `f327b9a`. Phase 0 completion was recorded separately as `7e8ea40`. A final fetch of both builder remotes still reports `origin/main=84181a3` and `upstream/main=e7b5b9f`.
 
-The API implements `POST/GET /api/projects`, `GET/PUT/PATCH /api/projects/:projectId`, `POST /api/dev/session`, `GET /api/session`, `/healthz`, and `/readyz`. Its SQL migration creates users, workspaces, workspace memberships, projects, immutable project snapshots, project assets, audit events, sessions, and save receipts. Migration replay is checksummed and serialized. `project_assets` is schema groundwork only; a dedicated asset upload pipeline is not yet implemented.
+The API implements `POST/GET /api/projects`, `GET/PUT/PATCH /api/projects/:projectId`, project-scoped asset register/list/metadata/bytes routes, `POST /api/projects/:projectId/frozen-revisions`, `POST /api/frozen-revisions/:id/materialize`, `POST /api/dev/session`, `GET /api/session`, `/healthz`, and `/readyz`. Its SQL migrations create users, workspaces, workspace memberships, projects, immutable project snapshots, content-addressed project assets, frozen revisions/manifests, audit events, sessions, and save receipts. Migration replay is checksummed and serialized.
 
 Saves send a base revision, matching `If-Match`, and an idempotency key. Stale saves return 409, pause autosave, and preserve the local copy. Files are written/fsynced/renamed before database references commit. Settings survive load/save/recovery. Snapshot compression is gzip using stable Node 22 support; the actual architecture decision is recorded in `CHAZ-Architecture.md`. No protected canvas/parser/runtime/mutation/generator/CMS internals were changed.
 
-The local browser proof uses real PostgreSQL 18.4 and durable data in the service's ignored `.data/phase1-proof-v1`. It creates a project through the UI, draws through actual pointer/keyboard input, closes the first browser context, reloads in a fresh context, edits/saves again, and reloads both frames. Further cases prove failed-load blocking and stale-browser recovery without overwriting the newer server revision. A test-harness click initially targeted the fixed header; correcting that test target produced a clean three-test run. No product workaround was used.
+The local browser proof uses real PostgreSQL 18.4 and durable data in the service's ignored `.data/phase1-proof-v1`. It creates a project through the UI, draws through actual pointer/keyboard input, closes the first browser context, reloads in a fresh context, edits/saves again, and reloads both frames. Further cases prove failed-load blocking and stale-browser recovery without overwriting the newer server revision. The control-plane integration suite now also proves asset deduplication/byte retrieval, stale freeze rejection, embedded SVG data-URL migration, and two independent materializations with identical manifest/file contents. No product workaround was used.
 
 Final proof project: `d71de69c-e859-4498-bb2d-1cf6131927c8`, revision 1 → 2 across independent browser contexts. The retained JSON report is `test-results/persistence-report.json`; the screenshot shows both frames reloaded with acknowledged Saved status.
 
-Next recommended action: review the two local persistence repositories and run the manual proof, then publish a persistence PR. The next implementation dependency is content-addressed design asset storage and exact frozen-revision materialization, before a publishing API, site Git repositories, or Docker. Production authentication, database backup/restore, Debian access/configuration, and deployment operations remain unvalidated.
+Next recommended action: review the two local repositories and publish the combined Phase 1/2 PR only after approval. The next implementation dependency is a minimal Publish API that references a frozen revision, before any site Git repository or Docker work. Production authentication, database backup/restore, Debian access/configuration, and deployment operations remain unvalidated.
 
 ## Next Planned Milestones
 
 1. Self-hosted publishing capability seam — complete on stable main
 2. Self-hosted project persistence backend — local proof complete; review pending
-3. Local/server asset upload storage
+3. Content-addressed design asset storage and frozen materialization — local proof complete; review pending
 4. Minimal publish API
 5. Git staging deployment
 6. Docker staging deployment
@@ -127,7 +128,8 @@ Each individual website repository owns generated Next.js website source and its
 ## Storage Strategy
 
 - Self-hosted editor autosaves now go to the server; standalone and Cloud keep their existing providers.
-- Full immutable snapshots use canonical SHA-256 identity and `.json.gz` storage. Existing design data URLs are retained inside snapshots until the dedicated asset phase.
+- Full immutable snapshots use canonical SHA-256 identity and `.json.gz` storage. New uploads use project-scoped content-addressed asset objects; eligible legacy data URLs migrate when a revision is frozen.
+- Frozen revisions point to the exact snapshot ID/revision and an immutable asset manifest. Materialization rewrites only the isolated output tree, never the mutable editor snapshot.
 - Runtime uploads must not depend on a container writable layer.
 - Persistent uploads should use server storage or bind mounts.
 - Static design assets may be baked into versioned site builds.
@@ -164,8 +166,9 @@ git diff --check
 Phase 1 validation on 2026-09-09:
 
 - Editor: fresh `npm ci`, TypeScript, all three builds, and diff checks passed. Full `npm run test:run -- --maxWorkers=4`: 658 files, 10,342 passed, 1 skipped, 3 todo. Scoped ESLint: zero errors, 42 existing warnings in touched upstream files; new modules/tests clean.
-- Service: fresh `npm ci` (zero reported vulnerabilities), TypeScript, build, 19 tests against real PostgreSQL, and whitespace checks passed. Tests include concurrency, dedupe, receipt replay, storage failures/corruption, authorization, and a fresh service/pool instance (not a database process crash simulation).
-- Browser: `npm run test:persistence` passed all three real-editor cases. Evidence and screenshots are under ignored `test-results/`; logs are `/private/tmp/og-persistence-browser.log`. Editor test/build logs are `/private/tmp/og-phase1-tests.log` and `/private/tmp/og-phase1-build.log`.
+- Editor: fresh `npm ci`, TypeScript, all three builds, and diff checks passed. Full `npm run test:run -- --maxWorkers=4`: 659 files, 10,343 passed, 1 skipped, 3 todo. The added self-hosted asset-client test passed. Scoped ESLint on changed client files: zero errors and no rule findings; the normal module-type notice remains.
+- Service: fresh `npm ci` (zero reported vulnerabilities), TypeScript, build, 21 tests against real PostgreSQL, and whitespace checks passed. Tests include concurrency, dedupe, receipt replay, storage failures/corruption, authorization, frozen revision idempotency/immutability, asset dedupe/byte retrieval, embedded data-URL migration, and two repeated materializations with matching manifests.
+- Browser: `npm run test:persistence` passed all three real-editor cases against the migrated service schema. Evidence and screenshots are under ignored `test-results/`; logs are `/private/tmp/og-phase2-browser.log`. Editor test/build logs are `/private/tmp/og-phase1-tests.log` and `/private/tmp/og-phase1-build.log`.
 - Existing warnings: media/canvas test stubs, SDK sourcemaps, dynamic imports, large build chunks, and Node's ESLint module-type notice. Browser runs also show the existing layout-no-children bootstrap trace; the deliberate missing-project case logs its expected 404. No unresolved validation failure remains.
 - The service pins its dependency graph and uses `.npmrc` `legacy-peer-deps=true` to work around npm 10's optional-peer resolver crash. This disables all peer resolution; the installed runtime graph is explicitly pinned and tested.
 
@@ -178,7 +181,8 @@ Phase 1 validation on 2026-09-09:
 - Production promotes an approved staging revision and the exact tested image.
 - Upstream compatibility is a first-class requirement.
 - Development sessions are local-proof only. The server checks identity, workspace role and allowed Origin, and rejects development bypass/sessions in production. Do not expose this service publicly before real authentication and operational hardening.
+- Asset logical paths are allowlisted under `public/uploads`; server object paths use hashes and never use browser filenames. Materialization output is temporary and has no Git, Docker, shell, or runtime-upload authority.
 
 ## Last Updated
 
-2026-09-09
+2026-09-10

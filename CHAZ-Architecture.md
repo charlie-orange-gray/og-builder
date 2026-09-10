@@ -748,9 +748,7 @@ Implemented:
 
 Not implemented:
 
-- authoritative self-hosted project persistence
-- authentication and workspace authorization
-- design-asset materialisation pipeline
+- production authentication and workspace administration
 - control-plane Publish API
 - per-site Git repository orchestration
 - Docker build or deployment
@@ -760,6 +758,8 @@ Not implemented:
 - realtime collaboration
 
 Current upstream integration is local only and has not been pushed or merged into `origin/main`.
+
+The local Phase 1/2 implementation now provides authoritative self-hosted project persistence, content-addressed design assets, frozen revision manifests, and deterministic temporary website-tree materialization in `og-control-plane`. It does not yet create Git repositories, commit/push sites, or run Docker.
 
 ## 21. Implementation Roadmap
 
@@ -773,7 +773,7 @@ Persist complete editable Revyme projects on Orange & Gray infrastructure and pr
 
 ### Phase 2 — Design Asset Materialisation and Runtime Upload Strategy
 
-Store source design assets durably, materialise immutable assets into generated sites, and establish separate persistent runtime upload paths.
+Store source design assets durably, freeze exact project revisions, materialise immutable assets into generated sites, and establish separate persistent runtime upload paths. The local proof uses project-scoped content-addressed objects and deterministic temporary trees; runtime/CMS upload APIs remain future work.
 
 ### Phase 3 — Minimal Publish API
 
@@ -1034,7 +1034,7 @@ Request:  { expectedRevision, reason: "staging-publish" }
 Response: { snapshotId, revision, contentHash, createdAt }
 ```
 
-The frozen-revision endpoint is designed now but may be implemented in the later Publish phase. It freezes an already saved project revision; it does not generate Git or Docker state.
+The frozen-revision endpoint is implemented in the local Phase 2 proof. It freezes an already saved project revision and records the exact asset manifest; it does not generate Git or Docker state. Materialization produces an isolated complete tree and deterministic manifest hash without mutating the editable snapshot.
 
 For a low-risk editor migration, `SelfHostedBackend` may initially expose compatibility calls under `/api/websites/:id` if that avoids UI changes. The canonical control-plane domain model should still call these records projects/sites internally rather than inheriting Revyme Cloud billing or hosting assumptions.
 

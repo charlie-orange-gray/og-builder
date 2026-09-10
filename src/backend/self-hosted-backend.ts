@@ -97,14 +97,8 @@ export class SelfHostedBackend implements ProjectBackend {
   async listWorkspaceFonts(_workspaceId: string): Promise<WorkspaceFont[]> { return []; }
 
   async uploadAsset(_id: string, file: File): Promise<string> {
-    // The persistence proof embeds immutable bytes in ProjectData. A dedicated
-    // content-addressed asset store comes in the later assets phase.
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error ?? new Error('Could not read the asset.'));
-      reader.readAsDataURL(file);
-    });
+    const asset = await this.client.registerAsset(_id, file);
+    return `/api/projects/${asset.projectId}/assets/${asset.assetId}/bytes`;
   }
 
   async deleteAssets(_id: string, _keys: string[]): Promise<void> {

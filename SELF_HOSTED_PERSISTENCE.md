@@ -50,7 +50,7 @@ Loads establish a project revision. Saves include that revision, an `If-Match` h
 
 When a conflict is reported, autosave pauses and preserves the local project. Download the local snapshot before explicitly reloading the server version. Closing a page while a versioned save is outstanding triggers the browser's leave warning; a queued beacon is not treated as a successful save.
 
-Uploaded design files are embedded as durable data URLs in this first snapshot proof. A dedicated asset store and deterministic publishing materialization remain subsequent work. This phase does not implement Git site publishing, Docker deployment, or Debian hosting.
+Newly uploaded design files are registered in the control plane's content-addressed asset store and are referenced from the editor by project-scoped immutable asset URLs. Existing embedded data URLs remain compatible in editable snapshots; when a frozen revision is requested, eligible image/font/media data URLs are migrated into asset objects with deterministic `public/uploads/<sha256>.<extension>` paths. `POST /api/frozen-revisions/:id/materialize` produces an isolated complete website tree with static asset references and a deterministic manifest hash. This phase still does not implement Git site publishing, Docker deployment, or Debian hosting.
 
 ## Development authentication boundary
 

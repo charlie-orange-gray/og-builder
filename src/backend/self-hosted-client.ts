@@ -31,6 +31,14 @@ export interface SavedRevision {
   contentHash: string;
   savedAt: string;
 }
+export interface RegisteredAsset {
+  assetId: string;
+  projectId: string;
+  contentHash: string;
+  logicalPath: string;
+  mimeType: string;
+  byteSize: number;
+}
 
 export class ControlPlaneError extends Error {
   constructor(message: string, readonly status: number, readonly code: string, readonly details?: Record<string, unknown>) {
@@ -123,6 +131,19 @@ export class SelfHostedClient {
 
   renameProject(id: string, name: string): Promise<ProjectSummary> {
     return this.request(projectPath(id), { method: 'PATCH', body: JSON.stringify({ name }) });
+  }
+
+  async registerAsset(id: string, file: File): Promise<RegisteredAsset> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    const filename = file.name.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '') || 'asset';
+    return this.request<RegisteredAsset>(`${projectPath(id)}/assets`, { method: 'POST', body: JSON.stringify({
+      originalFilename: filename,
+      mimeType: file.type || 'application/octet-stream',
+      logicalPath: `public/uploads/${filename}`,
+      contentBase64: btoa(binary),
+    }) });
   }
 }
 
