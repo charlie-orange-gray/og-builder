@@ -60,7 +60,7 @@ describe('project snapshot readers flush the mutation queue first', () => {
     expect(header).toContain("backendCapabilities.persistence === 'self-hosted'");
     expect(header).toContain('prepareStagingRelease');
     expect(header).toContain('Staging source published');
-    expect(dropdown).toContain("selfHosted ? 'Prepare staging release' : 'Go live'");
+    expect(dropdown).toContain("stagingDeployment ? 'Deploy staging' : 'Publish staging source'");
   });
 
   // The preview must also RE-PUSH when files change while it's open.

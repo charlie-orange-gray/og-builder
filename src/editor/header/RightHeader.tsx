@@ -52,6 +52,7 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
   const [publishing, setPublishing] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
   const [publishNotice, setPublishNotice] = useState<string | null>(null);
+  const [stagingUrl, setStagingUrl] = useState<string | null>(null);
   // Publish failures used to go through window.alert(), which is unstyled,
   // blocks the tab, and gives a plan-limit rejection no way to act on itself.
   // `upgradable` marks the PAYMENT_REQUIRED case so the dialog can offer the
@@ -182,6 +183,7 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
     setPublishing(true);
     setPublishSuccess(false);
     setPublishNotice(null);
+    setStagingUrl(null);
     startProgress();
     trace.action('header:publish-start', { id });
     try {
@@ -207,10 +209,18 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
       await flushSaveNow();
       if (backendCapabilities.persistence === 'self-hosted') {
         if (!backend.prepareStagingRelease) throw new Error('Self-hosted publish is unavailable.');
-        const release = await backend.prepareStagingRelease(id);
-        if (release.status !== 'ready-for-build') throw new Error('The staging source was not published.');
+        let release = await backend.prepareStagingRelease(id);
+        if (backendCapabilities.stagingDeployment && backend.deployStaging && release.status === 'ready-for-build') {
+          setPublishNotice('Deploying staging…');
+          release = await backend.deployStaging(release.deploymentId);
+        }
+        if (release.status !== 'ready-for-build' && release.status !== 'active') throw new Error('The staging source was not published.');
         const sha = release.git?.sha ?? 'unavailable';
-        setPublishNotice(`Staging source published · revision ${release.projectRevision} · ${sha.slice(0, 12)}`);
+        const url = release.stagingUrl;
+        setStagingUrl(url);
+        setPublishNotice(release.status === 'active'
+          ? `Staging deployed · revision ${release.projectRevision} · ${sha.slice(0, 12)}${url ? ` · ${url}` : ''}`
+          : `Staging source published · revision ${release.projectRevision} · ${sha.slice(0, 12)}`);
         trace.action('header:publish-success', { deploymentId: release.deploymentId, projectRevision: release.projectRevision, materializationHash: release.materializationHash });
         setProgress(1);
         setPublishSuccess(true);
@@ -398,6 +408,8 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
             publishing={publishing}
             publishSuccess={publishSuccess}
             publishNotice={publishNotice}
+            stagingUrl={stagingUrl}
+            stagingDeployment={backendCapabilities.stagingDeployment}
             selfHosted={backendCapabilities.persistence === 'self-hosted'}
             progress={progress}
             onPublish={handlePublish}

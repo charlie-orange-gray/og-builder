@@ -90,6 +90,8 @@ interface Props {
   publishing: boolean;
   publishSuccess: boolean;
   publishNotice?: string | null;
+  stagingUrl?: string | null;
+  stagingDeployment?: boolean;
   selfHosted?: boolean;
   /** 0–1, advances during publishing. The dropdown renders a fill bar
    *  inside the primary button. */
@@ -111,7 +113,7 @@ interface Props {
   onOpenStaging?: () => void;
 }
 
-export function LiveDropdown({ open, meta, publishing, publishSuccess, publishNotice, selfHosted = false, progress, onPublish, onClose, onOpenBackups, onAddDomain, onOpenStaging }: Props) {
+export function LiveDropdown({ open, meta, publishing, publishSuccess, publishNotice, stagingUrl, stagingDeployment = false, selfHosted = false, progress, onPublish, onClose, onOpenBackups, onAddDomain, onOpenStaging }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Outside-click close — but only when the click is genuinely outside the
@@ -286,9 +288,14 @@ export function LiveDropdown({ open, meta, publishing, publishSuccess, publishNo
                   : <Check size={14} className="text-[var(--accent-fg)]" />
                 : meta?.isPublished
                 ? 'Update live site'
-                : selfHosted ? 'Prepare staging release' : 'Go live'}
+                : selfHosted ? (stagingDeployment ? 'Deploy staging' : 'Publish staging source') : 'Go live'}
             </span>
           </button>
+          {publishSuccess && stagingUrl && (
+            <a href={stagingUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+              Open staging <ExternalLink size={10} />
+            </a>
+          )}
         </div>
       </div>
     </motion.div>

@@ -14,6 +14,7 @@ export const backendCapabilities = {
   persistence,
   versionedPersistence: persistence === 'self-hosted',
   projectManagement: persistence === 'self-hosted',
+  stagingDeployment: persistence === 'self-hosted' && import.meta.env.VITE_SELF_HOSTED_DOCKER === 'true',
 } as const;
 
 if (CLOUD_ENABLED && import.meta.env.VITE_SELF_HOSTED_PERSISTENCE === 'true') {

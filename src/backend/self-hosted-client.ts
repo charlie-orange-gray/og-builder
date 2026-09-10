@@ -36,11 +36,15 @@ export interface StagingRelease {
   siteId: string;
   projectId: string;
   environment: 'staging';
-  status: 'queued' | 'freezing' | 'frozen' | 'materialising' | 'ready-for-git' | 'ready-for-build' | 'failed';
+  status: 'queued' | 'freezing' | 'frozen' | 'materialising' | 'ready-for-git' | 'ready-for-build' | 'building' | 'image-ready' | 'starting' | 'health-checking' | 'switching' | 'active' | 'superseded' | 'failed';
   projectRevision: number;
   frozenRevisionId: string | null;
   materializationHash: string | null;
   git: { repository: string; branch: string; sha: string } | null;
+  image: { tag: string; digest: string; id: string } | null;
+  slot: 'blue' | 'green' | null;
+  containerId: string | null;
+  stagingUrl: string | null;
   createdAt: string;
 }
 export interface RegisteredAsset {
@@ -147,6 +151,10 @@ export class SelfHostedClient {
       headers: { 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify({ expectedRevision, environment: 'staging' }),
     });
+  }
+
+  deployStaging(deploymentId: string): Promise<StagingRelease> {
+    return this.request<StagingRelease>(`/deployments/${deploymentId}/staging`, { method: 'POST', body: '{}' });
   }
 
   renameProject(id: string, name: string): Promise<ProjectSummary> {

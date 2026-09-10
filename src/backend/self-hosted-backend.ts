@@ -95,6 +95,10 @@ export class SelfHostedBackend implements ProjectBackend {
     return this.client.prepareStagingRelease(id, project.revision);
   }
 
+  async deployStaging(deploymentId: string): Promise<StagingRelease> {
+    return this.client.deployStaging(deploymentId);
+  }
+
   async getWebsiteName(id: string): Promise<string> { return (await this.read(id)).name; }
   async getWebsiteRole(id: string): Promise<'owner' | 'editor' | 'viewer'> { return (await this.read(id)).role; }
   async getWebsiteWorkspaceId(id: string): Promise<string> { return (await this.read(id)).workspaceId; }

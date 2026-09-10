@@ -79,6 +79,27 @@ export interface ProjectBackend {
     frozenRevisionId: string | null;
     materializationHash: string | null;
     git: { repository: string; branch: string; sha: string } | null;
+    image: { tag: string; digest: string; id: string } | null;
+    slot: 'blue' | 'green' | null;
+    containerId: string | null;
+    stagingUrl: string | null;
+    createdAt: string;
+  }>;
+  /** Deploy a previously published exact staging SHA when the deployment capability is enabled. */
+  deployStaging?(deploymentId: string): Promise<{
+    deploymentId: string;
+    siteId: string;
+    projectId: string;
+    environment: 'staging';
+    status: string;
+    projectRevision: number;
+    frozenRevisionId: string | null;
+    materializationHash: string | null;
+    git: { repository: string; branch: string; sha: string } | null;
+    image: { tag: string; digest: string; id: string } | null;
+    slot: 'blue' | 'green' | null;
+    containerId: string | null;
+    stagingUrl: string | null;
     createdAt: string;
   }>;
 

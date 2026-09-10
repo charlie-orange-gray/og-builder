@@ -25,6 +25,7 @@ describe('SelfHostedClient assets', () => {
         environment: 'staging', status: 'ready-for-build', projectRevision: 7,
         frozenRevisionId: 'frozen-id', materializationHash: 'sha256:' + 'b'.repeat(64), createdAt: '2026-09-10T00:00:00.000Z',
         git: { repository: 'test-owner/test-project', branch: 'staging', sha: 'c'.repeat(40) },
+        image: null, slot: null, containerId: null, stagingUrl: null,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     });
     const release = await client.prepareStagingRelease('11111111-1111-4111-8111-111111111111', 7, 'publish-key-1');
@@ -32,5 +33,19 @@ describe('SelfHostedClient assets', () => {
     expect(requestUrl).toContain('/api/projects/11111111-1111-4111-8111-111111111111/publish');
     expect(requestInit?.headers).toMatchObject({ 'Idempotency-Key': 'publish-key-1' });
     expect(JSON.parse(String(requestInit?.body))).toEqual({ expectedRevision: 7, environment: 'staging' });
+  });
+
+  it('requests staging deployment by immutable deployment ID', async () => {
+    let requestUrl = ''; let requestMethod = '';
+    const client = new SelfHostedClient(async (input, init) => {
+      requestUrl = String(input); requestMethod = init?.method ?? 'GET';
+      return new Response(JSON.stringify({
+        deploymentId: 'deployment-id', siteId: 'site-id', projectId: '11111111-1111-4111-8111-111111111111', environment: 'staging', status: 'active', projectRevision: 7,
+        frozenRevisionId: 'frozen-id', materializationHash: 'sha256:' + 'b'.repeat(64), git: { repository: 'test-owner/test-project', branch: 'staging', sha: 'c'.repeat(40) },
+        image: { tag: 'og/test-project:' + 'c'.repeat(40), digest: 'sha256:' + 'd'.repeat(64), id: 'sha256:' + 'e'.repeat(64) }, slot: 'green', containerId: 'container-id', stagingUrl: 'http://127.0.0.1:18080', createdAt: '2026-09-10T00:00:00.000Z',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    const release = await client.deployStaging('deployment-id');
+    expect(requestUrl).toBe('/api/deployments/deployment-id/staging'); expect(requestMethod).toBe('POST'); expect(release.status).toBe('active'); expect(release.stagingUrl).toContain('127.0.0.1');
   });
 });
