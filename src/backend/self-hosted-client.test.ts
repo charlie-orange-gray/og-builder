@@ -13,4 +13,23 @@ describe('SelfHostedClient assets', () => {
     expect(requestBody).toMatchObject({ originalFilename: '_hero_image.svg', mimeType: 'image/svg+xml', logicalPath: 'public/uploads/_hero_image.svg' });
     expect(requestBody?.contentBase64).toBe('aGVsbG8=');
   });
+
+  it('prepares staging from the exact loaded revision and sends an idempotency key', async () => {
+    let requestUrl = '';
+    let requestInit: RequestInit | undefined;
+    const client = new SelfHostedClient(async (input, init) => {
+      requestUrl = String(input);
+      requestInit = init;
+      return new Response(JSON.stringify({
+        deploymentId: 'deployment-id', siteId: 'site-id', projectId: '11111111-1111-4111-8111-111111111111',
+        environment: 'staging', status: 'ready-for-git', projectRevision: 7,
+        frozenRevisionId: 'frozen-id', materializationHash: 'sha256:' + 'b'.repeat(64), createdAt: '2026-09-10T00:00:00.000Z',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    const release = await client.prepareStagingRelease('11111111-1111-4111-8111-111111111111', 7, 'publish-key-1');
+    expect(release.status).toBe('ready-for-git');
+    expect(requestUrl).toContain('/api/projects/11111111-1111-4111-8111-111111111111/publish');
+    expect(requestInit?.headers).toMatchObject({ 'Idempotency-Key': 'publish-key-1' });
+    expect(JSON.parse(String(requestInit?.body))).toEqual({ expectedRevision: 7, environment: 'staging' });
+  });
 });

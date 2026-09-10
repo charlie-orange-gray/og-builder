@@ -31,6 +31,17 @@ export interface SavedRevision {
   contentHash: string;
   savedAt: string;
 }
+export interface StagingRelease {
+  deploymentId: string;
+  siteId: string;
+  projectId: string;
+  environment: 'staging';
+  status: 'queued' | 'freezing' | 'frozen' | 'materialising' | 'ready-for-git' | 'failed';
+  projectRevision: number;
+  frozenRevisionId: string | null;
+  materializationHash: string | null;
+  createdAt: string;
+}
 export interface RegisteredAsset {
   assetId: string;
   projectId: string;
@@ -127,6 +138,14 @@ export class SelfHostedClient {
       throw new Error('The server returned an invalid save acknowledgement. Retry to verify the saved revision.');
     }
     return result;
+  }
+
+  prepareStagingRelease(id: string, expectedRevision: number, idempotencyKey: string = crypto.randomUUID()): Promise<StagingRelease> {
+    return this.request<StagingRelease>(`${projectPath(id)}/publish`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expectedRevision, environment: 'staging' }),
+    });
   }
 
   renameProject(id: string, name: string): Promise<ProjectSummary> {

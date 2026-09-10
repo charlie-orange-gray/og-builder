@@ -68,6 +68,19 @@ export interface ProjectBackend {
   /** Save the full project snapshot. */
   saveProject(id: string, data: ProjectData): Promise<void>;
 
+  /** Prepare an exact saved self-hosted revision for a staging release. */
+  prepareStagingRelease?(id: string): Promise<{
+    deploymentId: string;
+    siteId: string;
+    projectId: string;
+    environment: 'staging';
+    status: string;
+    projectRevision: number;
+    frozenRevisionId: string | null;
+    materializationHash: string | null;
+    createdAt: string;
+  }>;
+
   /** Optional versioned-persistence hook: retain loaded settings while the editor
    *  serializes file changes. Explicit settings in `data` take precedence. */
   completeSnapshot?(id: string, data: ProjectData): ProjectData;

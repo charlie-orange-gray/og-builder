@@ -89,6 +89,8 @@ interface Props {
   meta: WebsiteMeta | null;
   publishing: boolean;
   publishSuccess: boolean;
+  publishNotice?: string | null;
+  selfHosted?: boolean;
   /** 0–1, advances during publishing. The dropdown renders a fill bar
    *  inside the primary button. */
   progress: number;
@@ -109,7 +111,7 @@ interface Props {
   onOpenStaging?: () => void;
 }
 
-export function LiveDropdown({ open, meta, publishing, publishSuccess, progress, onPublish, onClose, onOpenBackups, onAddDomain, onOpenStaging }: Props) {
+export function LiveDropdown({ open, meta, publishing, publishSuccess, publishNotice, selfHosted = false, progress, onPublish, onClose, onOpenBackups, onAddDomain, onOpenStaging }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Outside-click close — but only when the click is genuinely outside the
@@ -277,12 +279,14 @@ export function LiveDropdown({ open, meta, publishing, publishSuccess, progress,
               {publishing
                 ? `Publishing… ${Math.round(progress * 100)}%`
                 : publishSuccess
-                // accent-fg, not white: sits on the accent fill, same reason as
-                // the progress bar above.
-                ? <Check size={14} className="text-[var(--accent-fg)]" />
+                ? publishNotice
+                  ? <span className="text-[10px] leading-tight">{publishNotice}</span>
+                  // accent-fg, not white: sits on the accent fill, same reason as
+                  // the progress bar above.
+                  : <Check size={14} className="text-[var(--accent-fg)]" />
                 : meta?.isPublished
                 ? 'Update live site'
-                : 'Go live'}
+                : selfHosted ? 'Prepare staging release' : 'Go live'}
             </span>
           </button>
         </div>

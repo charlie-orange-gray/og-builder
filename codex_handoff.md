@@ -70,7 +70,7 @@ The Phase 2 implementation commits are `3e8e2b3` in the builder and `1ae553c` in
 
 After Phase 2 work began, upstream advanced from `e7b5b9f` to `3ef52b6` through four upstream commits. The isolated `chore/sync-upstream-2026-09-10` branch was created from `origin/main` and merged upstream as `7f5d31f` with no textual conflicts. Its upstream-only validation passed TypeScript, all three builds, 671 test files (10,449 passed, 1 skipped, 3 todo), and `git diff --check`. The upstream overlap is broad and upstream-owned, including `ProjectLoader.tsx`, canvas, parser, mutation, generator, and CMS files; it was not merged into this feature branch.
 
-The API implements `POST/GET /api/projects`, `GET/PUT/PATCH /api/projects/:projectId`, project-scoped asset register/list/metadata/bytes routes, `POST /api/projects/:projectId/frozen-revisions`, `POST /api/frozen-revisions/:id/materialize`, `POST /api/dev/session`, `GET /api/session`, `/healthz`, and `/readyz`. Its SQL migrations create users, workspaces, workspace memberships, projects, immutable project snapshots, content-addressed project assets, frozen revisions/manifests, audit events, sessions, and save receipts. Migration replay is checksummed and serialized.
+The API implements `POST/GET /api/projects`, `GET/PUT/PATCH /api/projects/:projectId`, project-scoped asset register/list/metadata/bytes routes, `POST /api/projects/:projectId/frozen-revisions`, `POST /api/frozen-revisions/:id/materialize`, `POST /api/projects/:projectId/publish` plus the editor-compatible `/api/websites/:projectId/publish` alias, `GET /api/deployments/:deploymentId`, `GET /api/websites/:projectId`, `POST /api/dev/session`, `GET /api/session`, `/healthz`, and `/readyz`. Its SQL migrations create users, workspaces, workspace memberships, projects, immutable project snapshots, content-addressed project assets, frozen revisions/manifests, sites, deployments, deployment events, audit events, sessions, and save receipts. Migration replay is checksummed and serialized.
 
 Saves send a base revision, matching `If-Match`, and an idempotency key. Stale saves return 409, pause autosave, and preserve the local copy. Files are written/fsynced/renamed before database references commit. Settings survive load/save/recovery. Snapshot compression is gzip using stable Node 22 support; the actual architecture decision is recorded in `CHAZ-Architecture.md`. No protected canvas/parser/runtime/mutation/generator/CMS internals were changed.
 
@@ -78,14 +78,16 @@ The local browser proof uses real PostgreSQL 18.4 and durable data in the servic
 
 Final proof project: `d71de69c-e859-4498-bb2d-1cf6131927c8`, revision 1 → 2 across independent browser contexts. The retained JSON report is `test-results/persistence-report.json`; the screenshot shows both frames reloaded with acknowledged Saved status.
 
-Next recommended action: review the two local repositories and publish the combined Phase 1/2 PR only after approval. The next implementation dependency is a minimal Publish API that references a frozen revision, before any site Git repository or Docker work. Production authentication, database backup/restore, Debian access/configuration, and deployment operations remain unvalidated.
+Phase 3 is implemented locally. Self-hosted Publish flushes mutations and the exact saved revision, runs the upstream preflight, calls the control-plane preparation endpoint, and reports `Release prepared for staging` with deployment ID, revision, and materialization hash. The control plane derives authorization from the session, creates/reuses a stable site, freezes and materializes the exact revision, records ordered deployment events, and ends at `ready-for-git`; it never performs Git or Docker work. Control-plane migration `003_publish_preparation.sql` adds `sites`, `deployments`, and `deployment_events`.
+
+Next recommended action: review and publish the combined Phase 1/2/3 changes only after explicit external approval. The control-plane repository still has no remote configured, and the builder feature push remains blocked by the environment's publication approval gate. Production authentication, database backup/restore, Debian access/configuration, and deployment operations remain unvalidated.
 
 ## Next Planned Milestones
 
 1. Self-hosted publishing capability seam — complete on stable main
 2. Self-hosted project persistence backend — local proof complete; review pending
 3. Content-addressed design asset storage and frozen materialization — local proof complete; review pending
-4. Minimal publish API
+4. Minimal publish API — local proof complete; review/publication pending
 5. Git staging deployment
 6. Docker staging deployment
 7. Production promotion

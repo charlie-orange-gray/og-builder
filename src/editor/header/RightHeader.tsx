@@ -30,6 +30,8 @@ import { parseWebsiteMeta } from './publish-utils';
 import { useSigmoidProgress } from '@/editor/hooks/useSigmoidProgress';
 import type { WebsiteMeta } from '@/backend/types';
 import { useIsViewer } from '@/code/stores/viewer-mode-store';
+import { backend } from '@/backend';
+import { backendCapabilities } from '@/backend/capabilities';
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -49,6 +51,7 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
   const [exportTipOpen, setExportTipOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
+  const [publishNotice, setPublishNotice] = useState<string | null>(null);
   // Publish failures used to go through window.alert(), which is unstyled,
   // blocks the tab, and gives a plan-limit rejection no way to act on itself.
   // `upgradable` marks the PAYMENT_REQUIRED case so the dialog can offer the
@@ -178,6 +181,7 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
     const id = (await import('@/backend/project-id')).getProjectId();
     setPublishing(true);
     setPublishSuccess(false);
+    setPublishNotice(null);
     startProgress();
     trace.action('header:publish-start', { id });
     try {
@@ -201,28 +205,37 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
       }
       const { flushSaveNow } = await import('@/backend/autosave');
       await flushSaveNow();
-      const res = await fetch(`/api/websites/${id}/publish`, { method: 'POST' });
-      const json = await res.json();
-      if (json.success && json.url) {
-        trace.action('header:publish-success', { url: json.url });
+      if (backendCapabilities.persistence === 'self-hosted') {
+        if (!backend.prepareStagingRelease) throw new Error('Self-hosted publish is unavailable.');
+        const release = await backend.prepareStagingRelease(id);
+        if (release.status !== 'ready-for-git') throw new Error('The staging release was not prepared.');
+        const hash = release.materializationHash ?? 'unavailable';
+        setPublishNotice(`Release prepared for staging · revision ${release.projectRevision} · ${hash.slice(0, 19)}…`);
+        trace.action('header:publish-success', { deploymentId: release.deploymentId, projectRevision: release.projectRevision, materializationHash: release.materializationHash });
         setProgress(1);
         setPublishSuccess(true);
-        await fetchMeta();
         setTimeout(() => setPublishSuccess(false), 2000);
       } else {
-        trace.error('header:publish-failed', json);
-        setProgress(0);
-        // The API serializes failures as `{ error: { code, message, details } }`.
-        // Older paths return a bare string, hence the typeof check.
-        const e = json?.error;
-        // Plan-limit rejections carry a structured `violations` array — render
-        // those one per line instead of the flattened sentence, so a site over
-        // on three axes reads as three lines rather than a paragraph.
-        const violations = e?.details?.violations;
-        const body = Array.isArray(violations) && violations.length > 0
-          ? violations.map((v: { message: string }) => v.message).join('\n')
-          : (typeof e === 'string' ? e : e?.message) || json?.details || 'Publish failed';
-        setPublishError({ message: body, upgradable: e?.code === 'PAYMENT_REQUIRED' });
+        const res = await fetch(`/api/websites/${id}/publish`, { method: 'POST' });
+        const json = await res.json();
+        if (json.success && json.url) {
+          trace.action('header:publish-success', { url: json.url });
+          setProgress(1);
+          setPublishSuccess(true);
+          await fetchMeta();
+          setTimeout(() => setPublishSuccess(false), 2000);
+        } else {
+          trace.error('header:publish-failed', json);
+          setProgress(0);
+          // The API serializes failures as `{ error: { code, message, details } }`.
+          // Older paths return a bare string, hence the typeof check.
+          const e = json?.error;
+          const violations = e?.details?.violations;
+          const body = Array.isArray(violations) && violations.length > 0
+            ? violations.map((v: { message: string }) => v.message).join('\n')
+            : (typeof e === 'string' ? e : e?.message) || json?.details || 'Publish failed';
+          setPublishError({ message: body, upgradable: e?.code === 'PAYMENT_REQUIRED' });
+        }
       }
     } catch (err) {
       trace.error('header:publish-error', err);
@@ -384,6 +397,8 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
             meta={meta}
             publishing={publishing}
             publishSuccess={publishSuccess}
+            publishNotice={publishNotice}
+            selfHosted={backendCapabilities.persistence === 'self-hosted'}
             progress={progress}
             onPublish={handlePublish}
             onClose={() => setOpen(false)}

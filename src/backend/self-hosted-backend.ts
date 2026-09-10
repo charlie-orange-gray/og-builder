@@ -1,5 +1,5 @@
 import type { ProjectBackend, ProjectData, RevymeUser, WorkspaceFont } from './types';
-import { ControlPlaneError, isRetryablePersistenceError, RevisionConflictError, SelfHostedClient, selfHostedClient, type SaveRequest, type ServerProject } from './self-hosted-client';
+import { ControlPlaneError, isRetryablePersistenceError, RevisionConflictError, SelfHostedClient, selfHostedClient, type SaveRequest, type ServerProject, type StagingRelease } from './self-hosted-client';
 
 /** Revision state is private to this adapter; a failed load never enables saving. */
 export class SelfHostedBackend implements ProjectBackend {
@@ -87,6 +87,12 @@ export class SelfHostedBackend implements ProjectBackend {
     const result = await this.client.renameProject(id, name);
     const project = this.projects.get(id);
     if (project) this.projects.set(id, { ...project, name: result.name });
+  }
+
+  async prepareStagingRelease(id: string): Promise<StagingRelease> {
+    const project = this.projects.get(id);
+    if (!project) throw new ControlPlaneError('The project must load successfully before it can be published.', 400, 'PROJECT_NOT_LOADED');
+    return this.client.prepareStagingRelease(id, project.revision);
   }
 
   async getWebsiteName(id: string): Promise<string> { return (await this.read(id)).name; }
