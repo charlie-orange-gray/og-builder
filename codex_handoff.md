@@ -32,7 +32,7 @@ In self-hosted development, same-origin `/api/*` requests are proxied by Vite to
 
 The Phase 1 branch selects persistence once through `backendCapabilities`: Cloud → `RevymeBackend`; exact `VITE_SELF_HOSTED_PERSISTENCE=true` → `SelfHostedBackend`; otherwise → `LocalBackend`. Publishing and persistence are independent. The new adapter stores full editable `ProjectData` through the separate `/Users/chaz/og-control-plane` service. PostgreSQL owns identity, permissions, revision metadata, and idempotency receipts; durable immutable snapshot files contain project contents/settings. Browser project localStorage is not the self-hosted source of truth.
 
-Git publishing and Docker remain unimplemented. Their required order is still frozen server revision → complete generated site/design assets → Git commit/push → exact SHA/image → staging health check → approved production promotion. Runtime uploads must remain outside disposable containers.
+The control plane now has a server-side Git provider seam. Local development creates/reuses a per-site bare repository, publishes the exact materialized tree to `staging`, verifies the commit SHA, and ends at `ready-for-build`. GitHub credentials, Docker, staging health checks, and production promotion remain unimplemented. Runtime uploads must remain outside disposable containers.
 
 The ignored `.env.local` still contains the original Publish flag and API URL; it was not silently switched to persistence. See [SELF_HOSTED_PERSISTENCE.md](./SELF_HOSTED_PERSISTENCE.md) for explicit proof commands with publishing disabled. Both repositories pin Node `22.23.2`.
 
@@ -62,7 +62,7 @@ Feature validation passed fresh `npm ci`, TypeScript, all three builds, diff che
 
 Phase 0 is complete. [PR #2](https://github.com/charlie-orange-gray/og-builder/pull/2) merged with a normal merge commit as `84181a3` after successful confirmation validation and mergeability verification. `origin/main` contains both the latest validated upstream baseline (`e7b5b9f`) and the Publish capability feature (`74a3981`). Published feature history was not rebased. A fresh fetch at the start of persistence work found no newer upstream commit.
 
-Phase 1, Phase 2, and the Phase 3 publish-preparation proof are implemented and validated on `feature/self-hosted-project-persistence`; this branch has not been merged into stable main. `/Users/chaz/og-control-plane` is a separate local Git repository with no remote configured. These changes are kept local for review; no new website repository, Git publishing pipeline, Docker operation, or Debian deployment was performed.
+Phase 1, Phase 2, and the Phase 3/4 local Git staging proof are implemented and validated on `feature/self-hosted-project-persistence`; this branch has not been merged into stable main. `/Users/chaz/og-control-plane` is a separate local Git repository with no remote configured. These changes are kept local for review; no GitHub repository, Docker operation, or Debian deployment was performed.
 
 Local implementation commits: editor adapter `795c2c5`; control-plane initial commit `f327b9a`. Phase 0 completion was recorded separately as `7e8ea40`. The final fetch reports `origin/main=84181a3` and `upstream/main=3ef52b6`.
 
@@ -78,11 +78,11 @@ The local browser proof uses real PostgreSQL 18.4 and durable data in the servic
 
 Final proof project: `d71de69c-e859-4498-bb2d-1cf6131927c8`, revision 1 → 2 across independent browser contexts. The retained JSON report is `test-results/persistence-report.json`; the screenshot shows both frames reloaded with acknowledged Saved status.
 
-Phase 3 is implemented locally. Self-hosted Publish flushes mutations and the exact saved revision, runs the upstream preflight, calls the control-plane preparation endpoint, and reports `Release prepared for staging` with deployment ID, revision, and materialization hash. The control plane derives authorization from the session, creates/reuses a stable site, freezes and materializes the exact revision, records ordered deployment events, and ends at `ready-for-git`; it never performs Git or Docker work. Control-plane migration `003_publish_preparation.sql` adds `sites`, `deployments`, and `deployment_events`.
+Phase 3/4 is implemented locally. Self-hosted Publish flushes mutations and the exact saved revision, runs the upstream preflight, calls the control-plane publish endpoint, and reports `Staging source published` with deployment ID, revision, repository, branch, and verified SHA. The control plane derives authorization from the session, creates/reuses a stable site and repository assignment, freezes and materializes the exact revision, serializes per-site publication, pushes the local provider's `staging` branch, records ordered deployment events, and ends at `ready-for-build`. GitHub is credential-gated; Docker and live deployment remain out of scope. Migration `004_git_repositories.sql` adds repository assignments and Git metadata.
 
-Builder feature implementation commit is `1fcc8ce`; current HEAD includes handoff commit `9d8191b`. Control-plane `main` is `68ae116` (publish preparation `b8107f5`, freeze-reuse test `68ae116`). Builder validation after Phase 3 passed `npm ci`, TypeScript, 659 test files (10,344 passed, 1 skipped, 3 todo), all three builds, persistence browser proof (3 passed), scoped ESLint (zero errors), and diff checks. Control-plane validation passed Node `22.23.2`/npm `10.9.8` `npm ci`, TypeScript, 24 PostgreSQL-backed tests, build, and diff checks. The control-plane test suite covers successful exact-revision staging preparation, idempotent replay, stale revision rejection, viewer authorization, materialization failure status, deployment events, deployment status retrieval, and frozen-revision reuse across distinct requests.
+The current uncommitted work adds the builder Git response contract and `ready-for-build` UI, control-plane migration `004_git_repositories.sql`, the server-side `GitProvider`/local bare-repository implementation, per-site assignment, SHA verification, and docs/tests. Validation is being rerun before local commits; final counts and commit IDs belong here once complete.
 
-Next recommended action: review and publish the combined Phase 1/2/3 changes only after explicit external approval. The control-plane repository still has no remote configured, and the builder feature push remains blocked by the environment's publication approval gate. Production authentication, database backup/restore, Debian access/configuration, and deployment operations remain unvalidated.
+Next recommended action: review the local Phase 3/4 changes, then explicitly authorize commits and any external publication. The control-plane repository still has no remote configured. Do not begin Docker until the exact local staging SHA proof is accepted. Production authentication, database backup/restore, Debian access/configuration, and deployment operations remain unvalidated.
 
 ## Next Planned Milestones
 
@@ -90,7 +90,7 @@ Next recommended action: review and publish the combined Phase 1/2/3 changes onl
 2. Self-hosted project persistence backend — local proof complete; review pending
 3. Content-addressed design asset storage and frozen materialization — local proof complete; review pending
 4. Minimal publish API — local proof complete; review/publication pending
-5. Git staging deployment
+5. Git staging deployment — local provider proof complete; GitHub provider pending credentials
 6. Docker staging deployment
 7. Production promotion
 8. Deployment history and rollback

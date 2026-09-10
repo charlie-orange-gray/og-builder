@@ -59,7 +59,7 @@ describe('project snapshot readers flush the mutation queue first', () => {
     const dropdown = readFileSync(join(ROOT, 'editor/header/LiveDropdown.tsx'), 'utf8');
     expect(header).toContain("backendCapabilities.persistence === 'self-hosted'");
     expect(header).toContain('prepareStagingRelease');
-    expect(header).toContain('Release prepared for staging');
+    expect(header).toContain('Staging source published');
     expect(dropdown).toContain("selfHosted ? 'Prepare staging release' : 'Go live'");
   });
 

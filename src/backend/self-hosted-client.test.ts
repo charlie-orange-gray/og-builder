@@ -22,12 +22,13 @@ describe('SelfHostedClient assets', () => {
       requestInit = init;
       return new Response(JSON.stringify({
         deploymentId: 'deployment-id', siteId: 'site-id', projectId: '11111111-1111-4111-8111-111111111111',
-        environment: 'staging', status: 'ready-for-git', projectRevision: 7,
+        environment: 'staging', status: 'ready-for-build', projectRevision: 7,
         frozenRevisionId: 'frozen-id', materializationHash: 'sha256:' + 'b'.repeat(64), createdAt: '2026-09-10T00:00:00.000Z',
+        git: { repository: 'test-owner/test-project', branch: 'staging', sha: 'c'.repeat(40) },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     });
     const release = await client.prepareStagingRelease('11111111-1111-4111-8111-111111111111', 7, 'publish-key-1');
-    expect(release.status).toBe('ready-for-git');
+    expect(release.status).toBe('ready-for-build');
     expect(requestUrl).toContain('/api/projects/11111111-1111-4111-8111-111111111111/publish');
     expect(requestInit?.headers).toMatchObject({ 'Idempotency-Key': 'publish-key-1' });
     expect(JSON.parse(String(requestInit?.body))).toEqual({ expectedRevision: 7, environment: 'staging' });

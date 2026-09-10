@@ -36,10 +36,11 @@ export interface StagingRelease {
   siteId: string;
   projectId: string;
   environment: 'staging';
-  status: 'queued' | 'freezing' | 'frozen' | 'materialising' | 'ready-for-git' | 'failed';
+  status: 'queued' | 'freezing' | 'frozen' | 'materialising' | 'ready-for-git' | 'ready-for-build' | 'failed';
   projectRevision: number;
   frozenRevisionId: string | null;
   materializationHash: string | null;
+  git: { repository: string; branch: string; sha: string } | null;
   createdAt: string;
 }
 export interface RegisteredAsset {

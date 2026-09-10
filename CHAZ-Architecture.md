@@ -758,7 +758,7 @@ Not implemented:
 
 Current upstream integration is local only and has not been pushed or merged into `origin/main`.
 
-The local Phase 1/2 implementation provides authoritative self-hosted project persistence, content-addressed design assets, frozen revision manifests, and deterministic temporary website-tree materialization in `og-control-plane`. Phase 3 now adds a minimal Publish API that freezes and materializes an exact staging revision, records `sites`, `deployments`, and `deployment_events`, and ends at `ready-for-git`. It does not create Git repositories, commit/push sites, or run Docker.
+The local Phase 1/2 implementation provides authoritative self-hosted project persistence, content-addressed design assets, frozen revision manifests, and deterministic temporary website-tree materialization in `og-control-plane`. Phase 3/4 now adds a minimal Publish API that freezes and materializes an exact staging revision, assigns a stable per-site repository through a server-side `GitProvider`, commits/pushes the local provider's `staging` branch, verifies the SHA, records `sites`, `git_repositories`, `deployments`, and `deployment_events`, and ends at `ready-for-build`. It does not build Docker or deploy a container.
 
 ## 21. Implementation Roadmap
 
@@ -776,11 +776,15 @@ Store source design assets durably, freeze exact project revisions, materialise 
 
 ### Phase 3 — Minimal Publish API
 
-Freeze a project revision and create an auditable deployment request without yet exposing infrastructure credentials to the editor. The local implementation accepts the expected saved revision, derives authorization from the session, reuses a stable site record and idempotent deployment request, materializes the frozen tree, records its deterministic manifest hash, and ends at `ready-for-git`; it never reports a deployment as live.
+Freeze a project revision and create an auditable deployment request without exposing infrastructure credentials to the editor. The local implementation accepts the expected saved revision, derives authorization from the session, reuses a stable site record and idempotent deployment request, materializes the frozen tree, records its deterministic manifest hash, and hands the exact source to the server-side Git seam.
 
 ### Phase 4 — Per-Site Git Repository Creation/Integration
 
-Assign or create one independent repository per website.
+Assign or create one independent repository per website. The local proof uses a
+filesystem-backed provider that creates/reuses a bare repository, pushes
+`staging`, verifies the remote SHA, and records the exact repository/branch/SHA
+on the deployment. A GitHub implementation must satisfy the same interface and
+keep credentials server-side.
 
 ### Phase 5 — Git Staging Publish
 
@@ -1035,17 +1039,19 @@ Response: { snapshotId, revision, contentHash, createdAt }
 
 The frozen-revision endpoint is implemented in the local Phase 2 proof. It freezes an already saved project revision and records the exact asset manifest; it does not generate Git or Docker state. Materialization produces an isolated complete tree and deterministic manifest hash without mutating the editable snapshot.
 
-Phase 3 adds `POST /api/projects/:projectId/publish` and the compatibility alias
-`POST /api/websites/:projectId/publish`. The request contains
+Phase 3/4 adds `POST /api/projects/:projectId/publish` and the compatibility
+alias `POST /api/websites/:projectId/publish`. The request contains
 `{expectedRevision, environment:"staging"}` and may include an
 `Idempotency-Key`. The control plane derives the workspace and role from the
-session, creates or reuses a stable site, freezes the exact revision, runs
-deterministic materialization, and records a deployment plus ordered events.
-Successful preparation returns the deployment ID, frozen revision ID,
-project revision, and materialization hash with status `ready-for-git`.
-`GET /api/deployments/:deploymentId` retrieves the status for an authorized
-workspace member. This boundary intentionally performs no Git, Docker, or
-production operation and never claims the site is live.
+session, creates or reuses a stable site and repository assignment, freezes the
+exact revision, runs deterministic materialization, publishes the exact tree to
+the server-side Git provider's `staging` branch, verifies the SHA, and records a
+deployment plus ordered events. Successful preparation returns the deployment
+ID, frozen revision ID, project revision, materialization hash, repository,
+branch, and SHA with status `ready-for-build`. `GET
+/api/deployments/:deploymentId` retrieves the status for an authorized
+workspace member. This boundary intentionally performs no Docker or production
+operation and never claims the site is live.
 
 For a low-risk editor migration, `SelfHostedBackend` may initially expose compatibility calls under `/api/websites/:id` if that avoids UI changes. The canonical control-plane domain model should still call these records projects/sites internally rather than inheriting Revyme Cloud billing or hosting assumptions.
 

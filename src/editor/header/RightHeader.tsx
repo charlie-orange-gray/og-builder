@@ -208,9 +208,9 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
       if (backendCapabilities.persistence === 'self-hosted') {
         if (!backend.prepareStagingRelease) throw new Error('Self-hosted publish is unavailable.');
         const release = await backend.prepareStagingRelease(id);
-        if (release.status !== 'ready-for-git') throw new Error('The staging release was not prepared.');
-        const hash = release.materializationHash ?? 'unavailable';
-        setPublishNotice(`Release prepared for staging · revision ${release.projectRevision} · ${hash.slice(0, 19)}…`);
+        if (release.status !== 'ready-for-build') throw new Error('The staging source was not published.');
+        const sha = release.git?.sha ?? 'unavailable';
+        setPublishNotice(`Staging source published · revision ${release.projectRevision} · ${sha.slice(0, 12)}`);
         trace.action('header:publish-success', { deploymentId: release.deploymentId, projectRevision: release.projectRevision, materializationHash: release.materializationHash });
         setProgress(1);
         setPublishSuccess(true);
