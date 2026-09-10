@@ -66,7 +66,7 @@ Phase 1 and the first Phase 2 asset/materialization proof are implemented and va
 
 Local implementation commits: editor adapter `795c2c5`; control-plane initial commit `f327b9a`. Phase 0 completion was recorded separately as `7e8ea40`. The final fetch reports `origin/main=84181a3` and `upstream/main=3ef52b6`.
 
-Phase 2 commits are `3e8e2b3` and `7f700f1` in the builder and `1ae553c` in the control plane. The control-plane repository has no remote configured. Publishing the builder feature branch and opening its PR was requested, but the current environment rejected the external push because the available publication approval was scoped to the earlier Phase 0 integration; no Phase 1/2 source was pushed.
+The Phase 2 implementation commits are `3e8e2b3` in the builder and `1ae553c` in the control plane; builder documentation/publication-gate commits are `7f700f1` and `4ec2c44`. The control-plane repository has no remote configured. Publishing the builder feature branch and opening its PR was requested, but the current environment rejected the external push because the available publication approval was scoped to the earlier Phase 0 integration; no Phase 1/2 source was pushed.
 
 After Phase 2 work began, upstream advanced from `e7b5b9f` to `3ef52b6` through four upstream commits. The isolated `chore/sync-upstream-2026-09-10` branch was created from `origin/main` and merged upstream as `7f5d31f` with no textual conflicts. Its upstream-only validation passed TypeScript, all three builds, 671 test files (10,449 passed, 1 skipped, 3 todo), and `git diff --check`. The upstream overlap is broad and upstream-owned, including `ProjectLoader.tsx`, canvas, parser, mutation, generator, and CMS files; it was not merged into this feature branch.
 
