@@ -66,6 +66,8 @@ Phase 1 and the first Phase 2 asset/materialization proof are implemented and va
 
 Local implementation commits: editor adapter `795c2c5`; control-plane initial commit `f327b9a`. Phase 0 completion was recorded separately as `7e8ea40`. A final fetch of both builder remotes still reports `origin/main=84181a3` and `upstream/main=e7b5b9f`.
 
+Phase 2 commits are `3e8e2b3` in the builder and `1ae553c` in the control plane. The control-plane repository has no remote configured. Publishing the builder feature branch and opening its PR was requested, but the current environment rejected the external push because the available publication approval was scoped to the earlier Phase 0 integration; no Phase 1/2 source was pushed.
+
 The API implements `POST/GET /api/projects`, `GET/PUT/PATCH /api/projects/:projectId`, project-scoped asset register/list/metadata/bytes routes, `POST /api/projects/:projectId/frozen-revisions`, `POST /api/frozen-revisions/:id/materialize`, `POST /api/dev/session`, `GET /api/session`, `/healthz`, and `/readyz`. Its SQL migrations create users, workspaces, workspace memberships, projects, immutable project snapshots, content-addressed project assets, frozen revisions/manifests, audit events, sessions, and save receipts. Migration replay is checksummed and serialized.
 
 Saves send a base revision, matching `If-Match`, and an idempotency key. Stale saves return 409, pause autosave, and preserve the local copy. Files are written/fsynced/renamed before database references commit. Settings survive load/save/recovery. Snapshot compression is gzip using stable Node 22 support; the actual architecture decision is recorded in `CHAZ-Architecture.md`. No protected canvas/parser/runtime/mutation/generator/CMS internals were changed.
