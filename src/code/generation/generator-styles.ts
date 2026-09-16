@@ -1264,6 +1264,54 @@ export function mergeDetachedStyleCSSIntoPage(pageCode: string, css: string): st
   return createStyleBlockInCode(pageCode, chunk);
 }
 
+/**
+ * MAKE COMPONENT carry: move every TOP-LEVEL `<style>` rule keyed to the
+ * extracted subtree — border-overlay `::after`, `:hover`, `::placeholder`,
+ * `:lang()`… — from the page's block into the new master's own block. The
+ * subtree's inline styles travel with its JSX, but an Overlay border lives
+ * ENTIRELY in a `[data-id="X"]::after` rule, so without this the master had
+ * no border (user report 2026-09-09) and every other instance lost it. The
+ * reverse direction (detach) already carries the master's rules back.
+ *
+ * A rule moves when EVERY `[data-id="…"]` in its selector names a moved id;
+ * `@media` / `@container` bands are left alone (the breakpoint transfer
+ * turns them into variant entries separately). Returns the css to add to the
+ * master and the page code with those rules removed.
+ */
+export function moveStyleRulesForIds(pageCode: string, isMovedId: (id: string) => boolean): { css: string; pageCode: string } {
+  const styleBlockRegex = /(<style>\s*\{[`'])([\s\S]*?)([`']\}\s*<\/style>)/s;
+  const blockMatch = styleBlockRegex.exec(pageCode);
+  if (!blockMatch) return { css: '', pageCode };
+  const body = blockMatch[2];
+  const moved: string[] = [];
+  let kept = '';
+  let i = 0;
+  while (i < body.length) {
+    const open = body.indexOf('{', i);
+    if (open === -1) { kept += body.slice(i); break; }
+    let depth = 1;
+    let j = open + 1;
+    while (j < body.length && depth > 0) {
+      if (body[j] === '{') depth++;
+      else if (body[j] === '}') depth--;
+      j++;
+    }
+    if (depth !== 0) { kept += body.slice(i); break; }
+    const rule = body.slice(i, j);
+    const head = body.slice(i, open).trim();
+    const ids = [...head.matchAll(/\[data-(?:node-)?id="([^"]+)"\]/g)].map(m => m[1]);
+    const movable = !head.startsWith('@') && ids.length > 0 && ids.every(isMovedId);
+    if (movable) moved.push(rule.trim());
+    else kept += rule;
+    i = j;
+  }
+  if (moved.length === 0) return { css: '', pageCode };
+  trace.action('generator.moveStyleRulesForIds', { moved: moved.length });
+  const [fullMatch, prefix, , suffix] = blockMatch;
+  const next = pageCode.slice(0, blockMatch.index!) + prefix + kept + suffix + pageCode.slice(blockMatch.index! + fullMatch.length);
+  return { css: moved.join('\n    '), pageCode: next };
+}
+
 /** Selector of a node's border-overlay `::after` rule. BASE: `[data-id="X"]::after`.
  *  PER-VARIANT (design-component variant `v`, never 'default'): the tile /
  *  master root carries `data-variant` (canvas: Renderer stamps every tile

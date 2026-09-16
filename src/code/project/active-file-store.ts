@@ -36,6 +36,33 @@ export const activeFilePathAtom = atom<string>('app/page.client.tsx');
 export const componentBreadcrumbAtom = atom<string[]>([]);
 
 /**
+ * The breadcrumb trail as it should be SHOWN for `activeFile`. The stack is
+ * pushed by hand on every "enter component" path, and any navigation that
+ * bypasses those paths (undo/redo of a nested Make Component, a file-op
+ * undo landing on a master) leaves it stale — the bar then shows the
+ * master the user just left as an extra ancestor, and every undo/redo
+ * round adds one more (user report 2026-09-09: "Home › Header › Header ›
+ * Header"). History now restores the trail (see UiLocation.breadcrumb);
+ * this heal is the render-time safety net: drop entries whose file is gone,
+ * cut the trail at the active file (it can't be its own ancestor), and
+ * collapse consecutive duplicates.
+ */
+export function healBreadcrumbTrail(
+  trail: readonly string[],
+  activeFile: string,
+  exists: (path: string) => boolean,
+): string[] {
+  const out: string[] = [];
+  for (const p of trail) {
+    if (p === activeFile) break;
+    if (!exists(p)) continue;
+    if (out[out.length - 1] === p) continue;
+    out.push(p);
+  }
+  return out;
+}
+
+/**
  * Read/write the active file's code from ProjectFS.
  * This replaces codeAtom as the primary code accessor.
  *

@@ -593,6 +593,8 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
   // instead of updateMotionProp. One `data-instance-fx` spec per instance; every write
   // merges into it.
   const isInstance = !!node?.componentFile;
+  const pasteSourceAnim = useAtomValue(copiedAnimationAtom);
+  const pasteTargets = useAtomValue(selectedIdsAtom);
   const writeInstanceFx = useCallback((mutate: (spec: InstanceFxSpec) => InstanceFxSpec) => {
     const cur = getInstanceFx(code, nodeId) || {};
     const next = mutate({ ...cur });
@@ -1154,10 +1156,41 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
 
   if (!node) return null;
 
+  // "Paste <Kind>" in the + menu: the copied animation is applicable here when
+  // its kind can be written on this node through the clipboard's own write
+  // path — a text effect needs a text node; the motion-prop kinds (appear /
+  // hover / tap) are written as whileX/initial, which an instance root doesn't
+  // take (instances go through instance-fx). Fans out over the selection like
+  // the row-level Paste Style.
+  const pasteApplicable = !!pasteSourceAnim && (
+    pasteSourceAnim.kind === 'textEffect'
+      ? isTextTag(node.type)
+      : !isInstance && !isOverlayNode && !glideOnly
+  );
+  const pasteItem = pasteApplicable && pasteSourceAnim ? {
+    label: pasteSourceAnim.label,
+    onClick: () => {
+      const copied = pasteSourceAnim;
+      const targets = pasteTargets.length > 0 ? pasteTargets : [nodeId];
+      trace.action('anim-clipboard:paste-from-add-menu', { kind: copied.kind, count: targets.length });
+      expediteStableAtomSync();
+      for (const id of targets) {
+        const target = id === nodeId ? node : getNodeFromCache(id);
+        applyCopiedAnimation(copied, id, target);
+        // A fresh Appear (no enter state on the target yet) needs the
+        // once-only viewport trigger the + Appear path writes.
+        if (copied.kind === 'appear' && !target?.motionProps?.initial) {
+          queueMutation({ type: 'updateMotionProp', nodeId: id, propName: 'viewport', props: { once: 'true' } });
+        }
+      }
+    },
+  } : null;
+
   return (
     <LocalizeGate hidden>
       <ToolSection title="Animation" collapsible hasContent={detected.length > 0 || pageEffects.length > 0}
         action={<AddEffectDropdown onAdd={handleAdd} existing={existingTypes} isTextNode={!!node && isTextTag(node.type)}
+          pasteItem={pasteItem}
           isComponentInstance={!!node?.componentFile}
           appearOnly={isOverlayNode}
           glideOnly={glideOnly}

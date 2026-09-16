@@ -11,7 +11,7 @@ import { coerceCssNumberToPx, toKebab } from '@/shared/css-utils';
 import { findElByNodeId, findAllByNodeId } from '../sandbox-dom-utils';
 import { syncEditorFromLiveSvg as syncShapeEditorFromLiveSvg } from '../shape-edit-host';
 import { contentRoot, emit } from './sandbox-state';
-import { cornersForElement, shouldRefreshSubtree, emitSubtreeRefresh, emitElementRefresh, cornersAreDecoupled } from './rect-emit';
+import { cornersForElement, shouldRefreshSubtree, emitSubtreeRefresh, emitElementRefresh, cornersAreDecoupled, scheduleSubtreeRefresh } from './rect-emit';
 import { isSandboxDndInteracting } from '../sandbox-dnd-host';
 
 /** Two-pass style application — clear empty values first, then set non-empty.
@@ -157,6 +157,18 @@ export function setNodeHidden(nodeId: string, vpPrefix: string, hidden: boolean)
     trace.action('sandbox:node-transient-hide', { nodeId, vpPrefix, hidden, count: hiddenNodeKeys.size });
 }
 
+/** Ghost mirroring must NOT run while the canonical element is LIFTED by a
+ *  layout drag (liftNode stamps `data-lift-inline-snapshot` for the duration):
+ *  the per-frame lift geometry (left/top at the cursor, z-index…) would land on
+ *  every ghost copy, displacing the rows. Nothing repaired it afterwards when
+ *  the drop's forced render was skipped — the collection rows "disappeared"
+ *  after dragging the template row and releasing in place (2026-09-09). */
+function ghostFanOutAllowed(nodeId: string, vpPrefix: string): boolean {
+  if (!contentRoot) return false;
+  const canonical = findElByNodeId(contentRoot, vpPrefix, nodeId) as HTMLElement | null;
+  return !(canonical && canonical.hasAttribute('data-lift-inline-snapshot'));
+}
+
 export function patchStyles(nodeId: string, vpPrefix: string, styles: Record<string, string>, important: boolean): void {
     if (!contentRoot) return;
     // Stale-element guard: during a live re-parent (canvas → frame entry,
@@ -212,7 +224,7 @@ export function patchStyles(nodeId: string, vpPrefix: string, styles: Record<str
     // ghost suffix (caller targeted a specific ghost) — apply only to
     // exact match in that case.
     const isCanonicalNodeId = !/__\d+$/.test(nodeId);
-    if (isCanonicalNodeId) {
+    if (isCanonicalNodeId && ghostFanOutAllowed(nodeId, vpPrefix)) {
       const ghostSiblings = Array.from(
         contentRoot.querySelectorAll<HTMLElement>(`[data-node-id^="${vpPrefix}${nodeId}__"]`),
       ).filter(g => g.getAttribute('data-id') === nodeId);
@@ -237,7 +249,11 @@ export function patchStyles(nodeId: string, vpPrefix: string, styles: Record<str
     // border-radius, opacity, …) so the cheap drag paths stay cheap.
     if (shouldRefreshSubtree(styles)) {
       if (isSandboxDndInteracting()) emitElementRefresh(el, emit);
-      else emitSubtreeRefresh(subtreeRefreshScope(el), emit);
+      // COALESCED: a committed batch patches each node separately and they
+      // usually share one scope (all root sections have the same parent), so
+      // the refresh runs once per frame per distinct scope — see
+      // `scheduleSubtreeRefresh`.
+      else scheduleSubtreeRefresh(subtreeRefreshScope(el), emit);
     }
 }
 
@@ -326,7 +342,7 @@ export function patchMultipleStyles(updates: PatchUpdate[]): void {
       // looked smooth on the row-zero template but ghosts only updated
       // after release. Symmetric fix.
       const isCanonicalNodeId = !/__\d+$/.test(update.nodeId);
-      if (isCanonicalNodeId) {
+      if (isCanonicalNodeId && ghostFanOutAllowed(update.nodeId, update.vpPrefix)) {
         const ghostSiblings = Array.from(
           contentRoot.querySelectorAll<HTMLElement>(`[data-node-id^="${update.vpPrefix}${update.nodeId}__"]`),
         ).filter(g => g.getAttribute('data-id') === update.nodeId);
@@ -378,7 +394,7 @@ export function patchMultipleStyles(updates: PatchUpdate[]): void {
       // on an auto-sized box, transform on a viewport root, etc.).
       if (shouldRefreshSubtree(update.styles)) {
         if (isSandboxDndInteracting()) emitElementRefresh(primary, emit);
-        else emitSubtreeRefresh(subtreeRefreshScope(primary), emit);
+        else scheduleSubtreeRefresh(subtreeRefreshScope(primary), emit);
       }
     }
 }

@@ -37,6 +37,7 @@ function useBorderOverlayVariant(): string | null {
 import { extractStyleCSS } from '@/code/parsing/parser';
 import { queueMutation } from '@/code/mutation/mutation-queue';
 import { injectCanvasCSS, removeCanvasCSS } from '@/canvas/node-ops';
+import { forSelectionTargets } from '../../../controls/multi-select-targets';
 import { presetTokensAtom } from '@/code/stores/preset-store';
 import { trace } from '@/shared/debug-trace';
 import { resolvePresetColor } from '@/shared/css-utils';
@@ -103,11 +104,11 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
       // First var-backed write: the ::after reads var() from now on. Converting a
       // LITERAL base while on a variant tile keeps the base look in the inline
       // vars and drops the variant-scoped literal rule (pre-vars form).
-      queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS: formatBorderAfterCSSVars() });
+      forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updateBorderOverlay', nodeId: tid, afterCSS: formatBorderAfterCSSVars() }));
       if (overlayVariant) {
         const baseState = afterBodyRaw ? parseBorderAfterCSS(afterBodyRaw) : null;
-        queueMutation({ type: 'updateStyles', nodeId, styles: borderStateToOverlayVars(baseState ?? state) });
-        queueMutation({ type: 'removeBorderOverlay', nodeId, variant: overlayVariant });
+        forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updateStyles', nodeId: tid, styles: borderStateToOverlayVars(baseState ?? state) }));
+        forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid, variant: overlayVariant }));
       }
     }
     const clear: Record<string, string> = {};
@@ -119,9 +120,9 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
   const removeOverlayBorderVars = () => {
     expediteStableAtomSync();
     if (overlayVariant) { onChangeMultiple(clearedOverlayVars()); return; } // variant → inherit base
-    queueMutation({ type: 'removeBorderOverlay', nodeId });
+    forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid }));
     onChangeMultiple(clearedOverlayVars());
-    removeCanvasCSS(borderOverlaySelector(nodeId));
+    forSelectionTargets(nodeId, (tid) => removeCanvasCSS(borderOverlaySelector(tid)));
   };
   const overlayStateFromCode = afterBody ? parseBorderAfterCSS(afterBody) : null;
   const inlineState = parseBorderState(s);
@@ -197,20 +198,20 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
     } else if (effectiveMode === 'overlay') {
       const afterCSS = formatBorderAfterCSS(state);
       expediteStableAtomSync();
-      queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS, variant: overlayVariant });
+      forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updateBorderOverlay', nodeId: tid, afterCSS, variant: overlayVariant }));
       const clear: Record<string, string> = {};
       for (const key of BORDER_INLINE_KEYS) clear[key] = '';
       if (!s.position || s.position === 'static') clear.position = 'relative';
       onChangeMultiple(clear);
-      injectCanvasCSS(borderOverlaySelector(nodeId, overlayVariant), afterCSS);
+      forSelectionTargets(nodeId, (tid) => injectCanvasCSS(borderOverlaySelector(tid, overlayVariant), afterCSS));
       trace.action('border-panel:write-overlay', { nodeId, width: state.top.width });
     } else {
       if (isOverlayFromCode || renderMode === 'overlay') {
         if (varBorderMode) removeOverlayBorderVars();
         else {
           expediteStableAtomSync();
-          queueMutation({ type: 'removeBorderOverlay', nodeId, variant: overlayVariant });
-          removeCanvasCSS(borderOverlaySelector(nodeId, overlayVariant));
+          forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid, variant: overlayVariant }));
+          forSelectionTargets(nodeId, (tid) => removeCanvasCSS(borderOverlaySelector(tid, overlayVariant)));
         }
       }
       // In non-direct modes (variableDefault — component-instance prop row,
@@ -240,8 +241,8 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
     if (effectiveRenderMode === 'overlay') {
       const afterCSS = formatGradientBorderAfterCSS(gradientCSS, width);
       expediteStableAtomSync();
-      queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS, variant: overlayVariant });
-      injectCanvasCSS(borderOverlaySelector(nodeId, overlayVariant), afterCSS);
+      forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updateBorderOverlay', nodeId: tid, afterCSS, variant: overlayVariant }));
+      forSelectionTargets(nodeId, (tid) => injectCanvasCSS(borderOverlaySelector(tid, overlayVariant), afterCSS));
       const clear: Record<string, string> = {};
       for (const key of BORDER_INLINE_KEYS) clear[key] = '';
       if (!s.position || s.position === 'static') clear.position = 'relative';
@@ -249,8 +250,8 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
     } else {
       if (isOverlayFromCode) {
         expediteStableAtomSync();
-        queueMutation({ type: 'removeBorderOverlay', nodeId, variant: overlayVariant });
-        removeCanvasCSS(borderOverlaySelector(nodeId, overlayVariant));
+        forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid, variant: overlayVariant }));
+        forSelectionTargets(nodeId, (tid) => removeCanvasCSS(borderOverlaySelector(tid, overlayVariant)));
       }
       onChangeMultiple({
         borderImageSource: gradientCSS, borderImageSlice: '1',
@@ -278,7 +279,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
     const effectiveRenderMode = isScrollMode ? 'inline' : renderMode;
     if (effectiveRenderMode === 'overlay') {
       // Imperative ::after repaint (CSS rule swap, no source touch).
-      injectCanvasCSS(borderOverlaySelector(nodeId, overlayVariant), formatGradientBorderAfterCSS(gradientCSS, width));
+      forSelectionTargets(nodeId, (tid) => injectCanvasCSS(borderOverlaySelector(tid, overlayVariant), formatGradientBorderAfterCSS(gradientCSS, width)));
     } else {
       // Live inline-style DOM patch (bridge), no source write.
       (onChangeMultipleLive ?? onChangeMultiple)({
@@ -299,7 +300,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
     const effectiveMode = isScrollMode ? 'inline' : writeMode;
     if (effectiveMode === 'overlay') {
       if (varBorderMode) applyOverlayBorderVars(state, true);
-      else injectCanvasCSS(borderOverlaySelector(nodeId, overlayVariant), formatBorderAfterCSS(state));
+      else forSelectionTargets(nodeId, (tid) => injectCanvasCSS(borderOverlaySelector(tid, overlayVariant), formatBorderAfterCSS(state)));
     } else {
       const useUniformShorthand = isScrollMode || state.isUniform;
       const result = useUniformShorthand ? formatBorderUniform(state.top) : formatBorderIndividual(state);
@@ -340,7 +341,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
   const switchToIndividual = () => { setShowIndividual(true); writeBorder({ ...borderState, isUniform: false }, renderMode); };
 
   const switchRenderMode = (newMode: 'inline' | 'overlay') => {
-    if (renderMode === 'overlay') { if (varBorderMode) removeOverlayBorderVars(); else { expediteStableAtomSync(); queueMutation({ type: 'removeBorderOverlay', nodeId, variant: overlayVariant }); removeCanvasCSS(borderOverlaySelector(nodeId, overlayVariant)); } }
+    if (renderMode === 'overlay') { if (varBorderMode) removeOverlayBorderVars(); else { expediteStableAtomSync(); forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid, variant: overlayVariant })); forSelectionTargets(nodeId, (tid) => removeCanvasCSS(borderOverlaySelector(tid, overlayVariant))); } }
     if (renderMode === 'inline') {
       const clear: Record<string, string> = {};
       for (const key of BORDER_INLINE_KEYS) clear[key] = '';
@@ -353,8 +354,8 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
       if (newMode === 'overlay') {
         const afterCSS = formatGradientBorderAfterCSS(gCSS, gradientWidth);
         expediteStableAtomSync();
-        queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS, variant: overlayVariant });
-        injectCanvasCSS(borderOverlaySelector(nodeId, overlayVariant), afterCSS);
+        forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updateBorderOverlay', nodeId: tid, afterCSS, variant: overlayVariant }));
+        forSelectionTargets(nodeId, (tid) => injectCanvasCSS(borderOverlaySelector(tid, overlayVariant), afterCSS));
         if (!s.position || s.position === 'static') onChangeMultiple({ position: 'relative' });
       } else {
         onChangeMultiple({ borderImageSource: gCSS, borderImageSlice: '1', borderWidth: `${gradientWidth}px`, borderStyle: 'solid' });
@@ -365,8 +366,8 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
       } else if (newMode === 'overlay') {
         const afterCSS = formatBorderAfterCSS(borderState);
         expediteStableAtomSync();
-        queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS, variant: overlayVariant });
-        injectCanvasCSS(borderOverlaySelector(nodeId, overlayVariant), afterCSS);
+        forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updateBorderOverlay', nodeId: tid, afterCSS, variant: overlayVariant }));
+        forSelectionTargets(nodeId, (tid) => injectCanvasCSS(borderOverlaySelector(tid, overlayVariant), afterCSS));
         if (!s.position || s.position === 'static') onChangeMultiple({ position: 'relative' });
       } else {
         onChangeMultiple(borderState.isUniform ? formatBorderUniform(borderState.top) : formatBorderIndividual(borderState));
@@ -377,7 +378,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
 
   const switchBorderType = (newType: 'solid' | 'gradient') => {
     if (borderType === 'gradient') onChangeMultiple({ borderImageSource: '', borderImageSlice: '' });
-    if (borderType === 'solid' && renderMode === 'overlay') { expediteStableAtomSync(); queueMutation({ type: 'removeBorderOverlay', nodeId, variant: overlayVariant }); removeCanvasCSS(borderOverlaySelector(nodeId, overlayVariant)); }
+    if (borderType === 'solid' && renderMode === 'overlay') { expediteStableAtomSync(); forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid, variant: overlayVariant })); forSelectionTargets(nodeId, (tid) => removeCanvasCSS(borderOverlaySelector(tid, overlayVariant))); }
     setBorderType(newType);
     if (newType === 'gradient') {
       const width = borderState.top.width || gradientWidth || 1;
@@ -540,11 +541,11 @@ function BorderAtom() {
       // First var-backed write: the ::after reads var() from now on. Converting a
       // LITERAL base while on a variant tile keeps the base look in the inline
       // vars and drops the variant-scoped literal rule (pre-vars form).
-      queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS: formatBorderAfterCSSVars() });
+      forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updateBorderOverlay', nodeId: tid, afterCSS: formatBorderAfterCSSVars() }));
       if (overlayVariant) {
         const baseState = afterBodyRaw ? parseBorderAfterCSS(afterBodyRaw) : null;
-        queueMutation({ type: 'updateStyles', nodeId, styles: borderStateToOverlayVars(baseState ?? state) });
-        queueMutation({ type: 'removeBorderOverlay', nodeId, variant: overlayVariant });
+        forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updateStyles', nodeId: tid, styles: borderStateToOverlayVars(baseState ?? state) }));
+        forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid, variant: overlayVariant }));
       }
     }
     const clear: Record<string, string> = {};
@@ -556,9 +557,9 @@ function BorderAtom() {
   const removeOverlayBorderVars = () => {
     expediteStableAtomSync();
     if (overlayVariant) { onChangeMultiple(clearedOverlayVars()); return; } // variant → inherit base
-    queueMutation({ type: 'removeBorderOverlay', nodeId });
+    forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid }));
     onChangeMultiple(clearedOverlayVars());
-    removeCanvasCSS(borderOverlaySelector(nodeId));
+    forSelectionTargets(nodeId, (tid) => removeCanvasCSS(borderOverlaySelector(tid)));
   };
   const overlayStateFromCode = afterBody ? parseBorderAfterCSS(afterBody) : null;
   const inlineState = parseBorderState(s);
@@ -657,21 +658,21 @@ function BorderAtom() {
     } else if (effectiveMode === 'overlay') {
       const afterCSS = formatBorderAfterCSS(state);
       expediteStableAtomSync();
-      queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS, variant: overlayVariant });
+      forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updateBorderOverlay', nodeId: tid, afterCSS, variant: overlayVariant }));
       const clear: Record<string, string> = {};
       for (const key of BORDER_INLINE_KEYS) clear[key] = '';
       const currentPos = s.position;
       if (!currentPos || currentPos === 'static') clear.position = 'relative';
       onChangeMultiple(clear);
-      injectCanvasCSS(borderOverlaySelector(nodeId, overlayVariant), afterCSS);
+      forSelectionTargets(nodeId, (tid) => injectCanvasCSS(borderOverlaySelector(tid, overlayVariant), afterCSS));
       trace.action('border:write-overlay', { nodeId, width: state.top.width });
     } else {
       if (isOverlayFromCode || renderMode === 'overlay') {
         if (varBorderMode) removeOverlayBorderVars();
         else {
           expediteStableAtomSync();
-          queueMutation({ type: 'removeBorderOverlay', nodeId, variant: overlayVariant });
-          removeCanvasCSS(borderOverlaySelector(nodeId, overlayVariant));
+          forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid, variant: overlayVariant }));
+          forSelectionTargets(nodeId, (tid) => removeCanvasCSS(borderOverlaySelector(tid, overlayVariant)));
         }
       }
       // See BorderEditorPanel.writeBorder for why isScrollMode coerces to
@@ -701,8 +702,8 @@ function BorderAtom() {
     if (varBorderMode) removeOverlayBorderVars();
     else {
       expediteStableAtomSync();
-      queueMutation({ type: 'removeBorderOverlay', nodeId, variant: overlayVariant });
-      removeCanvasCSS(borderOverlaySelector(nodeId, overlayVariant));
+      forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeBorderOverlay', nodeId: tid, variant: overlayVariant }));
+      forSelectionTargets(nodeId, (tid) => removeCanvasCSS(borderOverlaySelector(tid, overlayVariant)));
     }
     setLocalState(null);
     setLocalGradient(null);

@@ -2861,3 +2861,65 @@ export default function Page() {
     expect(page).not.toContain('visBlogs');
   });
 });
+
+describe('makeComponent carries the page <style> rules of the moved subtree', () => {
+  const PAGE = `import React from 'react';
+export default function Page() {
+  return (
+    <div data-id="root" style={{ position: 'relative' }}>
+  <style>{\`
+    [data-id="other"]::after {
+  content: '';
+  border: 2px solid red;
+    }
+    [data-id="card"]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-width: 12px;
+  border-style: solid;
+  border-color: #384bf6;
+    }
+    [data-id="card-inner"]:hover {
+  opacity: 0.5;
+    }
+    @container (max-width: 768px) {
+      [data-id="card"] { width: 100px !important; }
+    }
+  \`}</style>
+      <div data-id="other" style={{ width: '10px', height: '10px' }}></div>
+      <div data-id="card" data-name="Card" style={{ position: 'relative', width: '200px', height: '120px' }}>
+        <div data-id="card-inner" style={{ width: '50px', height: '50px' }}></div>
+      </div>
+    </div>
+  );
+}`;
+  function extract() {
+    vi.clearAllMocks();
+    mockFS.readFile.mockReturnValue(PAGE);
+    mockFS.exists.mockReturnValue(false);
+    const result = makeComponent('app/page.tsx', 'card', 'Card') as { updatedPageCode: string } | null;
+    const written = mockFS.writeFile.mock.calls
+      .filter((c: any[]) => String(c[0]).endsWith('.tsx'))
+      .map((c: any[]) => String(c[1]));
+    return { page: result!.updatedPageCode, component: written[written.length - 1] ?? '' };
+  }
+
+  test('the overlay border ::after and the :hover of a descendant land in the master', () => {
+    const { component } = extract();
+    expect(component).toContain('[data-id="card"]::after');
+    expect(component).toContain('border-color: #384bf6');
+    expect(component).toContain('[data-id="card-inner"]:hover');
+    // …inside ONE <style> block of the master
+    expect(component.match(/<style>/g)?.length).toBe(1);
+  });
+
+  test('the page keeps only rules for nodes that stayed', () => {
+    const { page } = extract();
+    expect(page).not.toContain('[data-id="card"]::after');
+    expect(page).not.toContain('[data-id="card-inner"]:hover');
+    expect(page).toContain('[data-id="other"]::after');
+    // the moved node's band is the breakpoint transfer's business (it already
+    // clears it from the page) — this carry only touches top-level rules.
+  });
+});

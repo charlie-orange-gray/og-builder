@@ -13,6 +13,8 @@ import {
   redirectToComponentInstance,
   patchElementStyles,
   getNodeIdsAtPoint,
+  getNodeHitsAtPoint,
+  isNodeLockedById,
 } from './node-ops';
 import type { CanvasNode } from '@/code/parsing/parser';
 import { isComponentFilePath } from '@/code/project/active-file-store';
@@ -716,5 +718,51 @@ describe('isFitTextSvgWrapper', () => {
     expect(isFitTextSvgWrapper(nodes.get('t1'), nodes)).toBe(false);
     expect(isFitTextSvgWrapper(null, nodes)).toBe(false);
     expect(findSvgShapeChild(nodes.get('t1-svg'), nodes)?.id).toBe('fo1');
+  });
+});
+
+
+// ─── getNodeHitsAtPoint — locked layers are invisible to the pointer ────────
+describe('getNodeHitsAtPoint — locked (pointer-events: none)', () => {
+  function bridgeWithRects(rectEntries: Array<[string, DOMRect]>) {
+    const rectCache = new Map<string, DOMRect>(rectEntries);
+    return {
+      rectCache,
+      getRect: (nodeId: string, vpPrefix: string) => rectCache.get(`${vpPrefix}:${nodeId}`) ?? null,
+      getCachedCorners: () => null,
+      getChildRects: () => [],
+      getComputedValue: () => '',
+      getComputedValues: () => ({}),
+      getContainerRect: () => null,
+      getElementIdsAtPoint: () => [],
+      patchStyles: () => {},
+      injectCSS: () => {},
+      removeCSS: () => {},
+    } as any;
+  }
+  const mk = (id: string, parentId: string | null, children: string[], styles: Record<string, string> = {}) =>
+    ({ id, parentId, children, styles, attrs: {} }) as any;
+
+  it('a locked node and its whole subtree drop out of the hits; siblings stay', () => {
+    const cache = new Map<string, any>([
+      ['section', mk('section', null, ['grid', 'other'])],
+      ['grid', mk('grid', 'section', ['card'], { pointerEvents: 'none' })],
+      ['card', mk('card', 'grid', [])],
+      ['other', mk('other', 'section', [])],
+    ]);
+    vi.mocked(mockedGetNodeFromCache).mockImplementation((id: string) => cache.get(id));
+    setActiveBridge(bridgeWithRects([
+      [':section', new DOMRect(0, 0, 1440, 900)],
+      [':grid', new DOMRect(0, 0, 1440, 600)],
+      [':card', new DOMRect(50, 50, 400, 300)],
+      [':other', new DOMRect(0, 0, 200, 200)],
+    ]));
+    const ids = getNodeHitsAtPoint(100, 100).map(h => h.id);
+    expect(ids).not.toContain('grid');
+    expect(ids).not.toContain('card');
+    expect(ids).toContain('other');
+    expect(ids).toContain('section');
+    expect(isNodeLockedById('card')).toBe(true);
+    expect(isNodeLockedById('other')).toBe(false);
   });
 });

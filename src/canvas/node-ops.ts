@@ -745,6 +745,27 @@ export function getContentRootRect(): DOMRect | null {
  * corners so a rotated diamond doesn't register hover inside its
  * circumscribed AABB but outside the visual quad.
  */
+/**
+ * LOCKED = the node (or any ancestor) carries `pointerEvents: 'none'` — the
+ * Layers lock icon / Ctrl+L write exactly that. A locked node must be
+ * invisible to the pointer on the canvas: no hover, no click, no drag, no
+ * drop target, no marquee (the layers panel is the one place it can still be
+ * selected). Hit-testing is rect-cache based, so the browser's own
+ * pointer-events never applied here and locked nodes stayed fully selectable
+ * (user report 2026-09-09). Inherits like the CSS property: locking a frame
+ * locks its subtree.
+ */
+export function isNodeLockedById(nodeId: string): boolean {
+  let cur: string | null = nodeId;
+  for (let i = 0; i < 60 && cur; i++) {
+    const node = getNodeFromCache(cur);
+    if (!node) return false;
+    if ((node.styles?.pointerEvents || '').trim() === 'none') return true;
+    cur = node.parentId ?? null;
+  }
+  return false;
+}
+
 export function getNodeHitsAtPoint(x: number, y: number): Array<{ id: string; vpPrefix: string }> {
   const bridge = getCanvasBridge();
   if (!('rectCache' in bridge)) return [];
@@ -821,9 +842,17 @@ export function getNodeHitsAtPoint(x: number, y: number): Array<{ id: string; vp
     }
     return false;
   };
+  const lockedMemo = new Map<string, boolean>();
+  const locked = (id: string): boolean => {
+    let v = lockedMemo.get(id);
+    if (v === undefined) { v = isNodeLockedById(id); lockedMemo.set(id, v); }
+    return v;
+  };
   for (const [key] of cache) {
     const { vpPrefix, nodeId } = parseRectCacheKey(key) ?? { vpPrefix: '', nodeId: key };
     if (!nodeId || nodeId === 'root') continue;
+    // Locked (pointer-events: none on the node or an ancestor) → not a hit.
+    if (locked(nodeId)) continue;
     // Prefer the cached CORNERS (the painted/visible shape) as the hit
     // region. For SVG wrappers — especially GROUPS — the painted bbox can
     // extend well past the wrapper's CSS-box `rect` (a child moved/resized

@@ -19,7 +19,7 @@ import { clearComponentCache } from './component-registry';
 import { WRAPPER_ONLY_STYLE_PROPS, PROJECTION_STYLE_PROPS } from '@/shared/constants';
 import { cssTransformToMotionProps } from '@/shared/motion-transform';
 import { toCamel } from '@/shared/css-utils';
-import { updateVariantStyleInCode, setConditionalStyleInCode, syncLinkHandlerInCode, clearContainerStylesForNode, updateContainerQueryStyle, mergeDetachedStyleCSSIntoPage } from '../generation/generator-styles';
+import { updateVariantStyleInCode, setConditionalStyleInCode, syncLinkHandlerInCode, clearContainerStylesForNode, updateContainerQueryStyle, mergeDetachedStyleCSSIntoPage, moveStyleRulesForIds } from '../generation/generator-styles';
 import { parseContainerRules } from '../stores/container-query-store';
 import { extractStyleCSS } from '../parsing/parser';
 import { rehydrateInstanceFx, setInstanceFxInCode } from '../generation/instance-fx-gen';
@@ -1211,11 +1211,24 @@ export function makeComponent(
       componentCode = descTransfer.componentCode;
     }
 
+    // STYLE-RULE CARRY — the page's `<style>` rules keyed to the moved subtree
+    // (Overlay border `::after`, :hover, ::placeholder, :lang) follow their
+    // nodes into the master's own block and leave the page. The ids are
+    // preserved by the extraction, so "moved" = the id is now in the master
+    // and is not the INSTANCE tag's own id on the page (the root id is both:
+    // its rule belongs to the master root, which renders it on live).
+    const ruleCarry = moveStyleRulesForIds(finalPageCode, (id) => componentCode.includes(`data-id="${id}"`));
+    if (ruleCarry.css) {
+      finalPageCode = ruleCarry.pageCode;
+      componentCode = mergeDetachedStyleCSSIntoPage(componentCode, ruleCarry.css);
+      trace.action('component-ops:make-component-style-carry', { nodeId, cssLen: ruleCarry.css.length });
+    }
+
     // Re-write the master if either transfer changed it — and syncImports so the
     // extracted AnimatePresence's carried `import { motion, AnimatePresence }` merges
     // with the generated `import { motion, LayoutGroup }` (no duplicate `motion`),
     // and the added useState/useLayoutEffect get their React import.
-    if (ovTransfer.moved || descTransfer.moved) {
+    if (ovTransfer.moved || descTransfer.moved || !!ruleCarry.css) {
       componentCode = syncImports(componentCode);
       projectFS.writeFile(componentFilePath, componentCode);
       clearComponentCache();

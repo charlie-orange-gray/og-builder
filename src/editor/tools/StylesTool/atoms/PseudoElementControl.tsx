@@ -11,6 +11,7 @@ import ToolPopup, { useToolPopupOptional } from '../../../ui/ToolPopup';
 import { useControl } from '../../../controls/ControlProvider';
 import { pseudoStylesAtom } from '@/code/stores/pseudo-store';
 import { keyframeNamesAtom } from '@/code/stores/animation-store';
+import { forSelectionTargets, selectionTargetIds } from '../../../controls/multi-select-targets';
 import { queueMutation } from '@/code/mutation/mutation-queue';
 import { injectCanvasCSS, removeCanvasCSS } from '@/canvas/node-ops';
 import { toKebab } from '@/shared/css-utils';
@@ -369,11 +370,11 @@ function PseudoEditor({ nodeId, pseudo, styles }: {
 
   // Live preview via injectCanvasCSS
   useEffect(() => {
-    const selector = `[data-id="${nodeId}"]::${pseudo}`;
     const css = stylesToCSS(localRef.current);
-    if (css) injectCanvasCSS(selector, css);
+    const targets = selectionTargetIds(nodeId);
+    if (css) for (const tid of targets) injectCanvasCSS(`[data-id="${tid}"]::${pseudo}`, css);
     return () => {
-      removeCanvasCSS(selector);
+      for (const tid of targets) removeCanvasCSS(`[data-id="${tid}"]::${pseudo}`);
       if (writeTimerRef.current !== null) {
         clearTimeout(writeTimerRef.current);
         writeTimerRef.current = null;
@@ -384,16 +385,16 @@ function PseudoEditor({ nodeId, pseudo, styles }: {
   }, []);
 
   useEffect(() => {
-    const selector = `[data-id="${nodeId}"]::${pseudo}`;
     const css = stylesToCSS(localStyles);
-    if (css) injectCanvasCSS(selector, css);
+    if (css) forSelectionTargets(nodeId, (tid) => injectCanvasCSS(`[data-id="${tid}"]::${pseudo}`, css));
   }, [localStyles, nodeId, pseudo]);
 
   const doWrite = useCallback((s: Record<string, string>) => {
     const filtered: Record<string, string> = {};
     for (const [k, v] of Object.entries(s)) { if (v) filtered[k] = v; }
     expediteStableAtomSync();
-    queueMutation({ type: 'updatePseudoStyle', nodeId, pseudo, styles: filtered });
+    // Multi-selection: the same pseudo styles land on every selected node.
+    forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'updatePseudoStyle', nodeId: tid, pseudo, styles: filtered }));
     trace.action('pseudo-editor:write', { nodeId, pseudo, propCount: Object.keys(filtered).length });
   }, [nodeId, pseudo]);
 
