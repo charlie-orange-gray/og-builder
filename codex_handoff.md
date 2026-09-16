@@ -117,6 +117,14 @@ The implementation commits remain `9f8b2ad` in the builder and `8007244` in the 
 11. Agency hardening
 12. Optional CMS/analytics/A-B/AI/MCP integrations
 
+## Debian staging host inventory — 2026-09-16
+
+Read-only SSH inventory succeeded via `chaz-debian` (`192.168.7.24`, Tailscale `100.70.105.18`). The host is Debian 13.6 (kernel 6.12.105), x86-64, 24 CPUs, 31 GiB RAM, with 804 GiB free on `/`. Docker Engine `29.8.0` is active and already serves unrelated household/work services; no Docker resources were changed. Nginx is active and enabled, but the SSH account has no non-interactive sudo authorization (a password is required), so Nginx validation or reload was not attempted.
+
+The original Revyme PoC is positively identified: `/var/www/revyme-builder`, owner `revyme`, Git `main` at `a3ed7b5` tracking `revyme-web/builder`, with an uncommitted `package-lock.json` change. PM2 v7.0.4 runs `canvas-poc` on `*:3333`, `canvas-sandbox` on `127.0.0.1:15174`, and `canvas-preview` on `127.0.0.1:15175`; all three endpoints returned HTTP 200. No `revyme`, `3333`, `15174`, or `15175` references were found in readable Nginx site/config paths (only the default site is enabled). The `revyme` user and project have therefore been retained; stopping PM2, archiving the project, and any Nginx change require an approved sudo-capable session and must wait until the new platform is published and ready.
+
+The generated-site contract remains local in control-plane commit `09ccb0f` on `feat/site-build-contract-2026-09-16`; it has not been pushed. Consequently no Debian deployment, old-PoC retirement, or staging release proof has run. The next safe action is to authorize publication of that control-plane branch (and the builder documentation branch if desired), then repeat the host checks with sudo before making narrowly scoped service changes. Production promotion remains out of scope.
+
 ## Deployment Architecture
 
 ```text
