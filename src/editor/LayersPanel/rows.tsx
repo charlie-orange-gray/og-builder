@@ -1002,23 +1002,33 @@ export const LayerRow = React.memo(function LayerRow({
           // a non-default variant un-hides via `display: ''`.
           const isHidden = effectiveHidden;
           const isLocked = node.styles.pointerEvents === 'none';
-          const alwaysShow = isHidden || isLocked;
+          // Each action shows ON ITS OWN when its state is on: a locked row shows
+          // the padlock (solid fill, full-strength colour), a hidden row shows the
+          // crossed eye — the other icon stays hover-only. Showing both at once made
+          // the lock read as generic hover chrome (user report 2026-09-09).
+          const hoverOnly = 'opacity-0 group-hover:opacity-100';
+          const strokeColor = isSelected ? `color-mix(in srgb, ${selFg} 70%, transparent)` : '#666';
+          const onColor = isSelected ? selFg : 'var(--text-primary)';
           return (
-            <div className={`flex items-center gap-0.5 shrink-0 sticky right-2 z-10 transition-opacity ${alwaysShow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+            <div className="flex items-center gap-0.5 shrink-0 sticky right-2 z-10">
               <button
                 draggable={false}
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onToggleLock(layer.nodeId!); }}
-                className="p-0.5 rounded hover:bg-[var(--bg-hover)] transition-colors"
+                className={`p-0.5 rounded hover:bg-[var(--bg-hover)] transition-all ${isLocked ? 'opacity-100' : hoverOnly}`}
                 title={isLocked ? 'Unlock layer' : 'Lock layer'}
+                data-locked={isLocked ? 'true' : undefined}
               >
                 {isLocked ? (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isSelected ? `color-mix(in srgb, ${selFg} 70%, transparent)` : '#666'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  // SOLID padlock: filled body + closed shackle, full colour.
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={onColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" fill={onColor} /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
                   </svg>
                 ) : (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isSelected ? `color-mix(in srgb, ${selFg} 70%, transparent)` : '#666'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 5-5 5 5 0 0 1 5 5v4" /><line x1="1" y1="1" x2="23" y2="23" />
+                  // Open padlock outline (shackle lifted) — no slash, so "unlocked"
+                  // can't be mistaken for "locked and crossed".
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={strokeColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" />
                   </svg>
                 )}
               </button>
@@ -1026,15 +1036,15 @@ export const LayerRow = React.memo(function LayerRow({
                 draggable={false}
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onToggleVisibility(layer.nodeId!, layer.viewportId); }}
-                className="p-0.5 rounded hover:bg-[var(--bg-hover)] transition-colors"
+                className={`p-0.5 rounded hover:bg-[var(--bg-hover)] transition-all ${isHidden ? 'opacity-100' : hoverOnly}`}
                 title={isHidden ? 'Show layer' : 'Hide layer'}
               >
                 {isHidden ? (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isSelected ? `color-mix(in srgb, ${selFg} 70%, transparent)` : '#666'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={onColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" />
                   </svg>
                 ) : (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isSelected ? `color-mix(in srgb, ${selFg} 70%, transparent)` : '#666'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={strokeColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
                   </svg>
                 )}

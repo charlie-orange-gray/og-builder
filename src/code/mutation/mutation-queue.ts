@@ -157,7 +157,7 @@ import { addCloseOverlayInCode, removeCloseOverlayInCode, setCloseOverlayDelayIn
 import type { InteractionTrigger } from '../features/page-interactions';
 import { unbindStyleFromMapInCode, bindPropToMapInCode, unbindPropFromMapInCode, bindToCmsCollectionInCode, unbindFromCmsCollectionInCode, changeCollectionSourceInCode, bindCmsFieldOnDropInCode, bindCmsNavLinkOnDropInCode, setCmsNavHrefInCode, getEnclosingMapIteratorForNode } from '../generation/map-gen';
 import { dormantizeCmsBindings, rehydrateCmsBindings, clearCmsOrphanInCode, healDanglingCanvasNodeBindings, detachCmsSubtreeWithValues } from '../generation/cms-detach-gen';
-import { resolveCmsRowForNodeInCode } from '../generation/cms-row-resolve';
+import { resolveDetailPageRow, resolveCmsRowForNodeInCode } from '../generation/cms-row-resolve';
 import { dormantizeComponentVarBindings, rehydrateComponentVarBindings, clearVarOrphanInCode, isCanvasNode } from '../generation/component-var-detach-gen';
 import { dormantizeTranslationBinding, rehydrateTranslationBinding } from '../generation/i18n-gen';
 import { localizeCollectionListsInCode } from '../generation/cms-locale-gen';
@@ -1148,7 +1148,7 @@ export function flushNow(): void {
     // committed the live binding (canvas showed item-0's resolved data on mouse-up,
     // only fixed by a later async processQueue). Mirrors the processQueue heal.
     if (code.indexOf('const canvasNodes') !== -1) {
-      code = healDanglingCanvasNodeBindings(code);
+      code = healDanglingCanvasNodeBindings(code, resolveDetailPageRow(code));
       // A search field / dynamic CMS filter pasted onto the canvas references a
       // page useState var at module scope → "X is not defined". Neutralize it.
       code = dormantizePageVarBindingsInCanvas(code);
@@ -1564,6 +1564,17 @@ const KNOWN_GLOBALS = new Set<string>([
   'Image', 'Audio', 'Video', 'Event', 'CustomEvent', 'KeyboardEvent', 'MouseEvent',
   'IntersectionObserver', 'ResizeObserver', 'MutationObserver', 'PerformanceObserver',
   'getComputedStyle', 'matchMedia', 'DOMParser', 'Node', 'Element', 'HTMLElement',
+  // DOM element / drawing classes — referenced at runtime (`instanceof`) and
+  // in TS type positions the scope walk still counts (`useRef<HTMLDivElement>`,
+  // `x as HTMLCanvasElement`); a code component using them was bounced as
+  // WOULD_CRASH (2026-09-09).
+  'HTMLDivElement', 'HTMLSpanElement', 'HTMLCanvasElement', 'HTMLImageElement', 'HTMLVideoElement',
+  'HTMLAudioElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLButtonElement', 'HTMLAnchorElement',
+  'HTMLParagraphElement', 'HTMLHeadingElement', 'HTMLIFrameElement', 'HTMLSelectElement', 'HTMLFormElement',
+  'HTMLLabelElement', 'HTMLUListElement', 'HTMLLIElement', 'HTMLTableElement', 'HTMLSourceElement',
+  'SVGElement', 'SVGSVGElement', 'SVGPathElement', 'CanvasRenderingContext2D', 'WebGLRenderingContext',
+  'WebGL2RenderingContext', 'ImageData', 'Path2D', 'DOMRect', 'DOMMatrix', 'OffscreenCanvas', 'ImageBitmap',
+  'requestIdleCallback', 'cancelIdleCallback', 'structuredClone', 'queueMicrotask',
   'NodeList', 'Range', 'Selection', 'crypto', 'performance', 'CSS', 'AbortController',
   // more browser APIs
   'alert', 'confirm', 'prompt', 'scrollTo', 'scrollBy', 'getSelection', 'Worker',
@@ -2086,7 +2097,7 @@ function processQueue(): void {
   // CMS element dragged out of a paginated list before the iterator-detection fix) →
   // dormantize it (placeholder + Missing) so it stops blocking EVERY later mutation.
   if (codeChanged && code.indexOf('const canvasNodes') !== -1) {
-    code = healDanglingCanvasNodeBindings(code);
+    code = healDanglingCanvasNodeBindings(code, resolveDetailPageRow(code));
     // A whole <form> dragged onto the canvas carries onSubmit + FormSubmit
     // initialVariant + responsive-attr __mq gates that reference page-fn vars
     // out of scope in module-scope canvasNodes → dormantize them (no crash).
@@ -2617,7 +2628,14 @@ function applyMutationCore(code: string, mutation: Mutation): string {
             ? detachCmsSubtreeWithValues(moved, mutation.nodeId, srcMapIter, srcCmsRow)
             : dormantizeCmsBindings(moved, mutation.nodeId, srcMapIter);
         }
-        if (dstMapIter) {
+        // Rehydrate whenever the node is back INSIDE the component render —
+        // not only inside a `.map()`. A CMS detail (`[slug]`) page binds
+        // against one `item` declared in the component body, so `dstMapIter`
+        // is null there and a node dragged back in from the canvas kept its
+        // dormant stash and its frozen baked text (report 2026-09-09).
+        // `canvasNodes` is module scope, where no iterator exists, so a node
+        // that landed THERE must stay dormant — that is the only exclusion.
+        if (dstMapIter || !isCanvasNode(moved, mutation.nodeId)) {
           moved = rehydrateCmsBindings(moved, mutation.nodeId);
         }
         if (!mutation.canvasNode && mutation.newParentId) {

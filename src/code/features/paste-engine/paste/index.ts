@@ -24,8 +24,10 @@ import { isOverlayNode, parseOverlayTriggerCalls } from '@/code/parsing/overlay-
 import { rebuildPastedCollectionInCode } from '@/code/generation/cms-paste-gen';
 import { copySlotConnectionsInCode } from '@/code/generation/slot-ops';
 import { rehydrateCmsBindings } from '@/code/generation/cms-detach-gen';
+import { addTextAnimInCode } from '@/code/generation/text-anim-gen';
+import type { TextAnimConfig } from '@/editor/tools/AnimationTool/motion/text-anim-presets';
 import type { OverlayConfig, OverlayTriggerConfig } from '@/shared/types';
-import type { ClipboardData, PasteContext, PasteResult } from '../types';
+import type { ClipboardData, PasteContext, PasteResult, ClipboardNode } from '../types';
 
 export interface PasteOptions {
   selectedIds: string[];
@@ -168,6 +170,9 @@ export function executePaste(opts: PasteOptions): PasteResult {
       // Re-seed per-locale translations on the copies (see the module header
       // for why this runs HERE, after the nodes are guaranteed in the file).
       reinjectTranslations(ctx.clipboardNodes, idMapper, opts.activeFilePath);
+      // Re-apply text effects on the copies — same whole-file pass, after the
+      // nodes are guaranteed in the file (the wrapper is JSX, not a style).
+      reinjectTextAnims(ctx.clipboardNodes, idMapper, opts.activeFilePath);
     }
     return {
       success: true,
@@ -463,3 +468,27 @@ function rehydratePastedCmsBindings(idMapper: IdMapper, destFilePath: string): v
 // Re-exports so call-sites can pick a single import path.
 export { findMatchingRule, getRuleById } from './rules';
 export { conditionCheckers, checkConditions } from './conditions';
+
+
+/**
+ * TEXT EFFECTS travel as a config captured at copy (`ClipboardNode.textAnim`,
+ * read off the source's `data-text-anim`). The pasted node is plain text, so
+ * re-wrap it: `addTextAnimInCode` writes the attribute + the `<RevymeSplitText>`
+ * wrapper (+ the runtime import) on every new id the copy mapped to.
+ */
+function reinjectTextAnims(clipboardNodes: ClipboardNode[], idMapper: IdMapper, destFilePath: string): void {
+  const withAnim = clipboardNodes.filter(n => n.textAnim);
+  if (withAnim.length === 0) return;
+  const mappings = idMapper.getAllMappings();
+  const work: Array<{ newId: string; config: TextAnimConfig }> = [];
+  for (const n of withAnim) {
+    for (const newId of mappings.get(n.id) ?? []) work.push({ newId, config: n.textAnim as unknown as TextAnimConfig });
+  }
+  if (work.length === 0) return;
+  modifyProjectFile(destFilePath, code => {
+    let next = code;
+    for (const w of work) next = addTextAnimInCode(next, w.newId, w.config);
+    return next;
+  });
+  trace.action('paste:text-anims-reinjected', { count: work.length });
+}

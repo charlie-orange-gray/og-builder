@@ -3,11 +3,11 @@
 // Shows: [Page button] > [Component1] > [Component2] breadcrumb navigation.
 // Visible whenever activeFile is a component file — not just when entered via double-click.
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { nextFrames } from '@/shared/dom-utils';
 import { createPortal } from 'react-dom';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { activeFilePathAtom, componentBreadcrumbAtom, getFileDisplayName, isMasterFilePath, isComponentLikeFilePath, isTemplateFilePath, getRouteGroup, getHomePageFilePath, getSlugPageParentFile, syncUrlToPage } from '@/code/project/active-file-store';
+import { activeFilePathAtom, componentBreadcrumbAtom, healBreadcrumbTrail, getFileDisplayName, isMasterFilePath, isComponentLikeFilePath, isTemplateFilePath, getRouteGroup, getHomePageFilePath, getSlugPageParentFile, syncUrlToPage } from '@/code/project/active-file-store';
 import { selectedIdsAtom } from '@/code/stores/store';
 import { overlayEditingIdAtom, overlayCallsAtom } from '@/code/stores/overlay-store';
 import { suppressSelectionOverlayAtom } from '@/code/stores/editor-store';
@@ -17,6 +17,7 @@ import { parseCmsPageMeta, cmsItemDisplayLabel, prettyCollectionName } from '@/c
 import { openCmsEditorAtom } from '@/code/stores/cms-editor-store';
 import { leftPanelAtom } from '@/code/stores/left-panel-store';
 import { flushNow, syncQueueCode } from '@/code/mutation/mutation-queue';
+import { pushHistoryNavigation } from '@/code/mutation/history';
 import { projectFS } from '@/code/project/project-fs';
 import { zoomToFit, zoomToFitCanvasBounds, cameraStash, transformManager } from '@/canvas/transform';
 import { getContentRoot } from '@/canvas/node-ops';
@@ -27,10 +28,18 @@ import VariableModal from '@/editor/ui/VariableModal';
 import { trace } from '@/shared/debug-trace';
 
 export default function ComponentBreadcrumb() {
-  const breadcrumb = useAtomValue(componentBreadcrumbAtom);
+  const rawBreadcrumb = useAtomValue(componentBreadcrumbAtom);
   const [activeFile, setActiveFile] = useAtom(activeFilePathAtom);
+  // Render-time heal (see healBreadcrumbTrail): never show the active file
+  // as its own ancestor, nor a deleted file, nor a duplicated crumb — the
+  // stack can go stale on navigations that bypass the push paths.
+  const breadcrumb = useMemo(
+    () => healBreadcrumbTrail(rawBreadcrumb, activeFile, (p) => projectFS.readFile(p) != null),
+    [rawBreadcrumb, activeFile],
+  );
   const setBreadcrumb = useSetAtom(componentBreadcrumbAtom);
   const setSelectedIds = useSetAtom(selectedIdsAtom);
+  const selectedIds = useAtomValue(selectedIdsAtom);
   const setSuppressSelectionOverlay = useSetAtom(suppressSelectionOverlayAtom);
   // For the slug-page base: when the breadcrumb's root page is a CMS `[slug]`
   // detail page, the base shows [Collection] › [Item] (the previewed record)
@@ -138,6 +147,9 @@ export default function ComponentBreadcrumb() {
     // would land on a blank editor.
     const targetFile = hasBreadcrumb ? breadcrumb[0] : getHomePageFilePath();
     trace.action('breadcrumb:exit-to-page', { from: activeFile, to: targetFile });
+    // Where the user is LEAVING — undo walks them back here (the navigation is
+    // its own history step; see pushHistoryNavigation).
+    const navFrom = { activeFile, uiLocation: { breadcrumb }, selection: selectedIds };
     const freshCode = projectFS.readFile(activeFile);
     if (freshCode) syncQueueCode(freshCode);
     flushNow();
@@ -153,6 +165,7 @@ export default function ComponentBreadcrumb() {
       // stays on `?page=component:Xyz` after the user exits to the
       // page, so a reload drops them back into the master.
       syncUrlToPage(targetFile);
+      pushHistoryNavigation(navFrom);
     });
   };
 
@@ -161,6 +174,7 @@ export default function ComponentBreadcrumb() {
     const targetFile = breadcrumb[index + 1];
     if (!targetFile || targetFile === activeFile) return;
     trace.action('breadcrumb:navigate-component', { from: activeFile, to: targetFile, level: index });
+    const navFrom = { activeFile, uiLocation: { breadcrumb }, selection: selectedIds };
     const freshCode = projectFS.readFile(activeFile);
     if (freshCode) syncQueueCode(freshCode);
     flushNow();
@@ -172,6 +186,7 @@ export default function ComponentBreadcrumb() {
       // intermediate breadcrumb segment also needs to write the new
       // file's slug into the URL so reload lands on it.
       syncUrlToPage(targetFile);
+      pushHistoryNavigation(navFrom);
     });
   };
 
@@ -181,6 +196,7 @@ export default function ComponentBreadcrumb() {
   const handleNavigateToOrigin = (originFile: string) => {
     if (!originFile || originFile === activeFile) return;
     trace.action('breadcrumb:navigate-origin', { from: activeFile, to: originFile });
+    const navFrom = { activeFile, uiLocation: { breadcrumb }, selection: selectedIds };
     const freshCode = projectFS.readFile(activeFile);
     if (freshCode) syncQueueCode(freshCode);
     flushNow();
@@ -192,6 +208,7 @@ export default function ComponentBreadcrumb() {
       // Back to a PAGE → return the left panel to the Pages tab (the collection
       // segment may have left it on the CMS panel).
       setLeftPanel('pages-layers');
+      pushHistoryNavigation(navFrom);
     });
   };
 

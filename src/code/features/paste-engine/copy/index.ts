@@ -28,6 +28,7 @@ import { extractBorderAfterRuleBody } from '@/editor/ui/border-utils';
 import { parsePseudoRules } from '@/code/parsing/pseudo-parser';
 import { getProjectId } from '@/backend/project-id';
 import { readTranslationText } from '@/code/project/translation-ops';
+import { readTextAnimConfig } from '@/code/generation/text-anim-gen';
 import { getI18nConfig } from '@/code/project/locale-ops';
 
 const CLIPBOARD_STORAGE_KEY = 'revyme_clipboard';
@@ -440,6 +441,23 @@ export function copyNodes(
   // 4. Capture computed dims for the user-selected ROOTS only (not descendants
   //    or overlays — they'll size against their pasted parents).
   captureComputedDimensions(clipboardNodes, new Set(nodeIds));
+
+  // 4a. Capture TEXT EFFECTS. The wrapper `<RevymeSplitText>` + `data-text-anim`
+  //     live in the JSX, not in the node model the clipboard is built from, so
+  //     read the config straight off the source per copied node.
+  try {
+    const src = projectFS.readFile(getActiveFilePath()) ?? '';
+    if (src) {
+      let captured = 0;
+      for (const n of clipboardNodes) {
+        const cfg = readTextAnimConfig(src, n.id);
+        if (cfg) { n.textAnim = cfg as unknown as Record<string, unknown>; captured++; }
+      }
+      if (captured) trace.action('copy:text-anim-captured', { count: captured });
+    }
+  } catch (err) {
+    trace.error('clipboard:text-anim-capture-failed', err);
+  }
 
   // 4b. Capture function-scope effects (scroll transforms, hooks, tool
   //     annotations) that mention ANY node in the collected subtree —

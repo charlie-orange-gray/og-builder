@@ -1,7 +1,8 @@
 // CanvasDragStrategy.test.ts — Unit tests for the default canvas absolute drag strategy.
 
-import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { CanvasDragStrategy } from './CanvasDragStrategy';
+import { describe, test, expect, vi, beforeEach, it } from 'vitest';
+import { CanvasDragStrategy, hitIsOverComponentInstance, instanceWrapperIdForHit } from './CanvasDragStrategy';
+import { isInstanceOwnedNode } from '@/canvas/drag/instance-drop-guard';
 import type { DragContext } from '../types';
 import type { DraggedNode, Transform, Point } from '@/shared/types';
 import { dropLineOps } from '@/canvas/selection/drop-line-store';
@@ -910,6 +911,53 @@ describe('entry into a REPLICA writes the visibility pair', () => {
     expect(forceCanvasRenderDeferredDuringDrag).not.toHaveBeenCalled();
   });
 
+  test('a COMPONENT INSTANCE entering a replica writes the same pair, unhiding with the master ROOT display', async () => {
+    // Instances used to skip both halves ("the bounded @media hides cover
+    // the primary range") — they never did: a primary-width band is dropped
+    // by the generator, so the instance hid on mobile and stayed visible on
+    // desktop (2026-09-09). The unhide is the master root's display (never
+    // `unset`, which collapses the canvas wrapper <div> to inline).
+    const { getDefaultStore } = await import('jotai');
+    const { codeAtom } = await import('@/code/stores/store');
+    getDefaultStore().set(codeAtom, NO_RULES);
+
+    const nodes = replicaNodes();
+    nodes.set('node-1', {
+      id: 'node-1', type: 'Card', tag: 'Card', parentId: null, children: ['node-1:card-root'],
+      styles: { position: 'absolute', left: '100px', top: '200px' }, attrs: {},
+      isComponentInstance: true, componentFile: 'components/Card.tsx', isCanvasNode: true,
+    });
+    nodes.set('node-1:card-root', {
+      id: 'node-1:card-root', type: 'motion.div', tag: 'div', parentId: 'node-1', children: [],
+      styles: { display: 'flex', gap: '8px' }, attrs: {}, componentInstanceId: 'node-1', isComponentRoot: true,
+    });
+    const ctx = makeContext({
+      draggedNodes: [makeDraggedNode({ id: 'node-1', startLeft: 100, startTop: 200, startParentId: null })],
+      startMouse: { x: 200, y: 300 },
+      viewportPrefix: '',
+      nodes,
+    });
+    const s = new CanvasDragStrategy();
+    s.onStart(ctx);
+    for (let i = 0; i < 3; i++) s.onMove(ctx, { x: 220, y: 320 });
+
+    // Half one — the inline hide baseline, on the instance tag like any node.
+    expect(queueMutation).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'move', nodeId: 'node-1', styles: expect.objectContaining({ display: 'none' }),
+    }));
+    // Half two — the entered (tablet) band restores the ROOT's `flex`, not `unset`.
+    expect(queueMutation).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'updateContainerStyle', nodeId: 'node-1', maxWidth: 768, styles: { display: 'flex' },
+    }));
+    const containerWrites = (queueMutation as any).mock.calls
+      .map((c: any[]) => c[0])
+      .filter((m: any) => m.type === 'updateContainerStyle' && m.nodeId === 'node-1');
+    expect(containerWrites.some((m: any) => m.styles?.display === 'unset')).toBe(false);
+    // No primary-width band write — the inline none owns the primary.
+    expect(containerWrites.some((m: any) => m.maxWidth === 1440 && m.styles?.display === 'none')).toBe(false);
+    expect(flushNow).toHaveBeenCalled();
+  });
+
   test('the PRIMARY entry with nothing to change still takes the cheap path', async () => {
     const { getDefaultStore } = await import('jotai');
     const { codeAtom } = await import('@/code/stores/store');
@@ -1151,5 +1199,82 @@ describe('entry into a design-component VARIANT mirrors the hide into the DOM', 
     // Restored to the node's own display (none of its own → '' DELETES the
     // inline property). Without this a cancelled drag strands an invisible copy.
     expect(displayPatches()).toContainEqual({ prefix: '', display: '' });
+  });
+});
+
+// ─── A component instance NEVER accepts a drop — ghost rows included ───────
+// Reported 2026-09-09: dragging over a design-component instance that sits
+// inside a CMS collection list showed insert lines INSIDE the instance. Every
+// element of a `.map()` row past the first carries a `__N` ghost suffix on its
+// id, while the node model only holds the template id — so the instance lookup
+// missed and nothing blocked the drop. On a normal page (no ghosts) it worked.
+describe('instance drop guards resolve ghost-row ids', () => {
+  const nodes = new Map<string, any>([
+    ['list', { id: 'list', parentId: 'root', children: ['row'], type: 'div', styles: { display: 'flex' }, collectionList: { source: 'case-study' } }],
+    ['row', { id: 'row', parentId: 'list', children: ['card'], type: 'div', styles: { position: 'relative' } }],
+    ['card', { id: 'card', parentId: 'row', children: ['card:root'], type: 'Card', styles: { position: 'relative' }, componentFile: 'components/Card.tsx', isComponentInstance: true }],
+    ['card:root', { id: 'card:root', parentId: 'card', children: [], type: 'div', styles: { display: 'flex' }, componentInstanceId: 'card', componentFile: 'components/Card.tsx' }],
+  ]) as any;
+
+  test('the TEMPLATE row blocks (it always did)', () => {
+    expect(hitIsOverComponentInstance('card', nodes)).toBe(true);
+    expect(hitIsOverComponentInstance('card:root', nodes)).toBe(true);
+    expect(instanceWrapperIdForHit('card:root', nodes)).toBe('card');
+  });
+
+  test('a GHOST row blocks too — the `__N` suffix is stripped before the lookup', () => {
+    expect(hitIsOverComponentInstance('card__2', nodes)).toBe(true);
+    expect(hitIsOverComponentInstance('card:root__2', nodes)).toBe(true);
+    expect(instanceWrapperIdForHit('card__3', nodes)).toBe('card');
+    expect(instanceWrapperIdForHit('card:root__3', nodes)).toBe('card');
+  });
+
+  test('a plain node in the same list still accepts drops', () => {
+    expect(hitIsOverComponentInstance('row', nodes)).toBe(false);
+    expect(hitIsOverComponentInstance('row__2', nodes)).toBe(false);
+    expect(instanceWrapperIdForHit('row__2', nodes)).toBeNull();
+  });
+
+  test('an ABSOLUTE instance still sees through (an overlay must not block)', () => {
+    const overlay = new Map(nodes) as any;
+    overlay.set('card', { ...nodes.get('card'), styles: { position: 'absolute' } });
+    expect(hitIsOverComponentInstance('card__2', overlay)).toBe(false);
+  });
+});
+
+// ─── Nothing a master owns can be a drop parent ───────────────────────────
+// The instance tag blocks the drop; an ABSOLUTE instance is seen through to
+// the container behind. Seeing through must mean SKIP — the loop used to fall
+// past the wrapper and then accept one of the instance's own expanded
+// internals (`inst:child`) as the parent, which is how a drop line ended up
+// drawn inside a card of a collection list (report 2026-09-09).
+describe('isInstanceOwnedNode', () => {
+  it('rejects the instance tag and every element of its expansion', () => {
+    expect(isInstanceOwnedNode('card', { componentFile: 'components/Card.tsx' })).toBe(true);
+    expect(isInstanceOwnedNode('card', { isComponentInstance: true })).toBe(true);
+    expect(isInstanceOwnedNode('shader', { isCodeComponent: true })).toBe(true);
+    expect(isInstanceOwnedNode('card:root', { componentInstanceId: 'card' })).toBe(true);
+    expect(isInstanceOwnedNode('card:inner', { componentInstanceId: 'card' })).toBe(true);
+  });
+
+  it('rejects a ghost row copy of the same', () => {
+    expect(isInstanceOwnedNode('card__2', { componentFile: 'components/Card.tsx' })).toBe(true);
+    expect(isInstanceOwnedNode('card:inner__2', { componentInstanceId: 'card' })).toBe(true);
+    // Even when the model shape carries no flag, the expansion id form is enough.
+    expect(isInstanceOwnedNode('card:inner__2', { })).toBe(true);
+  });
+
+  it('accepts a plain frame, including a template row inside a collection list', () => {
+    expect(isInstanceOwnedNode('row', { })).toBe(false);
+    expect(isInstanceOwnedNode('row__2', { })).toBe(false);
+    expect(isInstanceOwnedNode('list', { })).toBe(false);
+  });
+
+  it('never rejects a template-chrome node on the strength of its `layout::` colon', () => {
+    expect(isInstanceOwnedNode('layout::navbar', { })).toBe(false);
+  });
+
+  it('a missing node is not instance-owned (the caller skips it anyway)', () => {
+    expect(isInstanceOwnedNode('gone', null)).toBe(false);
   });
 });

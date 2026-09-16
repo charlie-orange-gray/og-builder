@@ -2,6 +2,7 @@
 
 import { describe, it, test, expect, beforeEach } from 'vitest';
 import {
+  healBreadcrumbTrail,
   getFileDisplayName,
   isComponentFilePath,
   isTemplateFilePath,
@@ -604,5 +605,23 @@ describe('activeCodeAtom — identical-content writes are no-ops', () => {
     store.set(activeCodeAtom, 'const A = 2;');
     expect(store.get(projectVersionAtom)).toBe(v0 + 1);
     expect(projectFS.readFile('app/page.client.tsx')).toBe('const A = 2;');
+  });
+});
+
+describe('healBreadcrumbTrail', () => {
+  const exists = (p: string) => p !== 'components/Gone.tsx';
+  it('cuts the trail at the active file (never its own ancestor)', () => {
+    expect(healBreadcrumbTrail(['app/page.client.tsx', 'components/Header.tsx'], 'components/Header.tsx', exists))
+      .toEqual(['app/page.client.tsx']);
+  });
+  it('drops deleted files and consecutive duplicates', () => {
+    expect(healBreadcrumbTrail(
+      ['app/page.client.tsx', 'components/Gone.tsx', 'components/Header.tsx', 'components/Header.tsx'],
+      'components/Nested.tsx', exists,
+    )).toEqual(['app/page.client.tsx', 'components/Header.tsx']);
+  });
+  it('leaves a clean trail untouched', () => {
+    expect(healBreadcrumbTrail(['app/page.client.tsx'], 'components/Header.tsx', exists)).toEqual(['app/page.client.tsx']);
+    expect(healBreadcrumbTrail([], 'components/Header.tsx', exists)).toEqual([]);
   });
 });

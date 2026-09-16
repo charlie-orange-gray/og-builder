@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { parseJSX } from '@/code/parsing/ast-utils';
 import {
   createCollectionListInCode,
   bindFieldInCode,
@@ -7,8 +8,7 @@ import {
   findClosingTag,
   findJSXElementByDataId,
   findCollectionChainHead,
-  buildChainCode,
-} from './cms-gen';
+  buildChainCode, healBoundImageSizing } from './cms-gen';
 
 describe('findClosingTag — self-closing same-tag children', () => {
   // Regression: a container with self-closing <div … /> children (CMS card
@@ -143,6 +143,37 @@ export default function Page() {
 });
 
 // ─── bindFieldInCode ────────────────────────────────────────────────────────
+
+describe('bindFieldInCode — image fill sizing is NODE-scoped', () => {
+  // Another node already declares backgroundSize → the bound node must STILL get
+  // its own cover/center (the old whole-file regex skipped it: huge stretched
+  // avatar while the panel said "Cover", 2026-09-09).
+  const CODE = `<div data-id="root" style={{ backgroundImage: 'url(a.jpg)', backgroundSize: 'cover' }}>
+  <div data-id="avatar" style={{ width: '40px', height: '40px', backgroundColor: '#ccc' }}></div>
+</div>`;
+  it('seeds backgroundSize/backgroundPosition on the bound node even when a sibling has them', () => {
+    const out = bindFieldInCode(CODE, 'avatar', 'backgroundColor', 'photo', 'item', 'image');
+    const avatarTag = out.slice(out.indexOf('data-id="avatar"'), out.indexOf('</div>', out.indexOf('data-id="avatar"')));
+    expect(avatarTag).toContain('backgroundImage: `url(${item.photo})`');
+    expect(avatarTag).toContain("backgroundSize: 'cover'");
+    expect(avatarTag).toContain("backgroundPosition: 'center'");
+    expect(avatarTag).not.toContain('backgroundColor');
+  });
+  it('does not clobber a size the node already declares', () => {
+    const withSize = CODE.replace("backgroundColor: '#ccc'", "backgroundColor: '#ccc', backgroundSize: 'contain'");
+    const out = bindFieldInCode(withSize, 'avatar', 'backgroundColor', 'photo', 'item', 'image');
+    expect(out).toContain("backgroundSize: 'contain'");
+    expect((out.match(/backgroundSize/g) || []).length).toBe(2); // root + avatar, no duplicate
+  });
+  it('healBoundImageSizing seeds legacy bound nodes and is a no-op otherwise', () => {
+    const legacy = `<div data-id="root" style={{ backgroundSize: 'cover' }}><div data-id="pic" style={{ backgroundImage: \`url(\${item.photo})\` }}></div></div>`;
+    const healed = healBoundImageSizing(legacy);
+    const pic = healed.slice(healed.indexOf('data-id="pic"'));
+    expect(pic).toMatch(/backgroundImage: `url\(\$\{item\.photo\}\)`\s*,\s*backgroundSize: 'cover',\s*backgroundPosition: 'center'/);
+    expect(healBoundImageSizing(healed)).toBe(healed);
+    expect(healBoundImageSizing(CODE)).toBe(CODE);
+  });
+});
 
 describe('bindFieldInCode', () => {
   it('binds text content with expression', () => {
@@ -738,5 +769,42 @@ describe('localized collection chain head', () => {
   it('leaves an unlocalized list unwrapped', () => {
     expect(buildChainCode('programme', undefined, null, 3, null, 0, false))
       .toBe('programme.slice(0, 3)');
+  });
+});
+
+
+// ─── Unbind injects a REAL field value — it must be escaped ────────────────
+// Detaching a CMS field writes the row's own text into JSX. A richtext /
+// textarea body legitimately contains `<`, `>` and braces; splicing those raw
+// turned the content into live markup or made the file unparseable. (The
+// exposure widened when detail pages started resolving row values at all —
+// before that the injected value was always the empty string there.)
+describe('unbindFieldInCode — the injected literal is entity-escaped', () => {
+  const PAGE = `export default function Page() {
+  return (
+    <div data-id="root">
+      <p data-id="body">{item.body}</p>
+      <img data-id="pic" src={item.photo} alt={item.alt} />
+    </div>
+  );
+}`;
+
+  it('escapes angle brackets, braces and ampersands in text content', () => {
+    const out = unbindFieldInCode(PAGE, 'body', 'textContent', 'A <b>bold</b> claim & {braces}');
+    expect(out).toContain('A &lt;b&gt;bold&lt;/b&gt; claim &amp; &#123;braces&#125;');
+    expect(out).not.toContain('<b>bold</b>');
+    // Still a parseable file.
+    expect(parseJSX(out)).toBeTruthy();
+  });
+
+  it('escapes quotes in an attribute value so the tag cannot be broken', () => {
+    const out = unbindFieldInCode(PAGE, 'pic', 'alt', 'A "quoted" caption');
+    expect(out).toContain('alt="A &quot;quoted&quot; caption"');
+    expect(parseJSX(out)).toBeTruthy();
+  });
+
+  it('plain text is untouched', () => {
+    const out = unbindFieldInCode(PAGE, 'body', 'textContent', 'A forty-person practice.');
+    expect(out).toContain('>A forty-person practice.<');
   });
 });

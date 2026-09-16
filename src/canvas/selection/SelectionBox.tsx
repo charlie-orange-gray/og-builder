@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { trace } from '@/shared/debug-trace';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
-import { parseRectCacheKey, vpIdFromPrefix } from '@/canvas/node-ops';
+import { parseRectCacheKey, vpIdFromPrefix, isNodeLockedById } from '@/canvas/node-ops';
 import { isGhostNodeId } from '@/shared/ghost-id';
 import { getActiveAutoPan, isSpaceBarDown } from '@/canvas/transform';
 import { isViewerMode } from '@/code/stores/viewer-mode-store';
@@ -98,6 +98,10 @@ export function getMarqueeSelection(_contentEl: HTMLElement, selectionRect: BoxR
     // the selection (same exclusion deleteNode applies). Applies to every
     // viewport — replica template chrome is just as locked.
     if (nodeId.startsWith('layout::') || nodeId === 'children-slot') continue;
+    // Locked layers (pointer-events: none on the node or an ancestor) are
+    // ignored by the pointer — the marquee included. Same rule as
+    // getNodeHitsAtPoint; the layers panel remains the way to select them.
+    if (isNodeLockedById(nodeId)) continue;
 
     const nodeRect = bridge.getRect(nodeId, vpPrefix);
     if (!nodeRect) continue;
