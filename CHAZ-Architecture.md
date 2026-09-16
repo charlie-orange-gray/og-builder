@@ -1338,6 +1338,15 @@ Although persistence does not implement publishing, each snapshot must contain o
 
 Editable project snapshots remain distinct from generated website Git commits. A Publish record links the two without treating either as a replacement for the other.
 
+The generated repository must be independently buildable from its recorded Git
+tree. The control plane owns a versioned site build contract (currently
+`nextjs-node22-v1` / template `site-v1`) that pins the Next.js dependency graph,
+Node runtime, npm lockfile, build/start commands, Dockerfile, and `/healthz`
+route. Materialization composes that contract with Revyme-authored source and
+committed design assets; the deployment worker validates the complete tree and
+does not invent missing application files. Browser URLs for committed assets
+omit the `public/` prefix, while runtime uploads remain an external mount.
+
 ## 25. Publish and Deployment Metadata Model
 
 ### Minimum Website Metadata
