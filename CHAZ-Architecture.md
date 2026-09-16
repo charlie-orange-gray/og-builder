@@ -750,21 +750,22 @@ Implemented locally but daemon/deployment-gated:
 
 - server-side exact-SHA `DeploymentWorker`, `DockerProvider`, and `RoutingProvider` seams
 - local Docker command provider, two-slot staging state, direct health-check contract, and failure-preserving route proof
+- controlled `NginxRoutingProvider` with atomic per-site config/state, `nginx -t` validation, graceful reload, and rollback on switch failure
+- read-only image containers with an optional per-site runtime-upload bind mount outside the generated Git tree
 
 Not implemented:
 
 - production authentication and workspace administration
 - GitHub repository orchestration/credentials
 - real Docker daemon image/container proof on the development host
-- Nginx or other persistent reverse-proxy route provider
 - staging/production promotion
-- blue/green routing
-- deployment history or rollback
+- production blue/green routing and promotion
+- rollback UI and operational rollback workflow
 - realtime collaboration
 
 Current upstream integration is local only and has not been pushed or merged into `origin/main`.
 
-The local Phase 1/2 implementation provides authoritative self-hosted project persistence, content-addressed design assets, frozen revision manifests, and deterministic temporary website-tree materialization in `og-control-plane`. Phase 3/4 now adds a minimal Publish API that freezes and materializes an exact staging revision, assigns a stable per-site repository through a server-side `GitProvider`, commits/pushes the local provider's `staging` branch, verifies the SHA, records `sites`, `git_repositories`, `deployments`, and `deployment_events`, and ends at `ready-for-build`. Phase 6 now adds an opt-in server-side deployment worker and routing seam: it checks out the exact SHA, builds a SHA-tagged image, starts a new slot, health-checks `/healthz`, and switches a local route only after success. Docker production promotion and Nginx integration remain separate.
+The local Phase 1/2 implementation provides authoritative self-hosted project persistence, content-addressed design assets, frozen revision manifests, and deterministic temporary website-tree materialization in `og-control-plane`. Phase 3/4 now adds a minimal Publish API that freezes and materializes an exact staging revision, assigns a stable per-site repository through a server-side `GitProvider`, commits/pushes the local provider's `staging` branch, verifies the SHA, records `sites`, `git_repositories`, `deployments`, and `deployment_events`, and ends at `ready-for-build`. Phase 6 now adds an opt-in server-side deployment worker and routing seam: it checks out the exact SHA, builds a SHA-tagged image, starts a new slot, health-checks `/healthz`, and switches a local or controlled Nginx route only after success. Docker production promotion remains separate; the Debian host proof is still pending.
 
 ## 21. Implementation Roadmap
 
@@ -817,8 +818,11 @@ The local worker proof implements this boundary behind `DeploymentWorker`,
 `DockerProvider`, and `RoutingProvider`. It is opt-in (`OG_DOCKER_ENABLED=true`),
 uses an isolated exact-SHA checkout and ephemeral port, records image identity,
 slot, container, health, and staging URL metadata, and leaves the active route
-untouched when a candidate fails. The current development host has no Docker
-daemon; real image/container validation remains a Debian/daemon-gated proof.
+untouched when a candidate fails. `NginxRoutingProvider` accepts only controlled
+subdomains and loopback backends, writes generated config atomically, validates
+with `nginx -t`, reloads only after validation, and restores the previous route
+on failure. The current development host has no Docker daemon or Nginx host;
+real image/container/URL validation remains a Debian/daemon-gated proof.
 
 ### Phase 7 — Production Promotion
 
