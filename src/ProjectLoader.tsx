@@ -9,6 +9,9 @@ import App from './App';
 import RemixWorkspacePicker from './RemixWorkspacePicker';
 import { remixTemplate, remixTemplateShare } from '@/backend/revyme-backend';
 import { backend } from './backend';
+import { backendCapabilities } from './backend/capabilities';
+import { markServerProjectLoaded } from './backend/autosave';
+import { PersistenceStatus } from './self-hosted/PersistenceStatus';
 import { getProjectId } from './backend/project-id';
 import { userAtom } from './backend/user-store';
 import { projectFS, syncBuiltInCodeComponents, createEmptyProject } from './code/project/project-fs';
@@ -43,6 +46,7 @@ import { openPluginIdAtom } from '@/plugins/registry';
 
 export default function ProjectLoader() {
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // When set, a `?remix=` load is paused on the workspace picker — the
   // remix only runs once the user chooses a workspace (see below).
   const [remixPrompt, setRemixPrompt] = useState<{ websiteId: string } | null>(null);
@@ -66,7 +70,7 @@ export default function ProjectLoader() {
       const isNoAuthRoute =
         typeof window !== 'undefined' &&
         window.location.pathname.split('/').filter(Boolean).includes('noauth');
-      if (isNoAuthRoute) {
+      if (isNoAuthRoute && !backendCapabilities.versionedPersistence) {
         trace.action('project-loader:noauth-route');
         projectFS.loadSnapshot(createEmptyProject());
         syncBuiltInCodeComponents(projectFS);
@@ -176,6 +180,10 @@ export default function ProjectLoader() {
         return;
       }
 
+      if (backendCapabilities.versionedPersistence && !user) {
+        throw new Error('Your server session expired. Reload to sign in again.');
+      }
+
       if (cancelled) return;
 
       // 2b. Template remix entry-point.
@@ -196,7 +204,7 @@ export default function ProjectLoader() {
       const queryParams = new URLSearchParams(window.location.search);
       const remixId = queryParams.get('remix');
       const remixShareHash = queryParams.get('remix-share');
-      if ((remixId || remixShareHash) && user) {
+      if ((remixId || remixShareHash) && user && !backendCapabilities.versionedPersistence) {
         const kind: 'approved' | 'share' = remixId ? 'approved' : 'share';
         const token = remixId ?? remixShareHash!;
         // Don't remix on load. A remix must be attached to a workspace the
@@ -322,7 +330,7 @@ export default function ProjectLoader() {
       // Freshly remixed: ask which workspace the copy should live in, now that
       // the real site is open behind the modal. Strip the flag first so a
       // refresh doesn't re-ask.
-      if (queryParams.get('assign-workspace') === '1') {
+      if (queryParams.get('assign-workspace') === '1' && !backendCapabilities.versionedPersistence) {
         const clean = new URL(window.location.href);
         clean.searchParams.delete('assign-workspace');
         window.history.replaceState({}, '', clean.toString());
@@ -512,12 +520,17 @@ export default function ProjectLoader() {
         };
       }
 
+      if (backendCapabilities.versionedPersistence) markServerProjectLoaded(role === 'viewer');
       setReady(true);
       trace.action('project-loader:ready');
     }
 
     init().catch(err => {
       trace.error('project-loader:init-error', err);
+      if (backendCapabilities.versionedPersistence) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'The server project could not be loaded.');
+        return;
+      }
       // Show app anyway so user isn't stuck on blank screen
       if (!cancelled) setReady(true);
     });
@@ -529,6 +542,15 @@ export default function ProjectLoader() {
   // to show behind it — the previewed template inside the builder when the
   // snapshot loaded, the ordinary loading shell when it didn't (share links).
   // The picker performs the remix + redirect itself.
+  if (loadError) {
+    return <main className="min-h-screen bg-[var(--bg-canvas)] p-8 text-[var(--text-primary)]">
+      <h1 className="mb-4 text-xl">Project could not be opened</h1>
+      <p role="alert" className="mb-4">{loadError}</p>
+      <p className="mb-4">Editing is blocked to protect the saved project.</p>
+      <button className="mr-4 underline" onClick={() => window.location.reload()}>Retry loading project</button>
+      <a className="underline" href="/">Back to projects</a>
+    </main>;
+  }
   if (!ready) {
     return <BuilderLoadingShell />;
   }
@@ -540,6 +562,7 @@ export default function ProjectLoader() {
   return (
     <>
       <App />
+      {backendCapabilities.versionedPersistence && <PersistenceStatus />}
       <CanvasReadyShellOverlay />
       {/* The remix picker rides ON TOP of the mounted builder so the choice is
           made over the template the user is looking at. Blocking — see the

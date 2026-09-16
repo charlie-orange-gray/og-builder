@@ -5,11 +5,35 @@ import { getDefaultStore } from 'jotai';
 import { CLOUD_ENABLED } from '@/shared/cloud-flag';
 import { backend } from './index';
 import { getProjectId } from './project-id';
-import { saveStatusAtom } from './save-store';
+import { saveStatusAtom, versionedSaveStateAtom } from './save-store';
+import { backendCapabilities } from './capabilities';
+import { VersionedAutosave } from './versioned-autosave';
 import type { ProjectData } from './types';
 import { PROJECT_FORMAT } from './types';
 import { projectFS } from '../code/project/project-fs';
 import { trace } from '@/shared/debug-trace';
+
+const versionedAutosave = backendCapabilities.versionedPersistence ? new VersionedAutosave({
+  snapshot: () => getCurrentProjectSnapshot(),
+  save: data => backend.saveProject(getProjectId(), data),
+  state: state => {
+    getDefaultStore().set(versionedSaveStateAtom, state);
+    getDefaultStore().set(saveStatusAtom, state.status === 'conflict' ? 'error' : state.status === 'read-only' ? 'saved' : state.status);
+  },
+}) : null;
+
+/** Called only after the authenticated server snapshot has hydrated successfully. */
+export function markServerProjectLoaded(readOnly = false): void {
+  versionedAutosave?.markLoaded(readOnly);
+  // Persist the existing boot scaffold/migrations through the normal boundary.
+  versionedAutosave?.trigger();
+}
+
+/** Full recoverable payload, including loaded settings outside ProjectFS. */
+export function getCurrentProjectSnapshot(): ProjectData {
+  const data: ProjectData = { format: PROJECT_FORMAT, files: Object.fromEntries(projectFS.getSnapshot()) };
+  return backend.completeSnapshot?.(getProjectId(), data) ?? data;
+}
 
 const DEBOUNCE_MS = 2000;
 /** Bounded auto-retry after a failed save. Without it, `pendingSave` stayed
@@ -90,6 +114,7 @@ function startSave(): Promise<void> {
  *  is harmless, and it also covers a non-leader collab tab (whose
  *  triggerAutosave early-returns without ever setting pendingSave). */
 export async function flushSaveNow(): Promise<void> {
+  if (versionedAutosave) return versionedAutosave.flush();
   if (debounceTimer !== null) {
     clearTimeout(debounceTimer);
     debounceTimer = null;
@@ -127,6 +152,7 @@ export function setIsSaveLeader(leader: boolean): void {
 let _disposed = false;
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
+    versionedAutosave?.dispose();
     _disposed = true;
     if (debounceTimer !== null) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (typeof window !== 'undefined' && (window as any)['__revymeAutosaveUnloadHook'] === onBeforeUnloadSave) {
@@ -146,6 +172,7 @@ if (import.meta.hot) {
  *  window; release re-schedules anything deferred. */
 let isHeld = false;
 export function setAutosaveHeld(held: boolean): void {
+  if (versionedAutosave) { versionedAutosave.setHeld(held); return; }
   if (isHeld === held) return;
   isHeld = held;
   trace.action('autosave:held-changed', { held, pendingSave });
@@ -159,6 +186,7 @@ export function setAutosaveHeld(held: boolean): void {
 }
 
 export function triggerAutosave(opts?: { force?: boolean }): void {
+  if (versionedAutosave) { versionedAutosave.trigger(); return; }
   if (_disposed) { trace.action('autosave:skipped-disposed-generation'); return; }
   if (isHeld) {
     // Remember that something wants saving, but don't schedule — the
@@ -203,6 +231,7 @@ export function triggerAutosave(opts?: { force?: boolean }): void {
  *  PUT this tab's stale empty scaffold OVER the freshly applied template
  *  files. */
 export function cancelPendingAutosave(): void {
+  if (versionedAutosave) { versionedAutosave.cancel(); return; }
   if (debounceTimer !== null) {
     clearTimeout(debounceTimer);
     debounceTimer = null;
@@ -223,6 +252,7 @@ export function cancelPendingAutosave(): void {
 // guarantees exactly one live listener; dispose also detaches ours.
 const UNLOAD_HOOK_KEY = '__revymeAutosaveUnloadHook';
 function onBeforeUnloadSave(e: BeforeUnloadEvent): void {
+    if (versionedAutosave) { versionedAutosave.beforeUnload(e); return; }
     if (_disposed) return;
     // isSaving counts as unsaved: the in-flight fetch DIES with the page
     // (no keepalive), so "a save is already running" is precisely when the

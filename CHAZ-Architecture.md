@@ -746,20 +746,26 @@ Implemented:
 - Upstream publish preflight and the self-hosted capability seam auto-merge cleanly in `RightHeader.tsx`.
 - Sync validation passed `npm ci`, TypeScript, 10,274 tests, the editor production build, `git diff --check`, and scoped `RightHeader.tsx` lint with zero errors.
 
+Implemented locally but daemon/deployment-gated:
+
+- server-side exact-SHA `DeploymentWorker`, `DockerProvider`, and `RoutingProvider` seams
+- local Docker command provider, two-slot staging state, direct health-check contract, and failure-preserving route proof
+- controlled `NginxRoutingProvider` with atomic per-site config/state, `nginx -t` validation, graceful reload, and rollback on switch failure
+- read-only image containers with an optional per-site runtime-upload bind mount outside the generated Git tree
+
 Not implemented:
 
-- authoritative self-hosted project persistence
-- authentication and workspace authorization
-- design-asset materialisation pipeline
-- control-plane Publish API
-- per-site Git repository orchestration
-- Docker build or deployment
+- production authentication and workspace administration
+- GitHub repository orchestration/credentials
+- real Docker daemon image/container proof on the development host
 - staging/production promotion
-- blue/green routing
-- deployment history or rollback
+- production blue/green routing and promotion
+- rollback UI and operational rollback workflow
 - realtime collaboration
 
 Current upstream integration is local only and has not been pushed or merged into `origin/main`.
+
+The local Phase 1/2 implementation provides authoritative self-hosted project persistence, content-addressed design assets, frozen revision manifests, and deterministic temporary website-tree materialization in `og-control-plane`. Phase 3/4 now adds a minimal Publish API that freezes and materializes an exact staging revision, assigns a stable per-site repository through a server-side `GitProvider`, commits/pushes the local provider's `staging` branch, verifies the SHA, records `sites`, `git_repositories`, `deployments`, and `deployment_events`, and ends at `ready-for-build`. Phase 6 now adds an opt-in server-side deployment worker and routing seam: it checks out the exact SHA, builds a SHA-tagged image, starts a new slot, health-checks `/healthz`, and switches a local or controlled Nginx route only after success. Docker production promotion remains separate; the Debian host proof is still pending.
 
 ## 21. Implementation Roadmap
 
@@ -773,15 +779,19 @@ Persist complete editable Revyme projects on Orange & Gray infrastructure and pr
 
 ### Phase 2 — Design Asset Materialisation and Runtime Upload Strategy
 
-Store source design assets durably, materialise immutable assets into generated sites, and establish separate persistent runtime upload paths.
+Store source design assets durably, freeze exact project revisions, materialise immutable assets into generated sites, and establish separate persistent runtime upload paths. The local proof uses project-scoped content-addressed objects and deterministic temporary trees; runtime/CMS upload APIs remain future work.
 
 ### Phase 3 — Minimal Publish API
 
-Freeze a project revision and create an auditable deployment request without yet exposing infrastructure credentials to the editor.
+Freeze a project revision and create an auditable deployment request without exposing infrastructure credentials to the editor. The local implementation accepts the expected saved revision, derives authorization from the session, reuses a stable site record and idempotent deployment request, materializes the frozen tree, records its deterministic manifest hash, and hands the exact source to the server-side Git seam.
 
 ### Phase 4 — Per-Site Git Repository Creation/Integration
 
-Assign or create one independent repository per website.
+Assign or create one independent repository per website. The local proof uses a
+filesystem-backed provider that creates/reuses a bare repository, pushes
+`staging`, verifies the remote SHA, and records the exact repository/branch/SHA
+on the deployment. A GitHub implementation must satisfy the same interface and
+keep credentials server-side.
 
 ### Phase 5 — Git Staging Publish
 
@@ -803,6 +813,16 @@ Git SHA
     → health check
     → staging route swap
 ```
+
+The local worker proof implements this boundary behind `DeploymentWorker`,
+`DockerProvider`, and `RoutingProvider`. It is opt-in (`OG_DOCKER_ENABLED=true`),
+uses an isolated exact-SHA checkout and ephemeral port, records image identity,
+slot, container, health, and staging URL metadata, and leaves the active route
+untouched when a candidate fails. `NginxRoutingProvider` accepts only controlled
+subdomains and loopback backends, writes generated config atomically, validates
+with `nginx -t`, reloads only after validation, and restores the previous route
+on failure. The current development host has no Docker daemon or Nginx host;
+real image/container/URL validation remains a Debian/daemon-gated proof.
 
 ### Phase 7 — Production Promotion
 
@@ -1034,7 +1054,21 @@ Request:  { expectedRevision, reason: "staging-publish" }
 Response: { snapshotId, revision, contentHash, createdAt }
 ```
 
-The frozen-revision endpoint is designed now but may be implemented in the later Publish phase. It freezes an already saved project revision; it does not generate Git or Docker state.
+The frozen-revision endpoint is implemented in the local Phase 2 proof. It freezes an already saved project revision and records the exact asset manifest; it does not generate Git or Docker state. Materialization produces an isolated complete tree and deterministic manifest hash without mutating the editable snapshot.
+
+Phase 3/4 adds `POST /api/projects/:projectId/publish` and the compatibility
+alias `POST /api/websites/:projectId/publish`. The request contains
+`{expectedRevision, environment:"staging"}` and may include an
+`Idempotency-Key`. The control plane derives the workspace and role from the
+session, creates or reuses a stable site and repository assignment, freezes the
+exact revision, runs deterministic materialization, publishes the exact tree to
+the server-side Git provider's `staging` branch, verifies the SHA, and records a
+deployment plus ordered events. Successful preparation returns the deployment
+ID, frozen revision ID, project revision, materialization hash, repository,
+branch, and SHA with status `ready-for-build`. `GET
+/api/deployments/:deploymentId` retrieves the status for an authorized
+workspace member. This boundary intentionally performs no Docker or production
+operation and never claims the site is live.
 
 For a low-risk editor migration, `SelfHostedBackend` may initially expose compatibility calls under `/api/websites/:id` if that avoids UI changes. The canonical control-plane domain model should still call these records projects/sites internally rather than inheriting Revyme Cloud billing or hosting assumptions.
 
@@ -1119,8 +1153,8 @@ Site and deployment tables are introduced in the Publish model below. Large snap
 ```text
 /srv/og-platform/projects/<project-id>/
 ├── snapshots/
-│   ├── 00000001-<sha256>.json.zst
-│   ├── 00000002-<sha256>.json.zst
+│   ├── 00000001-<sha256>.json.gz
+│   ├── 00000002-<sha256>.json.gz
 │   └── ...
 └── assets/
     └── objects/
@@ -1128,6 +1162,8 @@ Site and deployment tables are introduced in the Publish model below. Large snap
 ```
 
 Snapshot and asset writes use a server-created temporary file in the same filesystem, validate size and hash, fsync where required, and atomically rename into the content-addressed location. Browser-provided filenames never determine server paths.
+
+The initial Node.js 22 implementation uses its stable built-in gzip codec (`.json.gz`) instead of the originally proposed Zstandard extension. Compression is a storage detail; content identity is computed from the canonical uncompressed project payload. A later codec change must preserve existing snapshot readability and hashes.
 
 ### Project Snapshot Format
 

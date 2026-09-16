@@ -32,6 +32,8 @@ import { activeFilePathAtom, createPageFile } from '@/code/project/active-file-s
 import { projectVersionAtom, projectFS } from '@/code/project/project-fs';
 import { shareAsTemplate, createWebsite } from '@/backend/revyme-backend';
 import { backend } from '@/backend/index';
+import { backendCapabilities } from '@/backend/capabilities';
+import { selfHostedClient } from '@/backend/self-hosted-client';
 import { getProjectId } from '@/backend/project-id';
 import { toast } from 'sonner';
 import type { AutoPanSpeed } from '@/code/stores/user-preferences-store';
@@ -93,6 +95,20 @@ export function createAndOpenProject(): void {
     // can debug headless setups where the indicator isn't visible.
     trace.action('menu:file-new-project:popup-blocked');
     console.warn('[Revyme] New project popup was blocked. Allow popups for this site to open new projects in a new tab.');
+    return;
+  }
+
+  if (backendCapabilities.projectManagement) {
+    void (async () => {
+      try {
+        const workspaceId = await backend.getWebsiteWorkspaceId(getProjectId());
+        const project = await selfHostedClient.createProject('Untitled project', workspaceId ?? undefined);
+        tab.location.href = `/builder/${project.projectId}`;
+      } catch (error) {
+        tab.close();
+        toast.error(error instanceof Error ? error.message : 'The project could not be created.');
+      }
+    })();
     return;
   }
 

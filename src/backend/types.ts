@@ -68,6 +68,45 @@ export interface ProjectBackend {
   /** Save the full project snapshot. */
   saveProject(id: string, data: ProjectData): Promise<void>;
 
+  /** Prepare an exact saved self-hosted revision for a staging release. */
+  prepareStagingRelease?(id: string): Promise<{
+    deploymentId: string;
+    siteId: string;
+    projectId: string;
+    environment: 'staging';
+    status: string;
+    projectRevision: number;
+    frozenRevisionId: string | null;
+    materializationHash: string | null;
+    git: { repository: string; branch: string; sha: string } | null;
+    image: { tag: string; digest: string; id: string } | null;
+    slot: 'blue' | 'green' | null;
+    containerId: string | null;
+    stagingUrl: string | null;
+    createdAt: string;
+  }>;
+  /** Deploy a previously published exact staging SHA when the deployment capability is enabled. */
+  deployStaging?(deploymentId: string): Promise<{
+    deploymentId: string;
+    siteId: string;
+    projectId: string;
+    environment: 'staging';
+    status: string;
+    projectRevision: number;
+    frozenRevisionId: string | null;
+    materializationHash: string | null;
+    git: { repository: string; branch: string; sha: string } | null;
+    image: { tag: string; digest: string; id: string } | null;
+    slot: 'blue' | 'green' | null;
+    containerId: string | null;
+    stagingUrl: string | null;
+    createdAt: string;
+  }>;
+
+  /** Optional versioned-persistence hook: retain loaded settings while the editor
+   *  serializes file changes. Explicit settings in `data` take precedence. */
+  completeSnapshot?(id: string, data: ProjectData): ProjectData;
+
   /** Update the website's canonical name (`websites.name`) — the value the
    *  dashboard tile shows. Called when the user renames the project from the
    *  in-editor chip so the editor and dashboard stay in sync. */

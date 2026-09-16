@@ -54,6 +54,15 @@ describe('project snapshot readers flush the mutation queue first', () => {
     expect(head).toContain('await flushSaveNow()');
   });
 
+  it('self-hosted publish uses the capability adapter and does not claim live deployment', () => {
+    const header = readFileSync(join(ROOT, 'editor/header/RightHeader.tsx'), 'utf8');
+    const dropdown = readFileSync(join(ROOT, 'editor/header/LiveDropdown.tsx'), 'utf8');
+    expect(header).toContain("backendCapabilities.persistence === 'self-hosted'");
+    expect(header).toContain('prepareStagingRelease');
+    expect(header).toContain('Staging source published');
+    expect(dropdown).toContain("stagingDeployment ? 'Deploy staging' : 'Publish staging source'");
+  });
+
   // The preview must also RE-PUSH when files change while it's open.
   // `projectVersionAtom` is bumped by `modifyProjectFile` and history restores
   // only — an ordinary mutation-queue flush (how nearly every canvas edit

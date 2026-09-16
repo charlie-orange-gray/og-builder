@@ -3,6 +3,8 @@ import { Provider, getDefaultStore } from 'jotai';
 import ProjectLoader from './ProjectLoader';
 import './styles/globals.css';
 import { subscribeBuilderTheme } from './editor/builder-theme';
+import { backendCapabilities } from './backend/capabilities';
+import SelfHostedRoot from './self-hosted/SelfHostedRoot';
 
 // Restore the saved builder accent BEFORE the first paint (so a non-default
 // theme doesn't flash the stock brass on reload) and keep it in sync with both
@@ -17,6 +19,6 @@ subscribeBuilderTheme();
 // from one path become invisible to readers on the other.
 createRoot(document.getElementById('root')!).render(
   <Provider store={getDefaultStore()}>
-    <ProjectLoader />
+    {backendCapabilities.projectManagement ? <SelfHostedRoot /> : <ProjectLoader />}
   </Provider>
 );

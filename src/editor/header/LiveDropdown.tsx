@@ -89,6 +89,10 @@ interface Props {
   meta: WebsiteMeta | null;
   publishing: boolean;
   publishSuccess: boolean;
+  publishNotice?: string | null;
+  stagingUrl?: string | null;
+  stagingDeployment?: boolean;
+  selfHosted?: boolean;
   /** 0–1, advances during publishing. The dropdown renders a fill bar
    *  inside the primary button. */
   progress: number;
@@ -109,7 +113,7 @@ interface Props {
   onOpenStaging?: () => void;
 }
 
-export function LiveDropdown({ open, meta, publishing, publishSuccess, progress, onPublish, onClose, onOpenBackups, onAddDomain, onOpenStaging }: Props) {
+export function LiveDropdown({ open, meta, publishing, publishSuccess, publishNotice, stagingUrl, stagingDeployment = false, selfHosted = false, progress, onPublish, onClose, onOpenBackups, onAddDomain, onOpenStaging }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Outside-click close — but only when the click is genuinely outside the
@@ -277,14 +281,21 @@ export function LiveDropdown({ open, meta, publishing, publishSuccess, progress,
               {publishing
                 ? `Publishing… ${Math.round(progress * 100)}%`
                 : publishSuccess
-                // accent-fg, not white: sits on the accent fill, same reason as
-                // the progress bar above.
-                ? <Check size={14} className="text-[var(--accent-fg)]" />
+                ? publishNotice
+                  ? <span className="text-[10px] leading-tight">{publishNotice}</span>
+                  // accent-fg, not white: sits on the accent fill, same reason as
+                  // the progress bar above.
+                  : <Check size={14} className="text-[var(--accent-fg)]" />
                 : meta?.isPublished
                 ? 'Update live site'
-                : 'Go live'}
+                : selfHosted ? (stagingDeployment ? 'Deploy staging' : 'Publish staging source') : 'Go live'}
             </span>
           </button>
+          {publishSuccess && stagingUrl && (
+            <a href={stagingUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+              Open staging <ExternalLink size={10} />
+            </a>
+          )}
         </div>
       </div>
     </motion.div>
