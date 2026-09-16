@@ -62,7 +62,7 @@ Feature validation passed fresh `npm ci`, TypeScript, all three builds, diff che
 
 Phase 0 is complete. [PR #2](https://github.com/charlie-orange-gray/og-builder/pull/2) merged with a normal merge commit as `84181a3` after successful confirmation validation and mergeability verification. `origin/main` contains both the latest validated upstream baseline (`e7b5b9f`) and the Publish capability feature (`74a3981`). Published feature history was not rebased. A fresh fetch at the start of persistence work found no newer upstream commit.
 
-Phase 1, Phase 2, and the Phase 3/4 local Git staging proof are implemented and validated on `feature/self-hosted-project-persistence`; this branch has not been merged into stable main. `/Users/chaz/og-control-plane` is a separate local Git repository with no remote configured. These changes are kept local for review; no GitHub repository, Docker operation, or Debian deployment was performed.
+Phase 1, Phase 2, and the Phase 3/4 local Git staging proof are implemented and validated. They were published in PR #4 and merged into `origin/main` as `8d07dc9`; the feature branch remains available with its published history. `/Users/chaz/og-control-plane` is a separate private GitHub repository and its `main` is published at `abfd04b`.
 
 Local implementation commits: editor adapter `795c2c5`; control-plane initial commit `f327b9a`. Phase 0 completion was recorded separately as `7e8ea40`. The final fetch reports `origin/main=84181a3` and `upstream/main=3ef52b6`.
 
@@ -88,7 +88,19 @@ The validated staging-worker commits are builder `1c13e61` and control plane `80
 
 Validation for this worker pass: control plane TypeScript, 29 tests passed and 1 Docker integration test skipped, build, and diff checks passed; the Docker integration file is skipped because the local Docker daemon is unavailable. Builder TypeScript, 659 test files (10,346 passed, 1 skipped, 3 todo), all three builds, browser persistence proof (3 passed with elevated IPC permission), scoped ESLint (zero errors, five existing warnings), and diff checks passed. Full builder lint remains baseline-failing. The generated Revyme materialization does not currently contain a package/build contract; the worker rejects missing `package.json` scripts and injects only deterministic Dockerfile, `.dockerignore`, and `/healthz` build-context files when the source is otherwise deployable. The Debian runbook documents this as a prerequisite rather than hiding it with worker-only application files.
 
-The prior implementation commits remain `9f8b2ad` in the builder and `8007244` in the control plane. Debian/Nginx preparation is currently uncommitted in both repositories for review; no push or PR was attempted. Next recommended action: obtain the Debian host/Tailscale or SSH target and run the documented staging proof with Docker/Nginx, then record the two-release and failed-candidate evidence. The control-plane repository still has no remote configured, the local Docker daemon is unavailable, and the current worker remains in-process for this private proof; split Docker authority into an `og-deployer` process before public production. Do not implement production promotion in this phase.
+The implementation commits remain `9f8b2ad` in the builder and `8007244` in the control plane, followed by the focused Debian/Nginx commits (`000583d`, `24eebc1`, `abfd04b`). Both repositories are clean and published. Next recommended action: obtain the Debian host/Tailscale or SSH target and run the documented staging proof with Docker/Nginx, then record the two-release and failed-candidate evidence. The local Docker daemon is unavailable, and the current worker remains in-process for this private proof; split Docker authority into an `og-deployer` process before public production. Do not implement production promotion in this phase.
+
+## Final Publication State — 2026-09-16
+
+- `origin/main`: `8d07dc952d1140e2c4917aa3eb144966f5af1128` (PR #4 merge commit).
+- `upstream/main`: `3ef52b6ef73c4519dec5f603da8c8bb31a0f637f`; it is fully contained in `origin/main`.
+- Upstream sync PR: #3, merged as `ae1e616`.
+- Feature PR: #4, merged as `8d07dc9`; no rebase was performed.
+- Control-plane repository: [charlie-orange-gray/og-control-plane](https://github.com/charlie-orange-gray/og-control-plane), `main` at `abfd04b681490e908cf7962913a08d6a9c38941b`.
+- Builder validation: TypeScript passed; 676 test files, 10,488 passed, 1 skipped, 3 todo; all builds passed; persistence proof 3 passed; scoped ESLint 0 errors and 47 warnings; diff checks passed.
+- Control-plane validation: TypeScript and build passed; 29 tests passed and 1 Docker integration test skipped; diff checks passed.
+- No real Debian Docker/Nginx proof has run. The generated-site package/build contract, separate `og-deployer` authority, production promotion, rollback, authentication, and agency hardening remain blockers.
+- Exact next phase: run the Debian staging proof (including two successful releases and a failed candidate) before implementing production promotion or rollback.
 
 ## Next Planned Milestones
 
