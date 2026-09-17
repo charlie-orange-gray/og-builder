@@ -278,6 +278,12 @@ export function isFitSize(v: string | undefined | null): boolean {
 export const WRAPPER_ONLY_STYLE_PROPS: ReadonlySet<string> = new Set([
   'position', 'left', 'top', 'right', 'bottom', 'inset',
   'zIndex',
+  // A size BOUND is placement too: a `flex: 1 0 0px` card with `minWidth:
+  // 280px` wraps in its row because the ITEM refuses to shrink under 280.
+  // Left on the root inside the host, the host shrank to 248 and three
+  // cards that wrap live sat in one row on the canvas (an imported site's
+  // pricing, 2026-09-16). The runtime's own PLACEMENT_KEYS lift them too.
+  'minWidth', 'maxWidth', 'minHeight', 'maxHeight',
   'transform', 'transformOrigin', 'transformBox', 'transformStyle',
   'order',
   'flex', 'flexShrink', 'flexGrow', 'flexBasis',

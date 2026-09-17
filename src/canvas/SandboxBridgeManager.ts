@@ -19,6 +19,7 @@ import type { TextEditFitResult } from '@/canvas-sandbox/protocol';
 import { setActiveBridge, resetActiveBridge } from './canvas-bridge';
 import { trace } from '@/shared/debug-trace';
 import type { TextEditSnapshot } from '@/canvas-sandbox/protocol';
+import { canvasThemeMode } from './canvas-theme';
 
 // ─── Callback interface ──────────────────────────────────────────────────────
 
@@ -211,6 +212,9 @@ export class SandboxBridgeManager {
         iframeLoaded: this.iframeLoaded,
         sandboxReadyMsg: this.sandboxReadyMsg,
       });
+      // Before the first render lifts the tokens: the sandbox has to know
+      // which colour mode the editor is in (canvas-theme.ts).
+      this.bridge.setThemeMode(canvasThemeMode());
       this.callbacks.onReadyChange(true);
     }
   }

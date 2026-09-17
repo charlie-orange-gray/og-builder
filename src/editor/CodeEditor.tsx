@@ -1,5 +1,6 @@
 // CodeEditor.tsx — Monaco editor synced with codeAtom + VS Code-style file tree
 
+import { codeEditorViewRequestAtom } from '@/code/stores/left-panel-store';
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
@@ -212,12 +213,10 @@ export default function CodeEditor() {
   const currentUser = useAtomValue(userAtom);
   const isAdmin = !!currentUser?.isAdmin;
   const [writeEnabled, setWriteEnabled] = useState(false);
-  const canWrite = isAdmin && writeEnabled;
-  // Apply read-only imperatively on toggle — the options prop covers mount, this
-  // guarantees a live Write flip takes effect on the mounted editor instance.
-  useEffect(() => {
-    editorRef.current?.updateOptions({ readOnly: !canWrite, domReadOnly: !canWrite });
-  }, [canWrite]);
+  // Code override files (`overrides/*.tsx`) are user-authored code, not
+  // generated source — always editable.
+  const [viewRequest, setViewRequest] = useAtom(codeEditorViewRequestAtom);
+  const canWriteGenerated = isAdmin && writeEnabled;
 
   // Build file tree from projectFS
   const allFiles = projectFS.listFiles();
@@ -231,6 +230,18 @@ export default function CodeEditor() {
   // (Pages panel, entering a master) re-syncs it.
   const [viewPath, setViewPath] = useState(activeFilePath);
   useEffect(() => { setViewPath(activeFilePath); }, [activeFilePath]);
+  useEffect(() => {
+    if (!viewRequest) return;
+    trace.action('code-editor:view-request', { path: viewRequest });
+    setViewPath(viewRequest);
+    setViewRequest(null);
+  }, [viewRequest, setViewRequest]);
+  const canWrite = canWriteGenerated || viewPath.startsWith('overrides/');
+  // Apply read-only imperatively on toggle — the options prop covers mount, this
+  // guarantees a live Write flip takes effect on the mounted editor instance.
+  useEffect(() => {
+    editorRef.current?.updateOptions({ readOnly: !canWrite, domReadOnly: !canWrite });
+  }, [canWrite]);
   const isViewingActive = viewPath === activeFilePath;
   // Non-active files read straight from projectFS — the projectVersion
   // subscription above re-renders this on any FS change, keeping it fresh.

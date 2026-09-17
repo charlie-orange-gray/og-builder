@@ -614,6 +614,18 @@ function expandComponent(
     }
   }
 
+  // A nested instance that switches NOTHING per viewport itself — no data-responsive, no inline
+  // `initialVariant={__mqN ? …}` rail, no per-parent ternary — renders ONE child variant (its plain
+  // `initialVariant`, else the master default) on EVERY tile. The map it holds here is INHERITED from
+  // the outer instance (stamped on its wrapper by the outer expansion) and speaks the PARENT's variant
+  // names, so nothing keyed by the CHILD's names may be resolved against it: treat the instance exactly
+  // like the no-map case below (bake the variant, clear motionVariants, bake visibility). Live find
+  // (an imported FAQ, 2026-09-16): the phone accordion's Closed items rendered OPEN on the mobile tile —
+  // the outer FAQ's map said 'variant-2' there, the answer is hidden on the ITEM's 'variant-1', and the
+  // tablet tile only looked right because both instances happened to name that variant 'variant-1'.
+  const ownViewportSwitching = !!respAttr || !!instanceNode.responsiveAttrPropValues?.initialVariant;
+  const fixedChildVariant = !instanceConditional && !ownViewportSwitching && !!responsiveVariantMap;
+
   // PER-VIEWPORT TEXT props → the child's responsiveTextValues rail. The
   // style-driving props lower via styleVariables below, but a TEXT variable's
   // per-tile literal (data-responsive {768:{content:"bnbub"}} — written by the
@@ -1008,7 +1020,7 @@ function expandComponent(
             remappedMotionVariants[parentVariant] = childStyles;
           }
         }
-      } else if (!respAttr && !(responsiveVariantMap && Object.keys(responsiveVariantMap).length > 0)) {
+      } else if (fixedChildVariant || (!respAttr && !(responsiveVariantMap && Object.keys(responsiveVariantMap).length > 0))) {
         // Parent-driven nested instance (NO own per-viewport switching) — clear
         // motionVariants so a parent variant never accidentally name-matches a
         // child variant. With a plain initialVariant the chosen child variant is
@@ -1171,7 +1183,7 @@ function expandComponent(
     // without per-viewport switching). Instance-level (parent-keyed) sets
     // merged onto the root are kept — the parent master resolves those.
     let bakedHidden = rootHidden;
-    if (!responsiveVariantMap && node.hiddenOnVariants && node.hiddenOnVariants.size > 0) {
+    if ((!responsiveVariantMap || fixedChildVariant) && node.hiddenOnVariants && node.hiddenOnVariants.size > 0) {
       const effectiveVariant = defaultChildVariant ?? 'default';
       if (node.hiddenOnVariants.has(effectiveVariant)) {
         overriddenStyles = { ...overriddenStyles, display: 'none' };
@@ -1196,6 +1208,12 @@ function expandComponent(
     // resolveVariantStyles falls back base-ward when a variant key is absent.
     let remappedConditional = rootConditional;
     let remappedHidden = bakedHidden;
+    if (fixedChildVariant && rootConditional) {
+      // The child's own branches are baked (above); only the instance-level `display` ternary on the
+      // root — keyed by the PARENT's names, resolved by the parent's map — may stay.
+      const rootDisplay = isRoot ? instanceNode.conditionalStyles?.['display'] : undefined;
+      remappedConditional = rootDisplay ? { display: rootDisplay } : null;
+    }
     if (Object.keys(perParentOverrides).length > 0) {
       if (rootConditional) {
         const rc: Record<string, Record<string, string>> = {};

@@ -80,6 +80,7 @@ import ComponentBreadcrumb from './ui/ComponentBreadcrumb';
 import SlugPageBreadcrumb from './ui/SlugPageBreadcrumb';
 import AddVariantUI from './ui/AddVariantUI';
 import AddVectorUI from './ui/AddVectorUI';
+import AddFormFieldUI from './ui/AddFormFieldUI';
 import ArrowConnectors from './ui/ArrowConnectors';
 import ConnectionHandle from './ui/ConnectionHandle';
 import SlotConnectionHandle from './ui/SlotConnectionHandle';
@@ -1454,6 +1455,9 @@ export default function Canvas() {
           vector is selected. Separate from AddVariantUI so each system
           stays focused. Self-gates internally. */}
       {!isViewer && <AddVectorUI />}
+
+      {/* Add Field "+" under a selected form (Text / Checkbox / Radio / Select). */}
+      {!isViewer && <AddFormFieldUI />}
 
       {/* Connection arrows between variant blocks — kept for viewers so
           the variant transition graph stays legible for inspection. */}

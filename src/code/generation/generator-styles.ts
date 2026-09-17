@@ -9,6 +9,7 @@ import { parseVariantConfig } from '@/code/variants/variant-config';
 
 import { toKebab, SHORTHAND_LONGHANDS } from '@/shared/css-utils';
 import { escapeRegExp } from '@/shared/regex-utils';
+import { scopeVariantConstsReadingProps } from './variant-const-scope';
 import { CSS_LAYOUT_DEFAULTS } from '@/shared/constants';
 import { cssTransformToMotionProps, MOTION_TRANSFORM_PROPS } from '@/shared/motion-transform';
 import { removeAxisTranslate } from '@/shared/position-utils';
@@ -1466,14 +1467,25 @@ export function removeHoverStyleInCode(code: string, nodeId: string): string {
  * Each property gets !important. Empty string values are filtered out.
  * If no properties remain, the rule is removed entirely.
  */
+/** The rule selector a pseudo kind writes: `::before` / `::after` /
+ *  `::placeholder` are pseudo-ELEMENTS; `checked` and `focus` are the form
+ *  control STATES (Checked / Focus rows in the Styles tool) — `:checked`,
+ *  `:focus`. */
+export function pseudoSelector(nodeId: string, pseudo: PseudoRuleKind): string {
+  return pseudo === 'checked' || pseudo === 'focus'
+    ? `[data-id="${nodeId}"]:${pseudo}`
+    : `[data-id="${nodeId}"]::${pseudo}`;
+}
+export type PseudoRuleKind = 'before' | 'after' | 'placeholder' | 'checked' | 'focus';
+
 export function updatePseudoStyleInCode(
-  code: string, nodeId: string, pseudo: 'before' | 'after' | 'placeholder', styles: Record<string, string>
+  code: string, nodeId: string, pseudo: PseudoRuleKind, styles: Record<string, string>
 ): string {
   trace.fn('generator.updatePseudoStyleInCode', { nodeId, pseudo, styleCount: Object.keys(styles).length });
 
   const styleBlockRegex = /(<style>\s*\{[`'])([\s\S]*?)([`']\}\s*<\/style>)/s;
   const blockMatch = styleBlockRegex.exec(code);
-  const selector = `[data-id="${nodeId}"]::${pseudo}`;
+  const selector = pseudoSelector(nodeId, pseudo);
   const selectorEsc = escapeRegExp(selector);
 
   const entries = Object.entries(styles).filter(([, v]) => v !== '');
@@ -1553,14 +1565,14 @@ export function removeSelectCaretRuleInCode(code: string, nodeId: string): strin
 /**
  * Remove a ::before / ::after / ::placeholder rule from the <style> block.
  */
-export function removePseudoStyleInCode(code: string, nodeId: string, pseudo: 'before' | 'after' | 'placeholder'): string {
+export function removePseudoStyleInCode(code: string, nodeId: string, pseudo: PseudoRuleKind): string {
   trace.fn('generator.removePseudoStyleInCode', { nodeId, pseudo });
 
   const styleBlockRegex = /(<style>\s*\{[`'])([\s\S]*?)([`']\}\s*<\/style>)/s;
   const blockMatch = styleBlockRegex.exec(code);
   if (!blockMatch) return code;
 
-  const selector = `[data-id="${nodeId}"]::${pseudo}`;
+  const selector = pseudoSelector(nodeId, pseudo);
   const selectorEsc = escapeRegExp(selector);
   const ruleRegex = new RegExp(`\\s*${selectorEsc}\\s*\\{[^}]*\\}`, 's');
 
@@ -1940,6 +1952,14 @@ function seedWouldBeClobberedByShorthand(key: string, entryContent: string): boo
   return new RegExp(`(?:^|[,{\\s])['"]?${shorthand}['"]?\\s*:`).test(entryContent);
 }
 
+/** Whether `name` is a destructured param of the file's component function
+ *  (`function Card({ style, color = '#fff', ...rest })`). */
+function isComponentPropParam(code: string, name: string): boolean {
+  if (['undefined', 'null', 'true', 'false', 'style', 'rest', 'initialVariant', 'variant'].includes(name)) return false;
+  const sig = /function\s+[A-Z]\w*\s*\(\s*\{([\s\S]*?)\}\s*(?::|\))/.exec(code)?.[1] ?? '';
+  return new RegExp(`(?:^|[,\\s])${escapeRegExp(name)}\\s*(?:=|,|$)`).test(sig);
+}
+
 function readBaseValuesForNode(
   code: string,
   nodeId: string,
@@ -2010,6 +2030,18 @@ function readBaseValuesForNode(
     const propRegex = new RegExp(`(?:^|[,{\\s])${keyText}\\s*:\\s*(?:'([^']*)'|"([^"]*)"|(-?\\d+(?:\\.\\d+)?))`);
     const m = styleContent.match(propRegex);
     if (m) { result[prop] = m[1] ?? m[2] ?? m[3] ?? ''; continue; }
+    // A base BOUND to a component variable (`backgroundColor: color`) — the
+    // default entry animates back to that same variable. Seeding the CSS
+    // initial here made a per-variant variable (`'variant-1': { backgroundColor:
+    // color1 }`) wipe the base binding on the default variant: Color A never
+    // showed (user report 2026-09-17). Only a destructured PROP qualifies —
+    // a scroll motion value (`y: heroY`) must never enter a variants object.
+    const identM = styleContent.match(new RegExp(`(?:^|[,{\\s])${keyText}\\s*:\\s*([A-Za-z_$][\\w$]*)\\s*(?=[,}\\n])`));
+    if (identM && isComponentPropParam(code, identM[1])) {
+      trace.fn('generator-styles:seed-variable-base', { nodeId, prop, variable: identM[1] });
+      result[prop] = `var:${identM[1]}`;
+      continue;
+    }
     // SVG presentation base from the tag's attrs (see attrBase above).
     const av = attrBase(prop);
     if (av != null) { result[prop] = av; continue; }
@@ -2324,7 +2356,9 @@ export function updateVariantStyleInCode(
   // boxShadow/…), stamp `contain:'layout paint' + willChange:'transform'`
   // onto the root so per-frame tweens can't reflow/repaint the whole page
   // (the Illustration/Chat live-jank find). No-op otherwise; idempotent.
-  return ensureRootPerfIsolation(updateVariantStyleInCodeImpl(code, nodeId, variantName, styles));
+  // A default entry seeded from a VARIABLE-bound base reads a prop, which only
+  // exists inside the component: move such a variants const in.
+  return ensureRootPerfIsolation(scopeVariantConstsReadingProps(updateVariantStyleInCodeImpl(code, nodeId, variantName, styles)));
 }
 
 function updateVariantStyleInCodeImpl(

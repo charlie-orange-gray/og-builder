@@ -91,16 +91,34 @@ function useIsCanvasRenderer(): boolean {
 // next-themes stub — code components like ThemeToggle import `useTheme` from
 // 'next-themes', which on the live Next.js site flips `<html class="dark">`
 // and persists the choice. On the canvas the real package isn't bundled and
-// the editor has its own theme switcher anyway, so we stub `useTheme` to
-// return a fixed `{ theme: 'light', setTheme: noop }`. The button still
-// renders correctly; clicking it is a harmless no-op.
-const stubUseTheme = () => ({
-  theme: 'light',
-  resolvedTheme: 'light',
-  systemTheme: 'light',
-  themes: ['light', 'dark'],
-  setTheme: () => {},
-});
+// the editor has its own theme switcher anyway, so we stub `useTheme`. The
+// theme it reports is the one the canvas is painting — the sandbox document
+// carries the editor's `.dark` class (SandboxApi.setThemeMode) — so a switch
+// that draws its own state shows the right one; `setTheme` is a no-op.
+const readCanvasTheme = () =>
+  typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+const stubUseTheme = () => {
+  // A hook, like the real one: the editor toggle flips the class on this
+  // document (setThemeMode) without re-rendering a mounted component, so the
+  // value is state that follows the class — or the switch's knob stays where
+  // the last render left it while the tokens around it change.
+  const [theme, setTheme] = React.useState<'light' | 'dark'>(readCanvasTheme);
+  React.useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    const sync = () => setTheme(readCanvasTheme());
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+  return {
+    theme,
+    resolvedTheme: theme,
+    systemTheme: theme,
+    themes: ['light', 'dark'],
+    setTheme: () => {},
+  };
+};
 const nextThemesStub = {
   useTheme: stubUseTheme,
   ThemeProvider: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),

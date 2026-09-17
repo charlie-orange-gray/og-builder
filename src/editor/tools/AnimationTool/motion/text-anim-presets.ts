@@ -13,6 +13,8 @@ interface TextAnimOverride {
   config: Partial<TextAnimConfig>;
 }
 
+export type TextAnimTrigger = 'appear' | 'view' | 'section' | 'scroll';
+
 export interface TextAnimConfig {
   /** Per-SCOPE existence switch (a VALUE field, so replicas/variants override
    *  it like any other): `true` = the effect renders static on that scope.
@@ -28,15 +30,29 @@ export interface TextAnimConfig {
    *  differently (live find 2026-07-30). Pair with a percentage `y` (e.g. '100%') so the offset tracks
    *  the type size; a px offset masks correctly at one breakpoint only. */
   mask?: boolean;
-  /** Playback trigger. 'view' (default) = each unit reveals once when scrolled into view (per-child
-   *  whileInView + staggered delay). 'scroll' = the reveal is scrubbed to scroll progress
-   *  (useScroll + per-unit useTransform). */
-  trigger?: 'view' | 'scroll';
+  /** Playback trigger (the Trigger dropdown + the scrubbed mode):
+   *  'appear'  = On Appear — plays as soon as the text mounts, wherever it is on the page.
+   *  'view'    = Layer in View (default) — plays when the text's top crosses `viewport`.
+   *  'section' = Section in View — plays when `sectionId`'s top crosses `viewport`.
+   *  'scroll'  = On Scroll — the reveal is scrubbed to scroll progress (scrollStart/End). */
+  trigger?: TextAnimTrigger;
+  /** Layer / Section in View — the viewport line the top edge must cross (Start / Viewport
+   *  control). Absent = as soon as it enters the viewport (the bottom line). */
+  viewport?: 'top' | 'middle' | 'bottom';
+  /** Layer / Section in View — play again each time it re-enters. */
+  replay?: boolean;
+  /** Section in View — the anchor id (an element's `id`) that triggers the reveal. */
+  sectionId?: string;
   /** On Scroll only — useScroll offset viewport positions (% down the viewport of the element's top).
    *  scrollStart (default 90) = where the reveal begins as the element enters from the bottom;
    *  scrollEnd (default 35) = where it's fully revealed. */
   scrollStart?: number;
   scrollEnd?: number;
+  /** On Scroll only — the share of the scrub each unit spans, as a fraction of the whole range
+   *  (the "Overlap" slider). Default 0.4: units overlap and the reveal reads as a soft gradient.
+   *  0 = one unit at a time (1/count each, no overlap): a sharp per-word step, the
+   *  Text Scroll Reveal feel. Mirrors `SplitTextSpec.scrollWindow` in @revyme/runtime. */
+  scrollWindow?: number;
   /** Per-viewport / per-variant VALUE overrides (the blue "reset override" rows). Only the base config's
    *  structural fields (animationType, trigger) apply; each entry overrides value fields for its scope. */
   responsive?: TextAnimOverride[];

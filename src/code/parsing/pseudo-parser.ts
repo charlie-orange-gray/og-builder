@@ -5,24 +5,28 @@ import { trace } from '@/shared/debug-trace';
 
 /** Pseudo selectors the editor owns. `placeholder` styles a form control's
  *  placeholder TEXT (Input tool), not a generated box like before/after. */
-export type PseudoKind = 'before' | 'after' | 'placeholder';
+export type PseudoKind = 'before' | 'after' | 'placeholder' | 'checked' | 'focus';
 
 export interface PseudoStyles {
   before?: Record<string, string>;
   after?: Record<string, string>;
   placeholder?: Record<string, string>;
+  /** `:checked` — a checkbox/radio's Checked state (Styles tool). */
+  checked?: Record<string, string>;
+  /** `:focus` — a form control's Focus state (Styles tool). */
+  focus?: Record<string, string>;
 }
 
 export function parsePseudoRules(css: string): Map<string, PseudoStyles> {
   const result = new Map<string, PseudoStyles>();
   if (!css) return result;
 
-  const ruleRx = /\[data-id="([^"]+)"\]::(before|after|placeholder)\s*\{([^}]*)\}/g;
+  const ruleRx = /\[data-id="([^"]+)"\](?:::(before|after|placeholder)|:(checked|focus))\s*\{([^}]*)\}/g;
   let match;
   while ((match = ruleRx.exec(css)) !== null) {
     const nodeId = match[1];
-    const pseudo = match[2] as PseudoKind;
-    const declBlock = match[3];
+    const pseudo = (match[2] ?? match[3]) as PseudoKind;
+    const declBlock = match[4];
     const props: Record<string, string> = {};
 
     const decls = declBlock.split(';').map(d => d.trim()).filter(Boolean);

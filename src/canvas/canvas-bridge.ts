@@ -123,6 +123,9 @@ export interface CanvasBridge {
 
   /** Inject or update a CSS rule in the canvas style element. */
   injectCSS(selector: string, cssBody: string): void;
+  /** Mirror the editor's colour mode onto the sandbox document, so the
+   *  token lift inside it picks the right block (canvas-theme.ts). */
+  setThemeMode?(mode: 'light' | 'dark'): void;
 
   /** Remove a CSS rule from the canvas style element by selector. */
   removeCSS(selector: string): void;

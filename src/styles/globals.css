@@ -17,6 +17,13 @@
 
 @layer theme {
   :root {
+    /* Native UI (select popups, date pickers, scrollbars) is painted by the
+       BROWSER, not by us — its colours come from `color-scheme`. Undeclared,
+       it defaults to light, so on Windows Chrome every <select> opened a white
+       list with a blue highlight inside the dark editor (user report
+       2026-09-17); macOS hid it by following the system appearance. Declaring
+       it per theme makes the OS chrome match the app in BOTH themes. */
+    color-scheme: light;
     /* SURFACES — the original neutral ladder, unchanged.
        An earlier pass moved every surface onto ayu's blue-tinted neutrals to
        go with the gold accent. It read as a blue cast across the whole app:
@@ -247,6 +254,8 @@
   }
 
   .dark {
+    /* Native UI follows the app theme — see the :root note. */
+    color-scheme: dark;
     /* Warm-neutral ladder — see the :root note. Canvas sits ABOVE panel here
        (the artboard is lighter than the chrome around it), which is the
        opposite of light mode and intentional: the work should be the

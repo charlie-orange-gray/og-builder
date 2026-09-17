@@ -63,6 +63,14 @@ const TRANSFORM_VALUE_KEYS = new Set([
 ]);
 
 function checkMotionTransformDrift(ast: t.File, v: OracleViolation[]): void {
+  // A master with 2+ variants: `layout` FLIPs on every resize, rebuilding the transform.
+  let multiVariantMaster = false;
+  for (const stmt of ast.program.body) {
+    if (!t.isVariableDeclaration(stmt)) continue;
+    for (const d of stmt.declarations) {
+      if (t.isIdentifier(d.id, { name: 'variantConfig' }) && t.isArrayExpression(d.init) && d.init.elements.length >= 2) multiVariantMaster = true;
+    }
+  }
   /** Object-literal keys of a JSX attr value (empty for non-object shapes). */
   const objKeys = (val: t.JSXAttribute['value'] | undefined): string[] => {
     if (!val || val.type !== 'JSXExpressionContainer') return [];
@@ -119,7 +127,9 @@ function checkMotionTransformDrift(ast: t.File, v: OracleViolation[]): void {
       const animates =
         (['initial', 'whileInView', 'animate'] as const).some((n) =>
           objKeys(attrs.find((a) => a.name.name === n)?.value).some((k) => TRANSFORM_VALUE_KEYS.has(k)))
-        || styleKeys.some((k) => TRANSFORM_VALUE_KEYS.has(k));
+        || styleKeys.some((k) => TRANSFORM_VALUE_KEYS.has(k))
+        // `layout` in a multi-variant master: the projection rebuilds the transform.
+        || (attrs.some((a) => a.name.name === 'layout') && multiVariantMaster);
 
       const tt = templatePrefix(attrs.find((a) => a.name.name === 'transformTemplate'));
       if (tt === 'foreign') return; // hand-written composer — not ours to judge

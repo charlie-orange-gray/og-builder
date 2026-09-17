@@ -456,6 +456,27 @@ export function setInlineVariableForVariant(
     const pidx = variantObj.properties.findIndex(keyMatches);
     const newProp = t.objectProperty(keyNode(), t.identifier(propName));
     if (pidx >= 0) variantObj.properties[pidx] = newProp; else variantObj.properties.push(newProp);
+    // The DEFAULT entry animates back to the element's BASE. When that base is
+    // itself a variable (`backgroundColor: color`), the default must read the
+    // same variable — a seeded CSS initial (`'rgba(0, 0, 0, 0)'`) or no entry
+    // at all left Color A unreachable on the default variant (user report
+    // 2026-09-17). A literal base keeps its literal default.
+    if (variantName !== 'default') {
+      const styleAttr = findAttribute(el.openingElement, 'style') as t.JSXAttribute | null;
+      const styleObj = styleAttr?.value?.type === 'JSXExpressionContainer' && t.isObjectExpression(styleAttr.value.expression)
+        ? styleAttr.value.expression : null;
+      const baseProp = styleObj?.properties.find(keyMatches) as t.ObjectProperty | undefined;
+      if (baseProp && t.isIdentifier(baseProp.value)) {
+        const defaultEntry = initNode.properties.find((p: any) => t.isObjectProperty(p)
+          && ((t.isIdentifier(p.key) && p.key.name === 'default') || (t.isStringLiteral(p.key) && p.key.value === 'default'))) as t.ObjectProperty | undefined;
+        let defObj: t.ObjectExpression;
+        if (defaultEntry && t.isObjectExpression(defaultEntry.value)) defObj = defaultEntry.value;
+        else { defObj = t.objectExpression([]); initNode.properties.unshift(t.objectProperty(t.identifier('default'), defObj)); }
+        const didx = defObj.properties.findIndex(keyMatches);
+        const defProp = t.objectProperty(keyNode(), t.identifier((baseProp.value as t.Identifier).name));
+        if (didx >= 0) defObj.properties[didx] = defProp; else defObj.properties.push(defProp);
+      }
+    }
     // MOVE the const into the component function if it's module-scope, so `<prop>` resolves at runtime
     // (a module-scope const referencing a component prop would be a ReferenceError on deploy).
     if (t.isProgram(binding.scope?.block)) {

@@ -125,20 +125,30 @@ export function getDarkTokenValue(tokenName: string): string | null {
  * `[data-theme="dark"]` entries on the way.
  */
 export function setDarkTokenValue(tokenName: string, darkValue: string): void {
-  let css = projectFS.readFile(TOKENS_PATH) || '';
-  css = migrateLegacyDarkBlock(css);
-  const darkMatch = css.match(DARK_BLOCK_REGEX);
+  const css = projectFS.readFile(TOKENS_PATH) || '';
+  projectFS.writeFile(TOKENS_PATH, addDarkTokenValueToCSS(css, tokenName, darkValue));
+  trace.action('preset-ops:set-dark-token', { tokenName, darkValue });
+}
+
+/**
+ * The pure form of `setDarkTokenValue`: the CSS with `--<tokenName>` set to
+ * `darkValue` under `:root.dark` (block created, legacy block migrated).
+ * A caller that batches many tokens through `modifyProjectFile` (a site
+ * import writes a whole palette with a dark value each) folds with this.
+ */
+export function addDarkTokenValueToCSS(css: string, tokenName: string, darkValue: string): string {
+  let out = migrateLegacyDarkBlock(css);
+  const darkMatch = out.match(DARK_BLOCK_REGEX);
   if (darkMatch) {
     let body = darkMatch[2];
     const propRegex = new RegExp(`(--${tokenName}:\\s*)([^;]+)(;)`);
     if (propRegex.test(body)) body = body.replace(propRegex, `$1${darkValue}$3`);
     else body += `\n  --${tokenName}: ${darkValue};`;
-    css = css.replace(DARK_BLOCK_REGEX, `$1${body}$3`);
+    out = out.replace(DARK_BLOCK_REGEX, `$1${body}$3`);
   } else {
-    css += `\n\n:root.dark {\n  --${tokenName}: ${darkValue};\n}\n`;
+    out += `\n\n:root.dark {\n  --${tokenName}: ${darkValue};\n}\n`;
   }
-  projectFS.writeFile(TOKENS_PATH, css);
-  trace.action('preset-ops:set-dark-token', { tokenName, darkValue });
+  return out;
 }
 
 // ─── Google Font Import Injection ────────────────────────────────────────────
@@ -205,6 +215,13 @@ export interface WorkspaceFontFaceSpec {
   weight: number;
   style: 'normal' | 'italic';
   ext: 'woff2' | 'woff' | 'otf' | 'ttf';
+  /**
+   * A SUBSETTED face declares the same family/weight/style many times, one
+   * file per script, told apart by unicode-range. Without it the rules
+   * collapse onto the last one declared — which may be a Cyrillic subset
+   * with no Latin glyphs. Imported sites arrive this way; uploads do not.
+   */
+  unicodeRange?: string;
 }
 
 /** `@font-face src` `format()` hint per container. */
@@ -231,6 +248,7 @@ export function addWorkspaceFontFacesToCss(css: string, fonts: WorkspaceFontFace
         `  src: url('${f.url}') format('${fontFaceFormat(f.ext)}');\n` +
         `  font-weight: ${f.weight};\n` +
         `  font-style: ${f.style};\n` +
+        (f.unicodeRange ? `  unicode-range: ${f.unicodeRange};\n` : '') +
         `  font-display: swap;\n` +
         `}`,
     );

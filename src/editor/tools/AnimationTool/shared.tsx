@@ -27,7 +27,14 @@ export function SliderRow({ label, value, min, max, step, onChange, onCommit, su
             chevrons entirely. Clean number + chevronLabel = chevrons + "s" suffix,
             matching the Delay row and the Width field. */}
         <ToolInput value={String(value)}
-          onChange={(v) => (onCommit ?? onChange)(parseFloat(v) || 0)} step={step} chevronLabel={suffix} />
+          onChange={(v) => (onCommit ?? onChange)(parseFloat(v) || 0)}
+          // With a commit, the chevrons scrub LIVE through onChange and commit
+          // once on release — exactly like the slider. Without these, every
+          // chevron step (and each 50ms hold-repeat) was a full commit, which
+          // made the Smooth Scroll intensity chevrons crawl.
+          onChangeLive={onCommit ? (v) => onChange(parseFloat(v) || 0) : undefined}
+          onCommit={onCommit ? (v) => onCommit(parseFloat(v) || 0) : undefined}
+          step={step} chevronLabel={suffix} />
       </div>
     </div>
   );

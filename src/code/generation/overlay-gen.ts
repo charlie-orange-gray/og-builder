@@ -354,8 +354,11 @@ function buildOverlayHandlerAttr(triggerConfig: OverlayTriggerConfig, overlayId:
   // component EVENT fires from inside it. Pass the event callback as a PROP — the
   // master forwards it (`{...rest}`) to a child wired with `onClick={eventName}`, so
   // firing the child fires this callback and opens the overlay.
+  // An overlay shown by an instance's event TOGGLES — the same
+  // button opens it and, fired again (Menu → Close), closes it. A close
+  // binding on an instance INSIDE the overlay stays `set…Open(false)`.
   if (triggerConfig.trigger === 'event' && triggerConfig.eventName) {
-    return ` ${triggerConfig.eventName}={() => ${setVarName}(true)}`;
+    return ` ${triggerConfig.eventName}={() => ${setVarName}(!${varName})}`;
   }
   if (triggerConfig.trigger === 'click') return ` onClick={() => ${setVarName}(!${varName})}`;
   // HOVER: open on enter; on leave, DON'T close if the cursor moved ONTO the
@@ -2680,3 +2683,4 @@ export function liftNestedCanvasOverlaysToRoot(code: string): string {
   trace.action('overlay-gen:liftNestedOverlays', { count: lifted.length, ids: nested.map(n => n.id) });
   return result;
 }
+

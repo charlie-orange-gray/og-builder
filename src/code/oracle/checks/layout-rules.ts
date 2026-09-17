@@ -539,6 +539,13 @@ function checkFlexRowChildFullWidth(ast: t.File, v: OracleViolation[]): void {
       if (dir === '__expr__') return; // indeterminate direction — skip
       // Absent flexDirection IS row (the CSS default) — don't reward omission.
       if (dir === 'column' || dir === 'column-reverse') return;
+      // A WRAPPING row cannot overflow sideways — a 100% child takes a line of
+      // its own, which is the standard way to force a break mid-row (a heading
+      // whose second line sits under an inline image). The rule's premise is
+      // "each 100% child claims the full row and the row overflows"; with
+      // flex-wrap that premise is false.
+      const wrap = strProp(pObj, 'flexWrap');
+      if (wrap === 'wrap' || wrap === 'wrap-reverse') return;
 
       const flow: Array<{ id: string; width: string | null; line?: number }> = [];
       for (const child of path.node.children) {

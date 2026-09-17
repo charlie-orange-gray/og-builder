@@ -1,7 +1,7 @@
 // preset-ops.test.ts — token-resolution helpers used for editor preview swatches.
 
 import { describe, test, expect } from 'vitest';
-import { resolveCssTokens, resolveTokenValue, addWorkspaceFontFacesToCss, type WorkspaceFontFaceSpec } from './preset-ops';
+import { resolveCssTokens, resolveTokenValue, addWorkspaceFontFacesToCss, addDarkTokenValueToCSS, type WorkspaceFontFaceSpec } from './preset-ops';
 import type { PresetToken } from '@/shared/types';
 
 const TOKENS: PresetToken[] = [
@@ -101,5 +101,47 @@ describe('addWorkspaceFontFacesToCss', () => {
     const css = "@import url('https://fonts.googleapis.com/x');\n:root { --x: 1; }";
     const out = addWorkspaceFontFacesToCss(css, [font()]);
     expect(out.indexOf('@import')).toBeLessThan(out.indexOf('@font-face'));
+  });
+});
+
+describe('addWorkspaceFontFacesToCss — subsetted faces', () => {
+  test('writes unicode-range when the spec carries one, and only then', () => {
+    const css = addWorkspaceFontFacesToCss(':root {}', [
+      { family: 'Inter', url: 'https://cdn/latin.woff2', weight: 400, style: 'normal', ext: 'woff2', unicodeRange: 'U+0000-00FF' },
+      { family: 'Switzer', url: 'https://cdn/switzer-600.woff2', weight: 600, style: 'normal', ext: 'woff2' },
+    ]);
+    expect(css).toContain("font-family: 'Inter';");
+    expect(css).toContain('unicode-range: U+0000-00FF;');
+    const switzer = css.slice(css.indexOf("font-family: 'Switzer'"));
+    expect(switzer).not.toContain('unicode-range');
+    expect(switzer).toContain('font-weight: 600;');
+  });
+
+  test('stays idempotent by url across re-imports', () => {
+    const spec = { family: 'Switzer', url: 'https://cdn/s.woff2', weight: 600, style: 'normal' as const, ext: 'woff2' as const };
+    const once = addWorkspaceFontFacesToCss(':root {}', [spec]);
+    const twice = addWorkspaceFontFacesToCss(once, [spec]);
+    expect(twice).toBe(once);
+    expect((twice.match(/@font-face/g) ?? []).length).toBe(1);
+  });
+});
+
+describe('addDarkTokenValueToCSS', () => {
+  test('creates the :root.dark block and adds to it', () => {
+    const base = ':root {\n  --color-text: #303030;\n}\n';
+    const one = addDarkTokenValueToCSS(base, 'color-text', '#fff');
+    expect(one).toContain(':root.dark {\n  --color-text: #fff;\n}');
+    const two = addDarkTokenValueToCSS(one, 'color-brand', '#d0ff71');
+    expect(two.match(/:root\.dark \{/g)).toHaveLength(1);
+    expect(two).toContain('--color-brand: #d0ff71;');
+    // Light values are untouched.
+    expect(two).toContain(':root {\n  --color-text: #303030;\n}');
+  });
+
+  test('replaces an existing dark value in place', () => {
+    const css = ':root {\n  --color-text: #303030;\n}\n\n:root.dark {\n  --color-text: #eee;\n}\n';
+    const out = addDarkTokenValueToCSS(css, 'color-text', '#fff');
+    expect(out).toContain('--color-text: #fff;');
+    expect(out).not.toContain('#eee');
   });
 });

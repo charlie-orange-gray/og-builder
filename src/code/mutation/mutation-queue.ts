@@ -15,6 +15,7 @@
 // The queue processes mutations in order, applies them to the code string,
 // and flushes to codeAtom when idle.
 
+import { liftCodeOverrides, restoreCodeOverrides, pruneUnusedOverrideImports, setCodeOverridesInCode, type CodeOverrideRef } from '../generation/code-override-gen';
 import { getAllCachedNodes, getNodeFromCache, canvasInteractingAtom, setPreferCacheSnapshot } from '@/code/stores/store';
 import { registerExternalWriteRefresh } from './external-write-registry';
 import { sanitizeDataName } from '@/shared/id-utils';
@@ -246,6 +247,7 @@ export type Mutation =
   /** Replica drag-out of a CMS collection list: COPY the literal `.map()` subtree
    *  into `canvasNodes` (id-renamed by `suffix`, map + bindings preserved). The
    *  original stays in the page; the caller hides it on the source replica. */
+  | { type: 'setCodeOverrides'; nodeId: string; overrides: CodeOverrideRef[] }
   | { type: 'duplicateCollectionToCanvas'; nodeId: string; source: string; suffix: string; styles: Record<string, string> }
   /** Move an element to a new position within its parent (reorder children). */
   | { type: 'reorder'; nodeId: string; parentId: string; index: number }
@@ -606,9 +608,9 @@ export type Mutation =
   | { type: 'unwrapFitText'; nodeId: string }
   // ─── Pseudo rules (::before / ::after / ::placeholder) ────────────────
   /** Write or update a ::before/::after/::placeholder CSS rule in the <style> block */
-  | { type: 'updatePseudoStyle'; nodeId: string; pseudo: 'before' | 'after' | 'placeholder'; styles: Record<string, string> }
+  | { type: 'updatePseudoStyle'; nodeId: string; pseudo: 'before' | 'after' | 'placeholder' | 'checked' | 'focus'; styles: Record<string, string> }
   /** Remove a ::before/::after/::placeholder rule from the <style> block */
-  | { type: 'removePseudo'; nodeId: string; pseudo: 'before' | 'after' | 'placeholder' }
+  | { type: 'removePseudo'; nodeId: string; pseudo: 'before' | 'after' | 'placeholder' | 'checked' | 'focus' }
   /** Write (raw declaration body) or remove (null) the select caret rule
    *  `select[data-id="…"] { … }` — the Input tool's Icon control. Lives in
    *  the <style> block so the node's inline backgroundImage stays the Fill
@@ -739,6 +741,8 @@ const FLUSH_DELAY_MS = 16; // ~1 frame
  * defined`.
  */
 const IMPORT_AFFECTING_TYPES = new Set([
+  // `<Override>` needs the runtime import; the override file import is written by the generator.
+  'setCodeOverrides',
   'updateMotionProp', 'removeMotionProp', 'removeMotionScopeBranch',
   'updateScrollAnim', 'removeScrollAnim', 'updateScrollDirection', 'removeScrollDirection',
   'updateScrollSpeed', 'removeScrollSpeed', 'updateLoop', 'removeLoop',
@@ -1853,6 +1857,8 @@ export function syncImports(code: string): string {
   // new ones.
   const FRAMEWORK_TAGS = new Set([
     'Link', 'Image', 'Fragment', 'AnimatePresence', 'MotionConfig', 'LayoutGroup',
+    // Code-override wrapper — a `@revyme/runtime` export, not a components/ file.
+    'Override',
     'React', 'Suspense',
     // `MotionLink` is a local `const MotionLink = motion.create(Link)` — NOT a
     // `@/components/MotionLink` file. Excluding it stops the auto-import pass
@@ -2265,6 +2271,20 @@ function healDuplicateLayoutAttrs(code: string): string {
 }
 
 function applyMutation(code: string, mutation: Mutation): string {
+  // Code overrides: lift every `<Override>` wrapper so generators see the plain
+  // JSX they were written for, then put each back around its element (a
+  // deleted element drops its wrapper). See code-override-gen.ts.
+  if (code.includes('<Override') && mutation.type !== 'setCodeOverrides') {
+    const { code: plain, lifted } = liftCodeOverrides(code);
+    if (lifted.size > 0) {
+      const next = applyMutationUnwrapped(plain, mutation);
+      return next === plain ? code : pruneUnusedOverrideImports(restoreCodeOverrides(next, lifted));
+    }
+  }
+  return applyMutationUnwrapped(code, mutation);
+}
+
+function applyMutationUnwrapped(code: string, mutation: Mutation): string {
   if (!mutationAffectsScroll(mutation)) return applyMutationCore(code, mutation);
   // Decompose → apply on the separate form → recompose conflicts. This is what
   // makes stacking effects "just work" like the reference: adding a 2nd effect that
@@ -2444,6 +2464,9 @@ function applyMutationCore(code: string, mutation: Mutation): string {
         }
         return next;
       }
+
+      case 'setCodeOverrides':
+        return setCodeOverridesInCode(code, mutation.nodeId, mutation.overrides);
 
       case 'reorder':
         return reorderNodeInCode(code, mutation.nodeId, mutation.parentId, mutation.index);
@@ -2895,7 +2918,7 @@ function applyMutationCore(code: string, mutation: Mutation): string {
         // An EVENT variable is a component CALLBACK prop (standard component event),
         // NOT a data prop — add it BARE (`{ eventName }`, no string default) so a child
         // can fire it (`onClick={eventName}`) and the page instance can pass a handler
-        // (`eventName={() => setOverlayOpen(true)}`). Other types get a typed literal default.
+        // (`eventName={() => setOverlayOpen(!overlayOpen)}`). Other types get a typed literal default.
         const withProp = mutation.varType === 'event'
           ? addBarePropToFunctionInCode(code, mutation.name, 'none')
           : createTypedVariableInCode(code, mutation.name, mutation.literalKind, mutation.defaultValue);

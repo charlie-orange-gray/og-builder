@@ -43,6 +43,7 @@ import * as RevymeRuntime from '@revyme/runtime';
 import { buildRouteTable, resolveRoute, type Route } from './router';
 import { templatePreviewPages } from '@/preview/template-preview';
 import { LinkShim, ImageShim, useRouter as useRouterShim, usePathname, useSearchParams, useParams as useParamsShim, setCurrentParams } from './next-shims';
+import Lenis from 'lenis';
 
 // ─── Project files (mirror of parent ProjectFS) ────────────────────────────
 
@@ -153,7 +154,7 @@ const MODULE_MAP: Record<string, any> = {
   'react/jsx-runtime': esm({ jsx: previewJsx, jsxs: previewJsx, Fragment: React.Fragment }),
   'react/jsx-dev-runtime': esm({ jsxDEV: previewJsx, Fragment: React.Fragment }),
   'react-dom': esm({ createPortal: (children: any) => children }),
-  'next-themes': esm({ ThemeProvider: NextThemeProvider, useTheme }),
+  'next-themes': esm({ ThemeProvider: NextThemeProvider, useTheme: useThemeForPage }),
   'next/link': esm({ default: LinkShim }),
   'next/image': esm({ default: ImageShim }),
   'next/navigation': esm({ useRouter: useRouterShim, usePathname, useSearchParams, useParams: useParamsShim }),
@@ -174,6 +175,9 @@ const MODULE_MAP: Record<string, any> = {
   // only `import` from 'next-intl' (the client root) anyway; pages-router
   // server APIs are out of scope for the preview iframe.
   'next-intl': NextIntl,
+  // Lenis — the generated Smooth Scroll controller (app/smooth-scroll-controller.tsx)
+  // imports it as a default export; published sites install it from npm.
+  'lenis': esm({ default: Lenis }),
   'next-intl/server': esm({
     getLocale: async () => 'en',
     getMessages: async () => ({}),
@@ -206,6 +210,11 @@ const MODULE_MAP: Record<string, any> = {
     // `localizeRows(slug, __activeLocale)`, so the preview needs it or the
     // page throws "localizeRows is not a function" and renders nothing.
     localizeRows: RevymeRuntime.localizeRows,
+    // Code overrides — `<Override with={withX}>` on pages, `createStore` and
+    // the host stand-ins inside `overrides/*.tsx`.
+    Override: RevymeRuntime.Override,
+    createStore: RevymeRuntime.createStore,
+    hostCompat: RevymeRuntime.hostCompat,
   }),
   // Legacy `@/lib/...` entries — old projects that still use these paths
   // resolve to the same package functions, so they keep working without a
@@ -422,6 +431,27 @@ let tokensStyleEl: HTMLStyleElement | null = null;
  *  active. */
 let forcedTheme: string | null = null;
 let themeEnforcer: MutationObserver | null = null;
+
+/** Drop the parent's theme pin: the page has asked for a theme itself. */
+function releaseThemePin(): void {
+  forcedTheme = null;
+  if (themeEnforcer) { themeEnforcer.disconnect(); themeEnforcer = null; }
+}
+
+/**
+ * The page's `useTheme`, with one difference: a theme the PAGE sets — a
+ * Theme Toggle click — releases the parent's pin before it lands. The pin
+ * exists to keep the FIRST paint on the canvas's light scheme against
+ * next-themes' `enableSystem` on a dark-mode OS; re-asserting it against
+ * the user's own toggle made the builder's Theme Toggle a dead button in
+ * its own preview (imported dark-capable site, 2026-09-14). Subsequent
+ * `preview:force-theme` messages (a file change re-sends one) pin again.
+ */
+function useThemeForPage(): ReturnType<typeof useTheme> {
+  const t = useTheme();
+  const setTheme: typeof t.setTheme = (v) => { releaseThemePin(); t.setTheme(v); };
+  return { ...t, setTheme };
+}
 function injectTokens(css: string): void {
   if (!tokensStyleEl) {
     tokensStyleEl = document.createElement('style');

@@ -41,4 +41,7 @@ export { ZIndexControl } from './ZIndexControl';
 export { PseudoElementControl } from './PseudoElementControl';
 export { PointerEventsControl } from './PointerEventsControl';
 export { UserSelectControl } from './UserSelectControl';
+export { BackfaceControl } from './BackfaceControl';
+export { MixBlendModeControl } from './MixBlendModeControl';
 export { TransitionVariableEditor } from './TransitionVariableEditor';
+export { FormStateControl } from './FormStateControl';

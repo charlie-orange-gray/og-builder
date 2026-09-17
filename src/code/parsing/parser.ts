@@ -401,6 +401,10 @@ export interface CanvasNode {
    *  Set is preferred over Array for O(1) membership tests during
    *  per-variant render decisions in the canvas Renderer. */
   hiddenOnVariants?: Set<string>;
+  /** Code overrides applied through a `<Override with={…}>` wrapper around
+   *  this element — the identifiers in `with`, innermost first. The wrapper
+   *  itself is transparent (no node); see runtime `code-override.tsx`. */
+  codeOverrides?: string[];
   // motion direct animation props (whileHover, whileTap, etc.)
   motionProps: {
     whileHover?: Record<string, string>;
@@ -547,6 +551,8 @@ interface ParseCtx {
    *  hidden-variant set is stashed here, then re-attached to the inner
    *  element's CanvasNode when its own JSXElement enter() fires. */
   pendingVisibilityByInnerId: Map<string, Set<string>>;
+  /** `<Override with={…}>` wrapper identifiers, keyed by the wrapped element's data-id. */
+  pendingOverridesByInnerId: Map<string, string[]>;
   /** The file's `const variantConfig = [...]`, parsed once up front. */
   currentVariantConfig: { name: string }[];
   /** Page-variable defaults, needed EARLY (before the node loop) — see the
@@ -1605,6 +1611,7 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
     collectionContextStack: [],
     detailPageContext: null,
     pendingVisibilityByInnerId: new Map(),
+    pendingOverridesByInnerId: new Map(),
     currentVariantConfig: [],
     earlyPageVarDefaults: {},
   };
@@ -1803,13 +1810,32 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
         // entry. We stash the parsed `hiddenOnVariants` on a
         // side-map keyed by the inner element so the JSXElement
         // handler can attach it once that node is created.
+        // Code-override wrapper: transparent like AnimatePresence. Record the
+        // override identifiers for the one wrapped element, then let the walk
+        // continue so that element parents to the wrapper's parent.
+        if (tagName === 'Override') {
+          const names = overrideNamesFromOpening(opening);
+          for (const child of el.children) {
+            if (child.type !== 'JSXElement') continue;
+            const idAttr = (child.openingElement.attributes as any[]).find((a) => a.type === 'JSXAttribute' && a.name?.name === 'data-id');
+            const innerId = idAttr?.value?.type === 'StringLiteral' ? idAttr.value.value : null;
+            if (innerId && names.length) ctx.pendingOverridesByInnerId.set(innerId, names);
+          }
+          return;
+        }
         if (tagName === 'AnimatePresence') {
           for (const child of el.children) {
             if (child.type !== 'JSXExpressionContainer') continue;
             const expr = child.expression;
             if (expr.type !== 'LogicalExpression' || expr.operator !== '&&') continue;
             if (expr.right.type !== 'JSXElement') continue;
-            const innerEl = expr.right;
+            let innerEl = expr.right;
+            // `{cond && <Override with={…}><El data-id/></Override>}` — look through the override wrapper.
+            if (resolveTagName(innerEl.openingElement) === 'Override') {
+              const wrapped = innerEl.children.find((c: any) => c.type === 'JSXElement');
+              if (!wrapped) continue;
+              innerEl = wrapped as typeof innerEl;
+            }
             const innerOpening = innerEl.openingElement;
             const innerId = getAttr(innerOpening.attributes, 'data-id');
             if (!innerId) continue;
@@ -2370,6 +2396,12 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
 
         // If this element was wrapped in <AnimatePresence>{cond && <this/>}</AnimatePresence>,
         // attach the parsed condition's hidden-variants set now.
+        const pendingOverrides = ctx.pendingOverridesByInnerId.get(id);
+        if (pendingOverrides) {
+          node.codeOverrides = pendingOverrides;
+          ctx.pendingOverridesByInnerId.delete(id);
+        }
+
         const pendingHidden = ctx.pendingVisibilityByInnerId.get(id);
         if (pendingHidden && pendingHidden.size > 0) {
           node.hiddenOnVariants = pendingHidden;
@@ -2429,7 +2461,8 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
         const tagName = resolveTagName(opening);
         if (tagName === 'AnimatePresence' || tagName === 'LayoutGroup'
             || tagName === 'MotionConfig' || tagName === 'Fragment'
-            || tagName === 'style' || tagName === 'PageTransitions') {
+            || tagName === 'style' || tagName === 'PageTransitions'
+            || tagName === 'Override') {
           return;
         }
         // Glide wrappers (`<motion.div data-glide-item>`) are skipped on enter
@@ -4340,4 +4373,15 @@ function walkVariantConditionalProp(expr: any, varDefaults?: Record<string, stri
   map['default'] = fallback;
 
   return Object.keys(map).length > 0 ? { map, varRefs } : null;
+}
+
+/** Identifiers in an `<Override with={withX}>` / `with={[withA, withB]}` opening tag. */
+function overrideNamesFromOpening(opening: any): string[] {
+  const attr = (opening.attributes as any[]).find((a) => a.type === 'JSXAttribute' && a.name?.name === 'with');
+  const expr = attr?.value?.type === 'JSXExpressionContainer' ? attr.value.expression : null;
+  if (!expr) return [];
+  const items = expr.type === 'ArrayExpression' ? expr.elements : [expr];
+  return items
+    .map((e: any) => (e?.type === 'Identifier' ? e.name : e?.type === 'MemberExpression' && e.property?.type === 'Identifier' && e.object?.type === 'Identifier' ? `${e.object.name}.${e.property.name}` : null))
+    .filter((n: string | null): n is string => !!n);
 }

@@ -325,6 +325,10 @@ export class PostMessageBridge implements CanvasBridge {
   injectCSS(selector: string, cssBody: string): void {
     this.remote?.injectCSS(selector, cssBody);
   }
+  /** The editor's colour mode, mirrored onto the sandbox document (see SandboxApi). */
+  setThemeMode(mode: 'light' | 'dark'): void {
+    this.remote?.setThemeMode(mode);
+  }
 
   /** Fire-and-forget CSS removal. */
   removeCSS(selector: string): void {

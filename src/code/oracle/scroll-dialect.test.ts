@@ -158,3 +158,32 @@ describe('scroll dialect — sinners bounce', () => {
     expect(codes(checkFile(code, { kind: 'page' }))).toContain('SCROLL_USESCROLL_SHAPE');
   });
 });
+
+describe('scroll-dialect — Section in View resolves its target by anchor id', () => {
+  // updateScrollAnimInCode's section mode never attaches a JSX ref: it
+  // resolves `document.getElementById(<anchor>)` at mount, the way the
+  // scroll parser reads it back. That is an attachment, like the data-id
+  // selector the On-Scroll text effect uses.
+  const page = `'use client';
+import React, { useRef, useEffect } from 'react';
+import { motion, useScroll, useTransform } from 'framer-motion';
+
+export default function Page() {
+  const heroRef = useRef(null);
+  useEffect(() => { heroRef.current = document.getElementById('about') || document.body; }, []);
+  const { scrollYProgress: heroProgress } = useScroll({ target: heroRef, offset: ["start end", "end end"] });
+  const heroScale = useTransform(heroProgress, [0, 1], [1, 0.8]);
+  return (
+    <div data-id="root" data-name="Page" style={{ position: 'relative' }}>
+      <motion.div data-id="card" data-name="Card" style={{ position: 'relative', scale: heroScale }}></motion.div>
+      <div data-id="about" data-name="About" id="about" style={{ position: 'relative' }}></div>
+    </div>
+  );
+}
+`;
+  it('does not report the anchor-resolved target as unattached', () => {
+    const codes = checkFile(page, { kind: 'page' }).map((x) => x.code);
+    expect(codes).not.toContain('SCROLL_TARGET_UNATTACHED');
+    expect(codes).not.toContain('SCROLL_REF_SHAPE');
+  });
+});

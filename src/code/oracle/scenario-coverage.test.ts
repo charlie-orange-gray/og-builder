@@ -68,8 +68,9 @@ const MUST_BOUNCE: Array<{ id: string; code: string; kind?: 'page' | 'component'
     fixture: page(`    <ul data-id="list" style={{ position: 'relative', width: '100%', height: 'auto' }}><li data-id="li1" style={{ position: 'relative', width: '100%', height: 'auto' }}>One</li></ul>`) },
   { id: 'S14 raw iframe embed', code: 'ELEMENT_UNSUPPORTED_TAG',
     fixture: page(`    <iframe data-id="yt" src="https://www.youtube.com/embed/abc" style={{ position: 'relative', width: '100%', height: '400px' }} />`) },
-  { id: 'S15 checkbox input', code: 'ELEMENT_UNSUPPORTED_TAG',
-    fixture: page(`    <input data-id="consent" type="checkbox" name="consent" style={{ position: 'relative', width: '20px', height: '20px' }} />`) },
+  // Was a checkbox until checkbox/radio became native form fields (2026-09-16).
+  { id: 'S15 range input', code: 'ELEMENT_UNSUPPORTED_TAG',
+    fixture: page(`    <input data-id="volume" type="range" name="volume" style={{ position: 'relative', width: '120px', height: '20px' }} />`) },
   { id: 'S16 ternary conditional render', code: 'CONDITIONAL_RENDER_UNSUPPORTED',
     fixture: page(`    {mounted ? <div data-id="popup" style={{ position: 'relative', width: '100%', height: 'auto' }}>hello</div> : null}`)
       .replace('return <div', 'const [mounted] = useState(true);\n  return <div') },

@@ -31,6 +31,7 @@ import { DEFAULT_VIEWPORT_WIDTH, SVG_SHAPE_TAGS } from '@/shared/constants';
 import { getReplicaContext, svgChildCarrierOrigin, groupChildBoxToMotion, groupChildrenCarryVariantGeometry, compensateGroupChildVariantsForBaseBox } from '@/canvas/drag/replica-context';
 import { motionPropsToCSSTransform } from '@/shared/motion-transform';
 import { trace } from '@/shared/debug-trace';
+import { extractCanvasGlobals, canvasThemeMode } from './canvas-theme';
 import { getCanvasBridge } from './canvas-bridge';
 import { transformManager } from './transform/TransformManager';
 import { moveChildAndRefitGroup, normalizeGroupOnResize, refitGroupChain } from '@/code/svg/refit-group';
@@ -418,20 +419,16 @@ export function refreshCanvasTokens(): void {
 function refreshCanvasTokensImmediate(): void {
   const styleEl = getOrCreateCanvasStyleEl();
   if (!styleEl) return;
+  // The mode changes here (the toolbar toggle) — keep the sandbox's own
+  // lift, and the code components inside it, on the same one.
+  getCanvasBridge().setThemeMode?.(canvasThemeMode());
   const rawCSS = projectFS.readFile('app/globals.css');
   if (!rawCSS) return;
 
-  // Extract ONLY :root, [data-theme], and @keyframes blocks from globals.css.
-  // Global resets (*, body, a, img) must NOT leak into the editor UI.
-  const safeBlocks: string[] = [];
-  const blockRegex = /(:root\s*\{[^}]*\}|\[data-theme[^\]]*\]\s*\{[^}]*\}|@keyframes\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\})/gs;
-  let match;
-  while ((match = blockRegex.exec(rawCSS)) !== null) {
-    safeBlocks.push(match[0]);
-  }
-  // Scope :root to [data-content-root] so CSS variables don't leak into the builder UI.
-  // :root always matches <html> regardless of where the <style> element lives.
-  const tokensCSS = safeBlocks.join('\n').replace(/:root\s*\{/g, '[data-content-root] {');
+  // The token blocks for the EDITOR's colour mode (light, or dark with the
+  // `:root.dark` values winning), plus @keyframes — scoped to the content
+  // root so nothing leaks into the builder UI. See canvas-theme.ts.
+  const tokensCSS = extractCanvasGlobals(rawCSS, canvasThemeMode()).tokensCSS;
 
   const current = styleEl.textContent || '';
   const startMarker = '/* canvas-tokens-start */';
