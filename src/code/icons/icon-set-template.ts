@@ -175,8 +175,70 @@ export function buildIconJSXBlock(entry: IconEntryInput): string {
 
 /** The full instance branch (everything after `const master = (…)`), shared by
  *  the builder and the migration so new + upgraded files are byte-identical. */
+/**
+ * Emitted into every icon-set file: the React-side twin of
+ * shared/svg-id-scope.ts (which covers the raw-markup canvas path).
+ *
+ * SVG ids are DOCUMENT-scoped, not per-<svg>. Every copy of an icon — one per
+ * viewport tile on the canvas, every instance on a page, every SSR breakpoint
+ * copy — otherwise ships the same exporter ids (`_clip2`, `_Image1`, …), and
+ * `url(#_clip2)` resolves to whichever copy comes FIRST in the document. A copy
+ * hidden with `display:none` (canvas culling, or a non-matching responsive
+ * copy) is still IN the document, so it still wins that lookup, while a
+ * clipPath inside it resolves to nothing — the visible copies then paint their
+ * clipped <use>/<image> content unclipped, as solid black rectangles.
+ *
+ * Suffixing each mount's ids (and the refs to them) keeps every copy
+ * self-contained. The scope comes from useId(), so SSR and hydration agree.
+ */
+export const SVG_ID_SCOPE_HELPERS =
+  "const SVG_URL_REF = /url\\((['\"]?)#([^)'\"]+)\\1\\)/g;\n" +
+  "function svgIdsIn(node, out) {\n" +
+  "  if (!React.isValidElement(node)) return out;\n" +
+  "  const p = node.props || {};\n" +
+  "  if (typeof p.id === 'string') out.add(p.id);\n" +
+  "  React.Children.forEach(p.children, (c) => svgIdsIn(c, out));\n" +
+  "  return out;\n" +
+  "}\n" +
+  "function scopeUrlRefs(value, uid, ids) {\n" +
+  "  return value.replace(SVG_URL_REF, (m, q, id) => (ids.has(id) ? 'url(' + q + '#' + id + '-' + uid + q + ')' : m));\n" +
+  "}\n" +
+  "function scopeSvgIds(node, uid, ids) {\n" +
+  "  if (!React.isValidElement(node)) return node;\n" +
+  "  const p = node.props || {};\n" +
+  "  const next = {};\n" +
+  "  let changed = false;\n" +
+  "  for (const [k, v] of Object.entries(p)) {\n" +
+  "    if (k === 'children') continue;\n" +
+  "    if (k === 'id' && typeof v === 'string' && ids.has(v)) { next.id = v + '-' + uid; changed = true; continue; }\n" +
+  "    if (k === 'style' && v && typeof v === 'object') {\n" +
+  "      const ns = {}; let sc = false;\n" +
+  "      for (const [sk, sv] of Object.entries(v)) {\n" +
+  "        const nsv = typeof sv === 'string' ? scopeUrlRefs(sv, uid, ids) : sv;\n" +
+  "        if (nsv !== sv) sc = true;\n" +
+  "        ns[sk] = nsv;\n" +
+  "      }\n" +
+  "      if (sc) { next.style = ns; changed = true; }\n" +
+  "      continue;\n" +
+  "    }\n" +
+  "    if (typeof v === 'string') {\n" +
+  "      let nv = scopeUrlRefs(v, uid, ids);\n" +
+  "      if ((k === 'href' || k === 'xlinkHref') && v.charAt(0) === '#' && ids.has(v.slice(1))) nv = v + '-' + uid;\n" +
+  "      if (nv !== v) { next[k] = nv; changed = true; }\n" +
+  "    }\n" +
+  "  }\n" +
+  "  const hasKids = p.children !== undefined;\n" +
+  "  const kids = hasKids ? React.Children.map(p.children, (c) => scopeSvgIds(c, uid, ids)) : undefined;\n" +
+  "  if (!changed && !hasKids) return node;\n" +
+  "  return hasKids ? React.cloneElement(node, next, kids) : React.cloneElement(node, next);\n" +
+  "}\n";
+
 const VECTOR_SET_INSTANCE_BODY =
-  '  if (!name) return master;\n' +
+  '  // Per-mount scope for the svg defs ids of this copy — see scopeSvgIds.\n' +
+  "  const uid = React.useId().replace(/[^a-zA-Z0-9_-]/g, '');\n" +
+  '  const svgIds = svgIdsIn(master, new Set());\n' +
+  '  const scoped = (n) => (svgIds.size ? scopeSvgIds(n, uid, svgIds) : n);\n' +
+  '  if (!name) return scoped(master);\n' +
   '  const child = React.Children.toArray(master.props.children).find(\n' +
   "    (c) => React.isValidElement(c) && c.props['data-id'] === name,\n" +
   '  );\n' +
@@ -227,7 +289,7 @@ const VECTOR_SET_INSTANCE_BODY =
   '  // `layout` so position changes FLIP-animate (the inner has absolute left/top),\n' +
   '  // matching how a normal motion group animates between variants; the tag may\n' +
   '  // already set it, in which case its value wins.\n' +
-  '  return React.createElement(motion.div, { layout: true, ...childRest, ...rest, ...animExtra, ref: safeRef, style: safeStyle }, filledKids);';
+  '  return React.createElement(motion.div, { layout: true, ...childRest, ...rest, ...animExtra, ref: safeRef, style: safeStyle }, React.Children.map(filledKids, scoped));';
 
 /** Remove a JSX attribute `name={…}` (balanced-brace value) from markup. */
 function removeJsxAttrBalanced(jsx: string, attr: string): string {
@@ -292,14 +354,20 @@ function ensureResponsivePropsWrapper(code: string): string {
  *  no-op unless this is an icon-set file. Applied at compile time (canvas render). */
 export function upgradeVectorSetInstanceBranch(code: string): string {
   // Only an icon-set/vector-set instance branch carries this exact line.
-  if (!code.includes('  if (!name) return master;')) return code;
+  if (!code.includes('  if (!name) return master;')
+    && !code.includes('  if (!name) return scoped(master);')) return code;
   // ALWAYS normalise the master vector first (even when the instance branch is
   // already current) — a file can have a clean instance branch but a stray
   // motion.svg master from a drag-into-variant before it became an icon set.
   let out = stripMotionFromIconSvgMarkup(code);
   // Instance branch already the current guarded forwardRef+motion version — still
   // ensure the responsive wrapper (an older guarded file may pre-date it).
-  if (out.includes('const safeRef =')) return ensureResponsivePropsWrapper(out);
+  // A file can be current in every other respect and still predate the svg id
+  // scoping, so that has to be part of "current" or the black-square bug (see
+  // SVG_ID_SCOPE_HELPERS) survives the fast path.
+  if (out.includes('const safeRef =') && out.includes('function scopeSvgIds(')) {
+    return ensureResponsivePropsWrapper(out);
+  }
   // forwardRef the default export so the instance can receive a ref + extra props
   // (no-op if a prior migration already did it).
   out = out.replace(
@@ -311,9 +379,16 @@ export function upgradeVectorSetInstanceBranch(code: string): string {
   // Replace the instance branch (ANY prior version, plain-function OR an earlier
   // forwardRef one) through end-of-file with the current motion render + close.
   out = out.replace(
-    / {2}if \(!name\) return master;[\s\S]*$/,
+    / {2}if \(!name\) return (?:scoped\()?master\)?;[\s\S]*$/,
     VECTOR_SET_INSTANCE_BODY + '\n});\n\nexport default ' + nm + ';\n',
   );
+  // The instance body calls svgIdsIn/scopeSvgIds — older files predate them.
+  if (!out.includes('function scopeSvgIds(')) {
+    out = out.replace(
+      'const ' + nm + ' = React.forwardRef(function',
+      SVG_ID_SCOPE_HELPERS + '\nconst ' + nm + ' = React.forwardRef(function',
+    );
+  }
   return ensureResponsivePropsWrapper(out);
 }
 
@@ -376,6 +451,7 @@ const iconConfig = [
 ${iconConfigEntries},
 ];
 
+${SVG_ID_SCOPE_HELPERS}
 const ${defaultExportName} = React.forwardRef(function ${defaultExportName}({ name, style, children, ...rest }, ref) {
   // Master JSX — parseJSXToNodes walks this once for the icon-set canvas; the
   // canvas merges iconConfig positions onto the parsed vector nodes. When \`name\`

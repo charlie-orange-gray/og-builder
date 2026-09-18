@@ -32,6 +32,7 @@ import { applyStrokeAlignment, setElStyle, clearElStyle, resolveInstanceWrapperO
 import { initCanvasImagePreview, isPreviewAppliedSrc } from './renderer/canvas-image-preview';
 import { applyNodeCmsBindings, applyBindingDataToTree, applyLocaleOverrides, clearLocaleStyleResidue } from './renderer/bindings';
 import { extractCanvasGlobals, canvasThemeMode } from './canvas-theme';
+import { scopeSvgMarkupIds, elementSvgScope } from '../shared/svg-id-scope';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -2552,7 +2553,9 @@ export function patchElement(
   if (node.graphicMarkup !== undefined && isSvgTag(node.type)) {
     if ((el as HTMLElement & { __graphicMarkup?: string }).__graphicMarkup !== node.graphicMarkup) {
       try {
-        el.innerHTML = node.graphicMarkup;
+        // Ids are scoped per element so a culled (display:none) copy of the same
+        // graphic can't steal this one's clipPath/mask refs. See svg-id-scope.
+        el.innerHTML = scopeSvgMarkupIds(node.graphicMarkup, elementSvgScope(el));
         (el as HTMLElement & { __graphicMarkup?: string }).__graphicMarkup = node.graphicMarkup;
         trace.dom('renderer:patch-graphic-markup', { nodeId: node.id, length: node.graphicMarkup.length });
       } catch (err) {
@@ -3594,7 +3597,8 @@ function buildNodeElement(
   // graphicMarkup injection (see there for why innerHTML, not child nodes).
   if (node.graphicMarkup !== undefined && isSvg) {
     try {
-      el.innerHTML = node.graphicMarkup;
+      // Per-element id scoping — see the patch path / svg-id-scope.
+      el.innerHTML = scopeSvgMarkupIds(node.graphicMarkup, elementSvgScope(el));
       (el as HTMLElement & { __graphicMarkup?: string }).__graphicMarkup = node.graphicMarkup;
       trace.dom('renderer:build-graphic-markup', { nodeId: node.id, length: node.graphicMarkup.length });
     } catch (err) {
