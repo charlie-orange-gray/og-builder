@@ -55,6 +55,10 @@ export interface PasteOptions {
   viewportWidths?: Record<string, number>;
   activeFilePath?: string;
 
+  /** Does the selected node's parent lay out ON THE ACTIVE VIEWPORT? Resolved
+   *  by the caller from the rendered element; see PasteContext.parentHasLayout. */
+  parentHasLayout?: boolean;
+
   /**
    * If provided, skip reading from localStorage and treat this as the
    * clipboard payload. Lets non-paste call sites (cmd+K palette, drag-
@@ -101,6 +105,7 @@ export function executePaste(opts: PasteOptions): PasteResult {
     forceNoLayoutPosition: opts.forceNoLayoutPosition,
     interactingVpId: opts.interactingVpId,
     viewportWidths: opts.viewportWidths,
+    parentHasLayout: opts.parentHasLayout,
     activeFilePath: opts.activeFilePath,
     sourceFilePath: data.sourceFilePath ?? null,
   };

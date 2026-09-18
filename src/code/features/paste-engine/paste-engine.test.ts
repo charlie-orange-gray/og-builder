@@ -7,7 +7,7 @@ import { findMatchingRule, getRuleById, conditionCheckers } from './paste';
 import { calculatePosition, findRootNodes } from './core/position';
 import { resolveTargets } from './core/target-resolver';
 import { createIdMapper } from './core/id-mapper';
-import { ensureDefaultAnchors } from './core/node-creator';
+import { ensureDefaultAnchors, fixupPositionForParent } from './core/node-creator';
 import type { CanvasNode } from '@/code/parsing/parser';
 import type { ClipboardNode, PasteContext } from './types';
 
@@ -117,6 +117,38 @@ describe('conditions', () => {
     expect(conditionCheckers.HAS_LAYOUT_PARENT(ctx)).toBe(false);
   });
 
+  // A frame added on ONE replica is stored hidden at the base (`display:'none'`
+  // plus a band rule that shows it as a flex container), so the base style says
+  // "no layout" for a perfectly good flex parent. Cmd+D on a flex child inside
+  // a mobile overlay then matched the no-layout rule and pasted an ABSOLUTE
+  // node (user report 2026-09-18). The caller resolves the display on the
+  // viewport being edited and passes the answer in.
+  test('parentHasLayout from the caller overrides the base style', () => {
+    const hiddenFlexParent = () => new Map([
+      ['p', makeCanvasNode('p', { children: ['c'], styles: { display: 'none' } })],
+      ['c', makeCanvasNode('c', { parentId: 'p' })],
+    ]);
+
+    const blind = makeContext({ selectedIds: ['c'], nodes: hiddenFlexParent() });
+    expect(conditionCheckers.NO_LAYOUT_PARENT(blind)).toBe(true);     // base style alone
+
+    const resolved = makeContext({ selectedIds: ['c'], nodes: hiddenFlexParent(), parentHasLayout: true });
+    expect(conditionCheckers.NO_LAYOUT_PARENT(resolved)).toBe(false);
+    expect(conditionCheckers.HAS_LAYOUT_PARENT(resolved)).toBe(true);
+  });
+
+  test('parentHasLayout:false still wins over a flex base style', () => {
+    const ctx = makeContext({
+      selectedIds: ['c'],
+      nodes: new Map([
+        ['p', makeCanvasNode('p', { children: ['c'], styles: { display: 'flex' } })],
+        ['c', makeCanvasNode('c', { parentId: 'p' })],
+      ]),
+      parentHasLayout: false,
+    });
+    expect(conditionCheckers.NO_LAYOUT_PARENT(ctx)).toBe(true);
+  });
+
   test('TEXT_IN_CLIPBOARD only matches text-tagged ROOT clipboard nodes', () => {
     const ctx = makeContext({
       clipboardNodes: [makeClipboardNode('t', { type: 'p' })],
@@ -191,6 +223,21 @@ describe('findMatchingRule', () => {
       clipboardNodes: [makeClipboardNode('a', { type: 'div' })],
     });
     expect(findMatchingRule(ctx)?.id).toBe('paste-child-as-sibling-no-layout');
+  });
+
+  test('flex child in a replica-hidden parent → sibling, NOT absolute', () => {
+    const ctx = makeContext({
+      selectedIds: ['c'],
+      nodes: new Map([
+        // Base says display:none (the replica-solo storage hide); the band
+        // makes it a flex container on the viewport being edited.
+        ['p', makeCanvasNode('p', { children: ['c'], styles: { display: 'none' } })],
+        ['c', makeCanvasNode('c', { parentId: 'p' })],
+      ]),
+      clipboardNodes: [makeClipboardNode('a', { type: 'div' })],
+      parentHasLayout: true,
+    });
+    expect(findMatchingRule(ctx)?.id).not.toBe('paste-child-as-sibling-no-layout');
   });
 
   test('text + frame → paste-text-into-frame', () => {
@@ -624,5 +671,43 @@ describe('paste-at-abs-in-canvas-frame keeps the source anchors', () => {
     expect('left' in out).toBe(false);
     expect('top' in out).toBe(false);
     expect(out.right).toBe('10%');
+  });
+});
+
+// The paste that actually reaches the file. Matching the right RULE was only
+// half of it: `fixupPositionForParent` re-reads the parent's base `display` and
+// forces every child of a "no-layout" parent to absolute — so Cmd+D on a flex
+// child inside a mobile overlay still produced `position:'absolute'; left:-20px`
+// from a source that was `position:'relative'; left:'auto'` (user report
+// 2026-09-18, second round).
+describe('fixupPositionForParent — a parent hidden at the base', () => {
+  const flexChild = () => ({ position: 'relative', left: 'auto', top: 'auto', width: '121px', height: '100px' });
+  // Replica-solo storage hide: `display:'none'` at the base, flex in the band.
+  const hiddenFlexParent = makeCanvasNode('p', { styles: { display: 'none', width: '300px', height: '600px' } });
+
+  test('keeps the child in flow when the caller says the parent lays out', () => {
+    const out = fixupPositionForParent(flexChild(), hiddenFlexParent, undefined, true);
+    expect(out.position).toBe('relative');
+    expect(out.isAbsoluteInFrame).toBeUndefined();
+    expect(out.left).toBe('auto');
+  });
+
+  test('without the caller\'s answer it still trusts the base style', () => {
+    // Unchanged fallback — headless paths and tests keep today's behaviour.
+    const out = fixupPositionForParent(flexChild(), hiddenFlexParent, undefined, undefined);
+    expect(out.position).toBe('absolute');
+  });
+
+  test('a genuinely no-layout parent still gets absolute children', () => {
+    const plain = makeCanvasNode('p', { styles: { width: '300px', height: '600px' } });
+    const out = fixupPositionForParent(flexChild(), plain, undefined, false);
+    expect(out.position).toBe('absolute');
+    expect(out.isAbsoluteInFrame).toBe('true');
+  });
+
+  test('a flex parent still pulls an absolute child into flow', () => {
+    const flexParent = makeCanvasNode('p', { styles: { display: 'flex' } });
+    const out = fixupPositionForParent({ position: 'absolute', left: '10px', top: '10px' }, flexParent, undefined, true);
+    expect(out.position).toBe('relative');
   });
 });

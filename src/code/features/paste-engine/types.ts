@@ -216,6 +216,20 @@ export interface PasteContext {
   viewportWidths?: Record<string, number>;
 
   /**
+   * Does the selected node's PARENT lay its children out, ON THE VIEWPORT
+   * BEING EDITED?
+   *
+   * `node.styles.display` is the BASE style, and a frame added on one replica
+   * is stored hidden there (`display: 'none'` + a band rule that shows it) — so
+   * reading the base said "no layout" for a perfectly good flex parent, and
+   * Cmd+D inside a mobile overlay pasted an absolute node instead of a flex
+   * sibling (user report 2026-09-18). The caller lives in the canvas layer and
+   * can resolve the real computed display, so it answers this; the engine falls
+   * back to the base style when it is absent (tests, headless paths).
+   */
+  parentHasLayout?: boolean;
+
+  /**
    * Active file path — needed to decide whether the paste is happening in a
    * component file (replica = variant entry) vs page file (replica = @container).
    */
