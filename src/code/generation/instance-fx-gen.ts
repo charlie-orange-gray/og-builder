@@ -16,7 +16,7 @@
 import { trace } from '@/shared/debug-trace';
 import { nodeIdToVarName } from '@/shared/id-utils';
 import { parseJSX } from '@/code/parsing/ast-utils';
-import { findJSXDataIdIndex, insertBeforeRenderReturn, setTagAttr, getJsonAttr } from './generator-utils';
+import { findJSXDataIdIndex, insertBeforeRenderReturn, setTagAttr, getJsonAttr, opensAcrossLines } from './generator-utils';
 import { buildScopedScalarExpr, type SerScope } from './scoped-expr';
 import { scopeEq, presentOn, isPresenceOverride, addPresenceScope, hidePresenceOn, resetPresenceScope, type PresenceState } from '@/code/animations/presence';
 
@@ -758,6 +758,9 @@ function stripInstanceFx(code: string, nodeId: string, cn: string): string {
   // them (`Identifier already declared`), so the whole regen bails + drops the edit.
   result = result.split('\n').filter((line) => {
     const t = line.trim();
+    // A declaration that continues on the next line must not lose its head:
+    // dropping only the first line orphans the body (see opensAcrossLines).
+    if (opensAcrossLines(t)) return true;
     if (new RegExp(`^const ${e}Fx\\w*\\s*=`).test(t)) return false;
     if (new RegExp(`^const \\{[^}]*:\\s*${e}Fx\\w*\\s*\\}\\s*=`).test(t)) return false;
     return true;

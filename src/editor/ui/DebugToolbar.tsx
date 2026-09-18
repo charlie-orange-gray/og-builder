@@ -25,6 +25,8 @@ import { materializeInstanceFxInCode } from '@/code/generation/instance-fx-gen';
 import { syncImports } from '@/code/mutation/mutation-queue';
 import { listPageFiles } from '@/code/project/active-file-store';
 import { normalizeSmoothScroll } from '@/code/project/smooth-scroll-config';
+import { setPageEffectForPage, routeForPage } from '@/code/project/page-effects-ops';
+import { pageEffectFromImportedSpec } from '@/code/project/page-effects-config';
 
 function generateStressTestJSX(nodeCount: number): string {
   const colors = ['#f0f0ff', '#f0fff0', '#fff0f0', '#fffff0', '#f0ffff', '#fff0ff', '#e8f5e9', '#e3f2fd', '#fce4ec', '#fff3e0'];
@@ -231,7 +233,7 @@ export default function DebugToolbar() {
       if (!res.ok || out.error) throw new Error(out.error || `import service answered ${res.status}`);
 
       const { code, template, componentFiles, overrideFiles, overrideWarnings, tokens, presets, colors, stats,
-        collections, cmsFiles, templatedPages, fonts, smoothScroll } = out;
+        collections, cmsFiles, templatedPages, fonts, smoothScroll, pageEffect } = out;
       if (typeof code !== 'string') throw new Error('import service returned no page code');
 
       // A site import is a whole project. Start from the empty starter, as the
@@ -359,6 +361,18 @@ export default function GroupLayout({ children }: { children: React.ReactNode })
       // panel writes, so preview and publish run it natively.
       if (smoothScroll && typeof smoothScroll === 'object') {
         setSmoothScrollForPages(listPageFiles(), normalizeSmoothScroll(smoothScroll));
+      }
+
+      // The original's ROUTE TRANSITION becomes the site-wide Page Effect.
+      // Written on the home page with Target = All Pages, which is exactly
+      // where the panel keeps a site default (`__default`), so every page
+      // navigates with the timing and easing the original stated — and the
+      // Effects panel opens on it, editable like any hand-made one.
+      if (pageEffect && typeof pageEffect === 'object') {
+        const effect = pageEffectFromImportedSpec(pageEffect);
+        const pages = listPageFiles();
+        const home = pages.find((f: string) => routeForPage(f) === '/') ?? pages[0];
+        if (effect && home) setPageEffectForPage(home, effect);
       }
 
       // Nested instance effects arrive as their `data-instance-fx` spec; the

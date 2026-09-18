@@ -217,3 +217,85 @@ export function isEmptyPageEffects(map: PageEffectsMap): boolean {
   });
 }
 
+
+// ─── Imported sites ──────────────────────────────────────────────────────────
+
+/** One side of a page effect read off an imported site's stylesheet. */
+export interface ImportedEffectSide {
+  /** The non-identity opacity. Absent = opacity is untouched on that side. */
+  opacity?: number;
+  duration?: number;
+  delay?: number;
+  bezier?: [number, number, number, number];
+  /** The channels that actually move; identity ones are simply absent. */
+  offsetX?: number;
+  offsetY?: number;
+  offsetUnit?: OffsetUnit;
+  scale?: number;
+  rotateX?: number;
+  rotateY?: number;
+  rotateZ?: number;
+}
+export interface ImportedPageEffectSpec {
+  exit?: ImportedEffectSide;
+  enter?: ImportedEffectSide;
+}
+
+function importedSide(spec: ImportedEffectSide): SideConfig {
+  const side = createDefaultSide();
+  if (typeof spec.opacity === 'number') side.opacity = spec.opacity;
+  if (typeof spec.scale === 'number') side.scale = spec.scale;
+  if (typeof spec.offsetX === 'number') side.offsetX = spec.offsetX;
+  if (typeof spec.offsetY === 'number') side.offsetY = spec.offsetY;
+  if (spec.offsetUnit) { side.offsetXUnit = spec.offsetUnit; side.offsetYUnit = spec.offsetUnit; }
+  if (typeof spec.rotateZ === 'number') side.rotateZ = spec.rotateZ;
+  if (typeof spec.rotateX === 'number' || typeof spec.rotateY === 'number') {
+    side.rotate = '3d';
+    side.rotateX = spec.rotateX ?? 0;
+    side.rotateY = spec.rotateY ?? 0;
+  }
+  side.transition = {
+    ...side.transition,
+    duration: typeof spec.duration === 'number' ? spec.duration : side.transition.duration,
+    delay: typeof spec.delay === 'number' ? spec.delay : 0,
+    ...(spec.bezier && spec.bezier.length === 4
+      ? { ease: 'custom' as const, bezier: [...spec.bezier] as [number, number, number, number] }
+      : {}),
+  };
+  return side;
+}
+
+/**
+ * An imported site's route transition, as a Page Effect. Both sides carry the
+ * site's OWN duration, delay and easing — the preset only names the shape, so a
+ * fade whose sides are sequenced still reads back as the site authored it.
+ */
+export function pageEffectFromImportedSpec(spec: ImportedPageEffectSpec): PageEffect | null {
+  if (!spec || (!spec.exit && !spec.enter)) return null;
+  const exit = spec.exit ? importedSide(spec.exit) : undefined;
+  const enter = spec.enter ? importedSide(spec.enter) : undefined;
+  // The preset only NAMES the shape — every value is the site's own, so an
+  // effect that no preset matches is still imported exactly, as 'custom'.
+  const moves = [exit, enter].some((s) => s
+    && (s.offsetX !== 0 || s.offsetY !== 0 || s.scale !== 1
+      || s.rotateZ !== 0 || s.rotateX !== 0 || s.rotateY !== 0));
+  if (moves) {
+    return {
+      preset: 'custom',
+      target: 'all',
+      ...(exit ? { exit } : {}),
+      ...(enter ? { enter } : {}),
+    };
+  }
+  // Opacity only: a crossfade; sequenced sides (the leaving page still delayed
+  // past the arriving one's start) are the "Fade Out & In" variant of it.
+  const sequenced = !!exit && !!enter
+    && (exit.transition.delay >= enter.transition.delay + enter.transition.duration
+      || enter.transition.delay >= exit.transition.delay + exit.transition.duration);
+  return {
+    preset: sequenced ? 'fade-out-in' : 'crossfade',
+    target: 'all',
+    ...(exit ? { exit } : {}),
+    ...(enter ? { enter } : {}),
+  };
+}

@@ -14,7 +14,7 @@
 // old + inject fresh), so the spec is the single source of truth.
 import { trace } from '@/shared/debug-trace';
 import { nodeIdToVarName } from '@/shared/id-utils';
-import { findJSXDataIdIndex, insertBeforeRenderReturn, setTagAttr, getJsonAttr } from './generator-utils';
+import { findJSXDataIdIndex, insertBeforeRenderReturn, setTagAttr, getJsonAttr, opensAcrossLines } from './generator-utils';
 import { parseJSX } from '@/code/parsing/ast-utils';
 import { buildScopedScalarExpr, sweepOrphanMediaGates, type SerScope } from './scoped-expr';
 import { presentOn, isPresenceOverride, hidePresenceOn, resetPresenceScope, scopeEq, type PresenceState } from '@/code/animations/presence';
@@ -626,6 +626,9 @@ function stripScrollVariant(code: string, nodeId: string, cn: string): string {
   // Single-line decls + destructures + useState referencing <cn>Sv.
   result = result.split('\n').filter((line) => {
     const t = line.trim();
+    // A declaration that continues on the next line must not lose its head:
+    // dropping only the first line orphans the body (see opensAcrossLines).
+    if (opensAcrossLines(t)) return true;
     if (new RegExp(`^const ${cnE}Sv\\w*\\s*=`).test(t)) return false;
     if (new RegExp(`^const \\[${cnE}Sv\\b`).test(t)) return false;
     if (new RegExp(`^const \\{[^}]*:\\s*${cnE}Sv\\w*\\s*\\}\\s*=`).test(t)) return false;

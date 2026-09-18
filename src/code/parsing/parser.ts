@@ -1636,6 +1636,16 @@ export function parseJSXToNodes(code: string, propOverrides?: Record<string, str
     return nodes; // Return empty on parse error (user is typing)
   }
 
+  // …and the COMPONENT's own prop defaults, for the same reason: inside a master a
+  // per-variant prop branch is usually a component variable, not a page variable
+  // (`value={variant === 'variant-1' ? priceYearly : priceMonthly}` on a pricing
+  // card). Without them the branch resolved to nothing, `walkVariantConditionalProp`
+  // returned null, and the whole conditional was dropped — the panel then showed the
+  // raw expression instead of the value + its binding (live find 2026-09-17).
+  for (const [name, value] of Object.entries(extractComponentPropDefaults(ast))) {
+    if (!(name in ctx.earlyPageVarDefaults)) ctx.earlyPageVarDefaults[name] = value;
+  }
+
   // Parse all imports: CMS collections, package imports (next/link, next/image), etc.
   const cmsImports = new Map<string, string>(); // varName → slug
   const packageImports = new Set<string>(); // component names imported from packages (not local files)

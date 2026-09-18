@@ -578,3 +578,32 @@ export function isIndexInsideSlotConst(code: string, idx: number): boolean {
 export function isModuleScopeJsx(code: string, tagStart: number): boolean {
   return isInCanvasNodes(code, tagStart) || isIndexInsideSlotConst(code, tagStart);
 }
+
+/**
+ * Does this line open a brace/paren/bracket it never closes — i.e. does the
+ * statement continue on the next line?
+ *
+ * The per-node cleanup passes drop a declaration by matching its FIRST line
+ * and filtering it out. That is only safe for a declaration that ends there:
+ * a babel reformat can leave one spanning two lines —
+ *
+ *   const divVariants = { default: { flex: '0 0 auto' }
+ *   };
+ *
+ * — whose first line opens and closes on itself and still continues, so
+ * testing the last character let it through and deleting a node inside a
+ * component left the stray `};` behind ("AI changes blocked", 2026-09-18).
+ * Quoted text is blanked first so a bracket inside a string cannot tip the
+ * count.
+ */
+export function opensAcrossLines(line: string): boolean {
+  const bare = line
+    .replace(/\\./g, '')
+    .replace(/'[^']*'|"[^"]*"|`[^`]*`/g, '');
+  let depth = 0;
+  for (const ch of bare) {
+    if (ch === '{' || ch === '(' || ch === '[') depth++;
+    else if (ch === '}' || ch === ')' || ch === ']') depth--;
+  }
+  return depth > 0;
+}
