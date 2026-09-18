@@ -1762,6 +1762,31 @@ export function removeNode(options: {
  * No one needs to pass variant/replica context — it's read from setStyleContext().
  */
 /**
+ * Is this node held invisible by a baked `display: 'none'` — inline, or in the
+ * variant entry the unhide targets?
+ *
+ * Unhiding queues a `display: ''` write to clear exactly that. `''` means
+ * DELETE the property, so on a node hidden through the render gate ALONE it
+ * deletes whatever display the element legitimately has: unhiding the Hamburger
+ * Menu Button on the desktop stripped its `display: 'flex'` from the inline
+ * style and the `default` variant entry at once, and the burger's three bars
+ * collapsed into one bar on EVERY variant — read by the user as "unhiding
+ * desktop replaced my mobile overrides" (2026-09-18).
+ */
+export function hasBakedDisplayNone(
+  node: { styles?: Record<string, string>; motionVariants?: Record<string, Record<string, string>> | null },
+  visVariant: string,
+  isPrimary: boolean,
+): boolean {
+  if (node.styles?.display === 'none') return true;
+  const variants = node.motionVariants ?? {};
+  if (variants[visVariant]?.display === 'none') return true;
+  // Unhiding the primary shows the node everywhere, so a `none` parked on ANY
+  // variant is stale and worth clearing.
+  return isPrimary && Object.values(variants).some((v) => v?.display === 'none');
+}
+
+/**
  * Lazily wire a component master so its instances' width/height override the
  * variant size (see `instance-size-override`). Idempotent + cheap-guarded:
  * resolves the master file from the instance node's `componentFile`, skips when
@@ -2261,8 +2286,15 @@ export function updateNodeStyles(options: {
       // unhidden variant (and is a harmless no-op on clean components). The
       // canvas reads `hiddenOnVariants` (resolveVariantStyles) to hide per
       // variant.
-      if (hide) {
-        const { display: _hideDisp, ...withoutDisplay } = styles;
+      // …but only when there IS a baked `display: 'none'` to clear. `''` means
+      // DELETE the property, so on a node that was hidden through the render
+      // gate alone it deletes whatever display the element legitimately has:
+      // unhiding the Hamburger Menu Button on the desktop stripped its
+      // `display: 'flex'` from both the inline style and the `default` variant
+      // entry, and the burger's three bars collapsed into one on EVERY variant
+      // (user report 2026-09-18 — read as "my mobile overrides were replaced").
+      if (hide || !hasBakedDisplayNone(nodeForVis, visVariant, isPrimary)) {
+        const { display: _visDisp, ...withoutDisplay } = styles;
         styles = withoutDisplay;
         if (Object.keys(styles).length === 0) return;
       }
