@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { computeSelectionSets, type FlatLayer } from './LayersPanel';
+import { computeSelectionSets, overlayExpandPath, type FlatLayer } from './LayersPanel';
 import type { CanvasNode } from '@/code/parsing/parser';
 
 // ─── Test helpers ──────────────────────────────────────────────────────────
@@ -271,5 +271,63 @@ describe('computeRangeSelection', () => {
   test('anchor === target → null', () => {
     const { nodes, rows } = rangeFixture();
     expect(computeRangeSelection(rows, 'desktop:f2', 'desktop:f2', nodes, noRedirect)).toBeNull();
+  });
+});
+
+// ─── Entering overlay edit mode reveals the overlay in the tree ─────────────
+//
+// An overlay row is displayed under its TRIGGER, not its real parent. The
+// existing auto-expand walks the real parent chain from the SELECTED node, so
+// it can't reveal an overlay — and entering overlay mode need not change the
+// selection at all. Most visible on a component instance, which is a forced
+// leaf showing only the overlay it triggers: the subtree stayed collapsed with
+// no way to see the layers being edited (user report 2026-09-18).
+describe('overlayExpandPath', () => {
+  const overlayAttrs = (triggerId: string) => ({ 'data-overlay': JSON.stringify({ triggerId }) });
+
+  function tree(): Map<string, CanvasNode> {
+    // root › navbar (component instance) › — and the overlay, whose REAL
+    // parent is root but which displays under the navbar that triggers it.
+    const nodes = new Map<string, CanvasNode>();
+    nodes.set('root', { ...makeNode('root', ['navbar', 'ov']) });
+    nodes.set('navbar', { ...makeNode('navbar', [], 'root'), isComponentInstance: true } as CanvasNode);
+    nodes.set('ov', { ...makeNode('ov', ['inner'], 'root'), attrs: overlayAttrs('navbar') } as CanvasNode);
+    nodes.set('inner', { ...makeNode('inner', [], 'ov') });
+    return nodes;
+  }
+
+  test('expands the viewport, the overlay and the TRIGGER chain', () => {
+    const path = overlayExpandPath(tree(), 'ov', 'desktop');
+    expect(path).toContain('__vp_desktop');
+    expect(path).toContain('desktop:ov');       // the overlay, so its children show
+    expect(path).toContain('desktop:navbar');   // the instance it displays under
+    expect(path).toContain('desktop:root');
+  });
+
+  test('falls back to the real parent when the overlay has no trigger', () => {
+    const nodes = tree();
+    nodes.set('ov', { ...makeNode('ov', ['inner'], 'root'), attrs: {} } as CanvasNode);
+    const path = overlayExpandPath(nodes, 'ov', 'desktop');
+    expect(path).toEqual(['__vp_desktop', 'desktop:ov', 'desktop:root']);
+  });
+
+  test('ignores a trigger that is not in the tree, and a malformed spec', () => {
+    const nodes = tree();
+    nodes.set('ov', { ...makeNode('ov', [], 'root'), attrs: { 'data-overlay': JSON.stringify({ triggerId: 'gone' }) } } as CanvasNode);
+    expect(overlayExpandPath(nodes, 'ov', 'desktop')).toEqual(['__vp_desktop', 'desktop:ov', 'desktop:root']);
+    nodes.set('ov', { ...makeNode('ov', [], 'root'), attrs: { 'data-overlay': 'not json' } } as CanvasNode);
+    expect(overlayExpandPath(nodes, 'ov', 'desktop')).toEqual(['__vp_desktop', 'desktop:ov', 'desktop:root']);
+  });
+
+  test('returns nothing for an overlay that is not in the tree', () => {
+    expect(overlayExpandPath(tree(), 'missing', 'desktop')).toEqual([]);
+  });
+
+  test('survives a parent cycle', () => {
+    const nodes = new Map<string, CanvasNode>();
+    nodes.set('a', { ...makeNode('a', [], 'b') });
+    nodes.set('b', { ...makeNode('b', [], 'a') });
+    nodes.set('ov', { ...makeNode('ov', [], 'a'), attrs: overlayAttrs('a') } as CanvasNode);
+    expect(() => overlayExpandPath(nodes, 'ov', 'desktop')).not.toThrow();
   });
 });

@@ -1112,3 +1112,36 @@ function RenameInput({ initialName, onCommit }: { initialName: string; onCommit:
     />
   );
 }
+
+/**
+ * Every row that must be expanded for an overlay's contents to be visible.
+ *
+ * An overlay row is displayed under its TRIGGER, not under its real parent
+ * (see `overlaysByTrigger` in LayersPanel), so the path that reveals it runs up
+ * the trigger's ancestry. On a component instance that is the only path there
+ * is: the instance is a forced leaf whose sole child is the overlay it
+ * triggers, which is why entering overlay mode there left the whole subtree
+ * collapsed with no way to see the layers being edited (2026-09-18).
+ *
+ * Returns the viewport header, the overlay itself (so its children show), and
+ * each ancestor of its trigger — or of its real parent when it has no trigger.
+ */
+export function overlayExpandPath(
+  nodes: Map<string, CanvasNode>,
+  overlayId: string,
+  vpId: string,
+): string[] {
+  const overlay = nodes.get(overlayId);
+  if (!overlay) return [];
+  let triggerId: string | undefined;
+  try { triggerId = JSON.parse(overlay.attrs?.['data-overlay'] ?? '{}').triggerId; } catch { /* malformed spec */ }
+  const out = [`__vp_${vpId}`, `${vpId}:${overlayId}`];
+  let cur: string | null | undefined = (triggerId && nodes.has(triggerId)) ? triggerId : overlay.parentId;
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    out.push(`${vpId}:${cur}`);
+    cur = nodes.get(cur)?.parentId ?? null;
+  }
+  return out;
+}

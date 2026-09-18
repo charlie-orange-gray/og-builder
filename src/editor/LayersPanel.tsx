@@ -30,11 +30,11 @@ import ToolDivider from '@/editor/controls/ToolDivider';
 // Row components + pure helpers, the drag-reorder handler, and the search filter
 // live in LayersPanel/ (Phase 7 god-file split, item 7.7). computeSelectionSets +
 // FlatLayer are re-exported below for existing importers of this module.
-import { LayerRow, computeSelectionSets, computeRangeSelection, isNodeUnderOverlay, resolveDisplayForLayer, getEffectiveLayerStyle, sortChildrenByVisualOrder, type FlatLayer } from './LayersPanel/rows';
+import { LayerRow, computeSelectionSets, computeRangeSelection, isNodeUnderOverlay, resolveDisplayForLayer, getEffectiveLayerStyle, sortChildrenByVisualOrder, overlayExpandPath, type FlatLayer } from './LayersPanel/rows';
 import { startLayerDrag, vpIdFromLayerId } from './LayersPanel/drag';
 import { filterLayersForSearch } from './LayersPanel/search';
 
-export { computeSelectionSets, computeRangeSelection, type FlatLayer } from './LayersPanel/rows';
+export { computeSelectionSets, computeRangeSelection, overlayExpandPath, type FlatLayer } from './LayersPanel/rows';
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -650,6 +650,43 @@ export default function LayersPanel() {
       });
     }
   }, [selectedId, interactingVpId, viewports, nodes, activeFilePath]);
+
+  // Entering OVERLAY EDIT MODE reveals that overlay's contents in the tree.
+  //
+  // An overlay row is displayed under its TRIGGER, not under its real parent
+  // (see overlaysByTrigger). The auto-expand above walks the real parent chain
+  // from the SELECTED node, so it can't reveal an overlay — and entering
+  // overlay mode need not change the selection at all. On a component instance
+  // it was most visible: the instance is a forced leaf that shows only the
+  // overlay it triggers, so the whole subtree sat collapsed with no way to see
+  // the layers being edited (user report 2026-09-18).
+  useEffect(() => {
+    if (!editingOverlayId) return;
+    const overlay = nodes.get(editingOverlayId);
+    if (!overlay) return;
+    let triggerId: string | undefined;
+    try { triggerId = JSON.parse(overlay.attrs?.['data-overlay'] ?? '{}').triggerId; } catch { /* malformed spec */ }
+    const vpId = interactingVpId;
+    // The overlay itself (to show its children) + the chain that leads to its
+    // row: the trigger when it has one, the real parent otherwise.
+    const toExpand = [`__vp_${vpId}`, `${vpId}:${editingOverlayId}`];
+    let cur: string | null | undefined = (triggerId && nodes.has(triggerId)) ? triggerId : overlay.parentId;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      toExpand.push(`${vpId}:${cur}`);
+      cur = nodes.get(cur)?.parentId ?? null;
+    }
+    trace.action('layers:auto-expand-overlay', { editingOverlayId, vpId, triggerId, expandedIds: toExpand });
+    setExpanded(prev => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of toExpand) {
+        if (!next.has(id)) { next.add(id); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [editingOverlayId, interactingVpId, nodes]);
 
   // Auto-scroll to selected layer
   useEffect(() => {
