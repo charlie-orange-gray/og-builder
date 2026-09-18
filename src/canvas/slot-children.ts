@@ -189,3 +189,34 @@ function buildOne(sn: SerializedSlotNode, key: string, isRoot: boolean): React.R
 export function buildSlotChildren(serialized: SerializedSlotNode[]): React.ReactNode[] {
   return serialized.map((sn, i) => buildOne(sn, String(i), true));
 }
+
+/**
+ * Every slot wiring that can reach the tree being rendered, keyed by the id
+ * the node carries HERE.
+ *
+ * A slot connection (`componentId → connected canvas-node ids`) is recorded in
+ * the file that owns both ends. The canvas, though, renders one merged tree:
+ * a template's nodes arrive `layout::`-prefixed, and a design component's
+ * arrive `${instanceId}:`-prefixed, at every depth. So each source file's
+ * connections are re-keyed with the prefix its nodes wear in this tree — a
+ * Marquee in a template kept showing its "Connect Content" placeholder on
+ * every page that used the template, because the page's own code says nothing
+ * about that wiring (2026-09-18).
+ */
+export function mergeSlotConnections(
+  pageConnections: Map<string, string[]>,
+  sources: { prefix: string; connections: Map<string, string[]> }[],
+): Map<string, string[]> {
+  const merged = new Map<string, string[]>(pageConnections);
+  for (const { prefix, connections } of sources) {
+    for (const [compId, childIds] of connections) {
+      const key = prefix + compId;
+      const children = childIds.map((c) => prefix + c);
+      // Concatenate rather than overwrite — the same component can be reached
+      // twice (one instance visited from two paths).
+      const existing = merged.get(key);
+      merged.set(key, existing ? existing.concat(children) : children);
+    }
+  }
+  return merged;
+}
