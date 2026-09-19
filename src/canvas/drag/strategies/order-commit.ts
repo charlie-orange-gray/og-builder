@@ -97,9 +97,29 @@ export function commitOrderAssignments(
 
   if (isPrimary) {
     branch = 'primary';
+    // On a component master a node's order may live in its `default` VARIANT
+    // object (`fooVariants.default = { order: 2 }`), which framer-motion applies
+    // over the base `style` prop — so a base-only write is rendered but never
+    // SEEN. That was the second half of the reported bug: the reorder landed
+    // correctly in the file and the canvas did not move, because every node's
+    // effective order still came from its variant entry.
+    //
+    // Write wherever THIS node's order actually lives, per node: siblings that
+    // carry a default-variant order get the variant write, the rest get the
+    // base one. Mixed parents stay coherent because a variant value only
+    // overrides where it exists.
+    const isCompMaster = getActiveFilePath().startsWith('components/');
     for (const { nodeId, order } of orderAssignments) {
       patchNodeStyles(contentEl, nodeId, vpPrefix, { order: String(order) });
       updates.push({ nodeId, type: 'style', styles: { order: String(order) } });
+      if (isCompMaster && getNodeFromCache(nodeId)?.motionVariants?.default?.order !== undefined) {
+        updates.push({
+          nodeId,
+          type: 'updateVariantStyle',
+          variantName: 'default',
+          styles: { order: String(order) },
+        });
+      }
     }
     for (const { nodeId, zIndex } of layering) {
       patchNodeStyles(contentEl, nodeId, vpPrefix, { zIndex: String(zIndex) });

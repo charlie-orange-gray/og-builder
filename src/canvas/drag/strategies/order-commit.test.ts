@@ -77,6 +77,61 @@ describe('commitOrderAssignments', () => {
     { nodeId: 'b', order: 1 },
   ];
 
+
+  // A component master keeps a node's order in its `default` VARIANT object,
+  // which framer-motion applies OVER the base style prop. Writing only the base
+  // order produced a correct file and a canvas that never moved.
+  describe('component master, default variant order', () => {
+    it('writes the variant entry for a node whose order lives there', () => {
+      mockActiveFilePath = 'components/Header.tsx';
+      mockNodes = {
+        a: { motionVariants: { default: { order: '2' } } },
+        b: {},
+      };
+      const updates = commitOrderAssignments(assignments, el, 'desktop');
+      expect(updates).toContainEqual({
+        nodeId: 'a', type: 'updateVariantStyle', variantName: 'default', styles: { order: '0' },
+      });
+    });
+
+    it('still writes the BASE order too — the node keeps a coherent style prop', () => {
+      mockActiveFilePath = 'components/Header.tsx';
+      mockNodes = { a: { motionVariants: { default: { order: '2' } } } };
+      const updates = commitOrderAssignments([{ nodeId: 'a', order: 0 }], el, 'desktop');
+      expect(updates).toContainEqual({ nodeId: 'a', type: 'style', styles: { order: '0' } });
+    });
+
+    // Mixed parents stay coherent because a variant value only overrides where
+    // it exists — so a sibling without one must NOT get a variant write.
+    it('leaves a sibling with no default-variant order on the base path only', () => {
+      mockActiveFilePath = 'components/Header.tsx';
+      mockNodes = {
+        a: { motionVariants: { default: { order: '2' } } },
+        b: { motionVariants: { default: { display: 'flex' } } },
+      };
+      const updates = commitOrderAssignments(assignments, el, 'desktop');
+      expect(updates.filter(u => u.type === 'updateVariantStyle').map(u => u.nodeId)).toEqual(['a']);
+    });
+
+    it('does NOT touch variants on a PAGE, even when the node has them', () => {
+      mockActiveFilePath = 'app/page.client.tsx';
+      mockNodes = { a: { motionVariants: { default: { order: '2' } } } };
+      const updates = commitOrderAssignments([{ nodeId: 'a', order: 0 }], el, 'desktop');
+      expect(updates.some(u => u.type === 'updateVariantStyle')).toBe(false);
+    });
+
+    // order 0 is falsy — an `if (order)` style guard would skip the very node
+    // being moved to the front, which is the most common reorder there is.
+    it('writes a variant order of 0', () => {
+      mockActiveFilePath = 'components/Header.tsx';
+      mockNodes = { a: { motionVariants: { default: { order: '0' } } } };
+      const updates = commitOrderAssignments([{ nodeId: 'a', order: 3 }], el, 'desktop');
+      expect(updates).toContainEqual({
+        nodeId: 'a', type: 'updateVariantStyle', variantName: 'default', styles: { order: '3' },
+      });
+    });
+  });
+
   beforeEach(() => {
     patchNodeStyles.mockClear();
     mockActiveFilePath = 'pages/home.tsx';

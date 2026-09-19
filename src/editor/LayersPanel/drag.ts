@@ -18,6 +18,7 @@ import { detectParentLayoutById, getFlexDirectionById } from '@/canvas/drag/type
 import { queuePendingUpdates } from '@/canvas/arrow-nudge';
 import { trace } from '@/shared/debug-trace';
 import { isFrameTag } from '@/shared/constants';
+import { sortChildrenByVisualOrder } from './rows';
 
 export type DropIndicator = { layerId: string; nodeId: string; position: 'before' | 'after' | 'inside'; depth: number };
 
@@ -573,11 +574,37 @@ export function startLayerDrag(ctx: LayerDragContext, e: ReactMouseEvent, layerI
         // the dragged id if it's already a child of finalParentId, then
         // insert it at the user-visible drop slot.
         const flexDir = getFlexDirectionById(finalParentId, dropVpId);
-        const currentVisualIds = findChildRects(finalParentId, dropVpId)
-          .slice()
-          .sort((a, b) => flexDir === 'row' ? a.rect.left - b.rect.left : a.rect.top - b.rect.top)
-          .map(c => c.id)
-          .filter(id => !id.startsWith('layout::'));
+        // ORDER THE SIBLINGS THE WAY THE TREE DOES — not by rect.
+        //
+        // The drop indicator is a TREE concept ("before this row"), so the
+        // sequence the commit renumbers has to be the sequence the tree shows,
+        // or "before X" means two different things on the two sides.
+        //
+        // Rects cannot supply that. A child hidden for this viewport/variant
+        // still has a cache entry, as a 0x0 rect parked at the parent's origin,
+        // so it sorts FIRST on either axis regardless of its authored `order`.
+        // It then takes slot 0 and shifts every real sibling down one: the
+        // reported bug was a hidden "Hamburger Menu Button" (order 1, between
+        // two visible siblings) silently renumbered to 0 while the dragged node
+        // landed back where it started — the drag appeared to do nothing, and
+        // the only node that actually moved was the invisible one.
+        //
+        // `sortChildrenByVisualOrder` is the layers tree's OWN sort: effective
+        // `order` per viewport/variant, JSX index as tie-break. Sorting by
+        // effective order is not an approximation of the render order — it is
+        // how flex computes it — so this is both more correct than the rect
+        // proxy and identical to the tree by construction.
+        const parentNode = nodes.get(finalParentId);
+        const currentVisualIds = (parentNode
+          ? sortChildrenByVisualOrder(
+              parentNode, parentNode.children, dropVpId, nodes, vpConfigs,
+              getDefaultStore().get(containerOverridesAtom), isCompMode,
+            )
+          : findChildRects(finalParentId, dropVpId)
+              .slice()
+              .sort((a, b) => flexDir === 'row' ? a.rect.left - b.rect.left : a.rect.top - b.rect.top)
+              .map(c => c.id)
+        ).filter(id => !id.startsWith('layout::'));
 
         const withoutDragged = currentVisualIds.filter(id => id !== draggedId);
 
@@ -616,11 +643,20 @@ export function startLayerDrag(ctx: LayerDragContext, e: ReactMouseEvent, layerI
         // page-replica reorder leaves it undefined (its branch doesn't use it).
         let defaultOrders: Map<string, number> | undefined;
         if (isCompMode && !isPrimaryViewport(dropVpId)) {
-          const primaryVisualIds = findChildRects(finalParentId, 'default')
-            .slice()
-            .sort((a, b) => flexDir === 'row' ? a.rect.left - b.rect.left : a.rect.top - b.rect.top)
-            .map(c => c.id)
-            .filter(id => !id.startsWith('layout::'));
+          // Same tree ordering as above — the default tile's sequence is read
+          // for exactly the same reason and would be corrupted by a hidden
+          // sibling's 0x0 rect in exactly the same way.
+          const primaryParent = nodes.get(finalParentId);
+          const primaryVisualIds = (primaryParent
+            ? sortChildrenByVisualOrder(
+                primaryParent, primaryParent.children, 'default', nodes, vpConfigs,
+                getDefaultStore().get(containerOverridesAtom), isCompMode,
+              )
+            : findChildRects(finalParentId, 'default')
+                .slice()
+                .sort((a, b) => flexDir === 'row' ? a.rect.left - b.rect.left : a.rect.top - b.rect.top)
+                .map(c => c.id)
+          ).filter(id => !id.startsWith('layout::'));
           if (primaryVisualIds.length > 0) {
             defaultOrders = new Map(primaryVisualIds.map((id, i) => [id, i] as const));
           }

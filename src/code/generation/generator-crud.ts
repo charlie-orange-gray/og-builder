@@ -1596,6 +1596,61 @@ export function getInlineSpanPropertyState(
 /**
  * Reorder a node within its parent (or move to a new parent) at a specific index.
  */
+/**
+ * The thing that occupies this node's SLOT in its parent's child list.
+ *
+ * A node hidden on some variants is not a direct child of its parent — the
+ * variant-visibility system wraps it:
+ *
+ *   <AnimatePresence mode="popLayout">{initialVariant === 'x' && <el …/>}</AnimatePresence>
+ *
+ * The wrapper is the node's slot. It is what the parent actually lists, so it
+ * is what a reorder has to splice, and — unlike a MOVE, where the element
+ * leaves and the wrapper has no further purpose — the wrapper must travel WITH
+ * the node or its visibility condition is lost and a per-variant element
+ * becomes permanently visible.
+ *
+ * Deliberately narrow: it matches only `{cond && el}` / `{cond ? el : …}`
+ * (optionally inside an `AnimatePresence`) and returns the node's own path for
+ * anything else. A generic "walk up to the nearest element child" would also
+ * swallow a `.map()` collection template, where the slot is the whole list.
+ */
+function variantVisibilitySlotPath(path: any): any {
+  const cond = path.parentPath;
+  if (!cond || !(cond.isLogicalExpression?.() || cond.isConditionalExpression?.())) return path;
+  const container = cond.parentPath;
+  if (!container?.isJSXExpressionContainer?.()) return path;
+  const outer = container.parentPath;
+  if (outer?.isJSXElement?.()) {
+    const opening = outer.node.openingElement;
+    if (opening.name.type === 'JSXIdentifier' && opening.name.name === 'AnimatePresence') return outer;
+  }
+  return container;
+}
+
+/** Does this child slot hold `nodeId` — either as itself or inside a
+ *  variant-visibility wrapper? */
+function slotHoldsNodeId(child: t.JSXElement['children'][number], nodeId: string): boolean {
+  let found = false;
+  const visit = (n: any): void => {
+    if (found || !n || typeof n !== 'object') return;
+    if (n.type === 'JSXElement') {
+      const hit = n.openingElement.attributes.some(
+        (a: any) => t.isJSXAttribute(a) && a.name.name === 'data-id'
+          && t.isStringLiteral(a.value) && a.value.value === nodeId,
+      );
+      if (hit) { found = true; return; }
+    }
+    for (const key of ['children', 'expression', 'left', 'right', 'consequent', 'alternate']) {
+      const v = n[key];
+      if (Array.isArray(v)) v.forEach(visit);
+      else if (v) visit(v);
+    }
+  };
+  visit(child);
+  return found;
+}
+
 export function reorderNodeInCode(
   code: string,
   nodeId: string,
@@ -1610,11 +1665,17 @@ export function reorderNodeInCode(
   let removedNode: t.JSXElement | null = null;
 
   findFirstElementByDataId(ast, nodeId, (path) => {
-    removedNode = t.cloneNode(path.node, true);
+    // Splice the SLOT, not the element. When the node is variant-wrapped its
+    // `parentPath` is a LogicalExpression, so the old `isJSXElement()` test
+    // failed, nothing was removed — and Step 2 then inserted the clone anyway.
+    // The node ended up in the file TWICE: once inside its wrapper, once bare
+    // at the new index, which the layers tree faithfully showed as two rows.
+    const slot = variantVisibilitySlotPath(path);
+    removedNode = t.cloneNode(slot.node, true);
 
-    const parent = path.parentPath;
-    if (parent?.isJSXElement()) {
-      const idx = parent.node.children.indexOf(path.node);
+    const parent = slot.parentPath;
+    if (parent?.isJSXElement() || parent?.isJSXFragment()) {
+      const idx = parent.node.children.indexOf(slot.node);
       if (idx !== -1) {
         parent.node.children.splice(idx, 1);
         if (idx > 0 && idx <= parent.node.children.length) {
@@ -1648,19 +1709,24 @@ export function reorderNodeInCode(
         const hasDataId = child.openingElement.attributes.some(
           (a: any) => t.isJSXAttribute(a) && a.name.name === 'data-id'
         );
-        if (hasDataId) content.push(child);
+        // An `AnimatePresence` carries no data-id of its own but WRAPS a node
+        // that has one, so it occupies that node's slot. Classified as an
+        // anchor it would be pinned at a fixed content offset — the node it
+        // holds could never be reordered, and every sibling index past it would
+        // shift.
+        const isVisibilityWrapper = child.openingElement.name.type === 'JSXIdentifier'
+          && child.openingElement.name.name === 'AnimatePresence';
+        if (hasDataId || isVisibilityWrapper) content.push(child);
         else anchors.push({ node: child, after: content.length });
       } else if (child.type === 'JSXExpressionContainer') {
         content.push(child);
       }
     }
 
-    // Remove the moved node from the content slots (matched by data-id; it may
-    // already be gone if Step 1 removed it from this same parent).
-    const removeIdx = content.findIndex(n => t.isJSXElement(n) && n.openingElement.attributes.some(
-      (a: any) => t.isJSXAttribute(a) && a.name.name === 'data-id' &&
-        t.isStringLiteral(a.value) && a.value.value === nodeId
-    ));
+    // Remove the moved node from the content slots (it may already be gone if
+    // Step 1 removed it from this same parent). Matched through wrappers: the
+    // slot holding a variant-hidden node is the wrapper, not the node.
+    const removeIdx = content.findIndex(n => slotHoldsNodeId(n, nodeId));
     if (removeIdx >= 0) content.splice(removeIdx, 1);
 
     // Insert at the target CONTENT slot index.
