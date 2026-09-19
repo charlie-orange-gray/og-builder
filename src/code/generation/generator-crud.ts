@@ -1628,6 +1628,48 @@ function variantVisibilitySlotPath(path: any): any {
   return container;
 }
 
+/**
+ * Swap the `nodeId` element inside a cloned visibility wrapper for `replacement`.
+ *
+ * The wrapper is cloned at removal time, so its inner element is a stale copy —
+ * it predates the attribute edits a move applies (stripping `data-canvas-node`,
+ * style changes). Re-inserting that stale copy would silently revert them, so
+ * the live element is swapped in before the wrapper is spliced.
+ *
+ * Returns false when the element is not found, leaving the caller to insert the
+ * bare node rather than a wrapper around the wrong thing.
+ */
+function replaceWrappedElement(
+  wrapper: t.JSXElement,
+  nodeId: string,
+  replacement: t.JSXElement,
+): boolean {
+  let done = false;
+  const visit = (n: any, set: (v: any) => void): void => {
+    if (done || !n || typeof n !== 'object') return;
+    if (n.type === 'JSXElement') {
+      const hit = n.openingElement.attributes.some(
+        (a: any) => t.isJSXAttribute(a) && a.name.name === 'data-id'
+          && t.isStringLiteral(a.value) && a.value.value === nodeId,
+      );
+      if (hit) { set(replacement); done = true; return; }
+    }
+    for (const key of ['children', 'expression', 'left', 'right', 'consequent', 'alternate']) {
+      const v = n[key];
+      if (Array.isArray(v)) {
+        for (let i = 0; i < v.length; i++) {
+          const idx = i;
+          visit(v[idx], (nv) => { v[idx] = nv; });
+        }
+      } else if (v) {
+        visit(v, (nv) => { n[key] = nv; });
+      }
+    }
+  };
+  visit(wrapper, () => {});
+  return done;
+}
+
 /** Does this child slot hold `nodeId` — either as itself or inside a
  *  variant-visibility wrapper? */
 function slotHoldsNodeId(child: t.JSXElement['children'][number], nodeId: string): boolean {
@@ -2451,6 +2493,10 @@ export function moveNodeInCode(
 
   // Step 1: Find and remove the node
   let removedNode: t.JSXElement | null = null;
+  /** The variant-visibility `<AnimatePresence>` the node was wrapped in, if any.
+   *  Re-applied around the node when it lands in a new parent so its condition
+   *  survives the move. */
+  let removedWrapper: t.JSXElement | null = null;
 
   findFirstElementByDataId(ast, nodeId, (path) => {
     removedNode = t.cloneNode(path.node, true);
@@ -2476,12 +2522,20 @@ export function moveNodeInCode(
       // Element is wrapped — most commonly inside the AnimatePresence
       // visibility pattern: `<AnimatePresence>{cond && <element/>}</AnimatePresence>`.
       // Walk up to find the AnimatePresence wrapper and REMOVE the
-      // whole wrapper (the wrapper exists only to gate this element's
-      // visibility; with the element gone the wrapper has no purpose).
+      // whole wrapper from its old location.
       // Without this branch the element stays in the source while ALSO
       // being added to its new location — visible as a duplicate
       // data-id (one in the wrapper, one in canvasNodes), unable to
       // resize, layers panel shows it twice.
+      //
+      // The wrapper is KEPT (see `removedWrapper`) and re-applied when the node
+      // lands in a new parent. It is the node's visibility condition, so
+      // dropping it on a reparent silently UNHID a variant-hidden node: the
+      // layers row still showed the eye-slash while the canvas rendered it on
+      // every variant (user report 2026-09-19, hamburger dragged into "Menu
+      // links"). Exit-to-canvas is the exception and keeps unwrapping —
+      // canvasNodes live outside the variant system, so the condition has
+      // nothing to read there.
       let walker: any = path.parentPath;
       while (walker) {
         if (walker.isJSXElement()) {
@@ -2489,6 +2543,7 @@ export function moveNodeInCode(
           const isAnimPresence = opening.name.type === 'JSXIdentifier'
             && opening.name.name === 'AnimatePresence';
           if (isAnimPresence) {
+            removedWrapper = t.cloneNode(walker.node, true);
             const ancestor = walker.parentPath;
             if (ancestor?.isJSXElement() || ancestor?.isJSXFragment()) {
               const ancestorChildren = ancestor.node.children;
@@ -3004,6 +3059,17 @@ export function moveNodeInCode(
         trace.action('generator:moveNodeInCode-strip-canvas-node', { nodeId, newParentId });
       } else {
         trace.action('generator:moveNodeInCode-no-canvas-node-attr', { nodeId, newParentId });
+      }
+    }
+    // RE-WRAP: put the node back inside its visibility condition before it is
+    // inserted. Done here — after the attribute edits above, which target the
+    // ELEMENT — so everything upstream still sees a bare node and only the
+    // thing actually spliced into the new parent is the wrapper.
+    if (removedWrapper && removedNode) {
+      const wrapper = removedWrapper as t.JSXElement;
+      if (replaceWrappedElement(wrapper, nodeId, removedNode)) {
+        removedNode = wrapper;
+        trace.action('generator:moveNodeInCode-rewrapped-visibility', { nodeId, newParentId });
       }
     }
     let parentFound = false;

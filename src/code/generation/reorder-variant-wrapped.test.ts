@@ -12,7 +12,7 @@
 // that never went away (user report 2026-09-19).
 
 import { describe, test, expect } from 'vitest';
-import { reorderNodeInCode } from './generator-crud';
+import { reorderNodeInCode, moveNodeInCode } from './generator-crud';
 
 const PAGE = `export default function Header({ initialVariant = 'default' }) {
   return (
@@ -100,5 +100,54 @@ describe('reorderNodeInCode — anchors still pinned', () => {
     const out = reorderNodeInCode(WITH_STYLE, 'b', 'root', 0);
     expect(sequence(out, 'root')).toEqual(['b', 'a']);
     expect(out.indexOf('<style>')).toBeLessThan(out.indexOf('data-id="b"'));
+  });
+});
+
+// MOVING a variant-hidden node to a NEW PARENT.
+//
+// `moveNodeInCode` deleted the AnimatePresence wrapper on the way out — correct
+// when the element is being removed from the file, wrong for a move, where the
+// element survives. The condition went with the wrapper, so a hidden node
+// became unconditionally rendered: the layers row still showed the eye-slash
+// while the canvas painted it on every variant (user report 2026-09-19).
+describe('moveNodeInCode — variant-wrapped node keeps its visibility', () => {
+  const TREE = `export default function Header({ initialVariant = 'default' }) {
+  return (
+    <div data-id="bar" style={{ display: 'flex' }}>
+      <div data-id="logo" style={{ order: '0' }}>Logo</div>
+      <AnimatePresence mode="popLayout">{initialVariant === "variant-2" && <motion.div data-id="burger" style={{ order: '1' }}>Burger</motion.div>}</AnimatePresence>
+      <div data-id="menu" style={{ display: 'flex', order: '2' }}>
+        <p data-id="t1">Adidas</p>
+      </div>
+    </div>
+  );
+}`;
+
+  test('the condition survives the reparent', () => {
+    const out = moveNodeInCode(TREE, 'burger', 'menu', undefined, 1);
+    expect(out).toMatch(/initialVariant === "variant-2"/);
+    expect(out).toContain('AnimatePresence');
+  });
+
+  test('the node moves exactly once', () => {
+    const out = moveNodeInCode(TREE, 'burger', 'menu', undefined, 1);
+    expect(count(out, 'burger')).toBe(1);
+  });
+
+  test('it really lands inside the new parent, still wrapped', () => {
+    const out = moveNodeInCode(TREE, 'burger', 'menu', undefined, 1);
+    const menuAt = out.indexOf('data-id="menu"');
+    const burgerAt = out.indexOf('data-id="burger"');
+    expect(burgerAt).toBeGreaterThan(menuAt);
+    // the wrapper travelled with it, not left behind next to the logo
+    const wrapperAt = out.indexOf('<AnimatePresence');
+    expect(wrapperAt).toBeGreaterThan(menuAt);
+  });
+
+  test('an UNWRAPPED node still moves plainly', () => {
+    const out = moveNodeInCode(TREE, 'logo', 'menu', undefined, 0);
+    expect(count(out, 'logo')).toBe(1);
+    expect((out.match(/<AnimatePresence/g) ?? []).length).toBe(1);
+    expect(out.indexOf('data-id="logo"')).toBeGreaterThan(out.indexOf('data-id="menu"'));
   });
 });
