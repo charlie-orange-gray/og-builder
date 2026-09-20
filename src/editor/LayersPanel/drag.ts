@@ -6,7 +6,7 @@
 import type { MouseEvent as ReactMouseEvent, MutableRefObject } from 'react';
 import type { CanvasNode } from '@/code/parsing/parser';
 import { flushNow, queueMutation } from '@/code/mutation/mutation-queue';
-import { getContentRoot, isPrimaryViewport, findChildRects, findNodeComputedStyle, findNodeComputedStyles, forceRenderAfterExternalEdit } from '@/canvas/node-ops';
+import { getContentRoot, isPrimaryViewport, findChildRects, findNodeComputedStyle, findNodeComputedStyles, forceRenderAfterExternalEdit, redirectToFitTextWrapper } from '@/canvas/node-ops';
 import { computeReorderAssignments, computeReplicaOrderMirrorUpdates, flexForFlowChildEnteringFlex } from '@/canvas/drag/reparent-utils';
 import { containerOverridesAtom } from '@/code/stores/container-query-store';
 import { getDefaultStore } from 'jotai';
@@ -123,13 +123,19 @@ export function resolveLayerDropStructure(
     if (!parent) return null;
     return { finalParentId: indicator.nodeId, structuralInsertIndex: fileSiblingsOf(parent).length };
   }
-  const targetNode = nodes.get(indicator.nodeId);
+  // The DROP TARGET gets the same FIT-pair redirect as the dragged node. The
+  // tree shows a FIT text's inner `<p>`, whose parent is the `<foreignObject>`
+  // — so a before/after drop beside one resolved its parent to the
+  // foreignObject and dropped the node INSIDE the FIT wrapper, where it is
+  // invisible to every layout the user can see.
+  const targetId = redirectToFitTextWrapper(indicator.nodeId, nodes) ?? indicator.nodeId;
+  const targetNode = nodes.get(targetId);
   const finalParentId = targetNode?.parentId;
   if (!finalParentId) return null;
   const parent = nodes.get(finalParentId);
   if (!parent) return null;
   const fileSiblings = fileSiblingsOf(parent);
-  const siblingIndex = fileSiblings.indexOf(indicator.nodeId);
+  const siblingIndex = fileSiblings.indexOf(targetId);
   if (siblingIndex === -1) return null;
   const structuralInsertIndex = indicator.position === 'after' ? siblingIndex + 1 : siblingIndex;
   const anchor = fileSiblings[structuralInsertIndex];
@@ -284,7 +290,25 @@ export function startLayerDrag(ctx: LayerDragContext, e: ReactMouseEvent, layerI
       const relativeY = ev.clientY - rect.top;
       const height = rect.height;
       const parent = targetNode.parentId ? nodes.get(targetNode.parentId) : null;
-      const isLastChild = parent ? parent.children[parent.children.length - 1] === targetNodeId : false;
+      // LAST as the TREE renders it, not as the JSX lists it.
+      //
+      // On a frame row the bottom 30% means "after" only for the last child;
+      // otherwise it means "inside". Reading `parent.children` answers in JSX
+      // order, which is not what the user sees — the tree renders by effective
+      // `order`. The two normally agree here, because a layers drop always
+      // queues a structural JSX reorder alongside the CSS order (that is
+      // deliberate — it keeps the parser, codegen and undo coherent), so this
+      // has no live repro from the panel. They diverge after a CANVAS reorder on
+      // a non-primary tile, which writes CSS order only and leaves the shared
+      // JSX alone: the visually-last frame then reads as not-last and its bottom
+      // edge drops INTO it instead of after it.
+      const ordered = parent
+        ? sortChildrenByVisualOrder(
+            parent, parent.children, vpIdFromLayerId(targetLayerId), nodes, vpConfigs,
+            getDefaultStore().get(containerOverridesAtom), isCompMode,
+          ).filter(id => !id.startsWith('layout::'))
+        : [];
+      const isLastChild = ordered.length > 0 && ordered[ordered.length - 1] === targetNodeId;
       const isComponentInstance = !!targetNode.componentFile;
 
       let position: 'before' | 'after' | 'inside';

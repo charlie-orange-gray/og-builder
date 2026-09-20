@@ -857,11 +857,21 @@ export default function LayersPanel() {
   // ─── Drag and Drop (mousemove-based) ─────────────────────────────────────
 
   const handleLayerDragStart = useCallback((e: React.MouseEvent, layerId: string, nodeId: string) => {
+    // Same FIT-pair redirect as handleSelect and handleContextMenu — drag was
+    // the ONE row handler that skipped it.
+    //
+    // A FIT text is a PAIR: `<svg data-id="<id>-svg" data-name="FIT">
+    // <foreignObject><p data-id="<id>">`. The tree shows the inner <p>, but the
+    // element that actually sits in the parent is the svg wrapper. Dragging the
+    // raw id therefore moved the <p> ALONE — it landed in the new parent as a
+    // bare paragraph with no FIT sizing, and an empty `<svg><foreignObject/>`
+    // was left orphaned behind it (user report 2026-09-20).
+    const dragNodeId = redirectToFitTextWrapper(nodeId, nodes) ?? nodeId;
     startLayerDrag({
       nodes, isCompMode, vpWidths, vpConfigs, activeFilePath,
       dragStartPos, dragThresholdMet, activeIdRef, activeLayerIdRef, dropIndicatorRef,
       setActiveId, setActiveLayerId, setDropIndicator,
-    }, e, layerId, nodeId);
+    }, e, layerId, dragNodeId);
   }, [nodes, isCompMode, vpWidths, vpConfigs, activeFilePath]);
 
   // Context menu on right-click
