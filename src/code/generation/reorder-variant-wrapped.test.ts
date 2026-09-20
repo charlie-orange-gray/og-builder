@@ -151,3 +151,158 @@ describe('moveNodeInCode — variant-wrapped node keeps its visibility', () => {
     expect(out.indexOf('data-id="logo"')).toBeGreaterThan(out.indexOf('data-id="menu"'));
   });
 });
+
+// A node gated by a BARE conditional — no AnimatePresence. The CMS pagination
+// "Load More" (`{visible < items.length && <LoadMore/>}`, cms-pagination-gen)
+// and the parenthesised overlay form are the two real shapes.
+//
+// `moveNodeInCode`'s removal walker only recognised an AnimatePresence
+// ancestor, so for these the parent is a LogicalExpression, nothing was
+// spliced out, and the clone was inserted anyway — the node appeared in TWO
+// places and repeated drags multiplied it (user report 2026-09-19, four
+// LoadMore rows in the layers tree).
+describe('moveNodeInCode — bare-conditional gated node', () => {
+  const LIST = `export default function Page() {
+  const [visible, setVisible] = useState(3);
+  return (
+    <div data-id="root" style={{ display: 'flex' }}>
+      <div data-id="list" style={{ display: 'flex' }}>
+        {items.slice(0, visible).map((item, i) => <div data-id="row" key={i}>{item.title}</div>)}
+        {visible < items.length && <LoadMore data-id="more" onClick={() => setVisible(visible + 4)} />}
+      </div>
+      <div data-id="sidebar" style={{ display: 'flex' }}>
+        <p data-id="note">Note</p>
+      </div>
+    </div>
+  );
+}`;
+
+  test('moving it out does NOT duplicate it', () => {
+    const out = moveNodeInCode(LIST, 'more', 'sidebar', undefined, 1);
+    expect(count(out, 'more')).toBe(1);
+  });
+
+  test('its condition travels with it', () => {
+    const out = moveNodeInCode(LIST, 'more', 'sidebar', undefined, 1);
+    expect(out).toMatch(/visible < items\.length &&/);
+    // and only once — the original gate is gone from the list
+    expect((out.match(/visible < items\.length &&/g) ?? []).length).toBe(1);
+  });
+
+  test('it really lands in the new parent', () => {
+    const out = moveNodeInCode(LIST, 'more', 'sidebar', undefined, 1);
+    expect(out.indexOf('data-id="more"')).toBeGreaterThan(out.indexOf('data-id="sidebar"'));
+  });
+
+  // Repeated drags were what multiplied it to four rows.
+  test('dragging twice still leaves exactly one', () => {
+    const once = moveNodeInCode(LIST, 'more', 'sidebar', undefined, 1);
+    const twice = moveNodeInCode(once, 'more', 'list', undefined, 1);
+    expect(count(twice, 'more')).toBe(1);
+  });
+
+  test('a parenthesised overlay body behaves the same', () => {
+    const overlay = `export default function Page() {
+  return (
+    <div data-id="root" style={{ display: 'flex' }}>
+      <div data-id="host" style={{ display: 'flex' }}>
+        {open && (<motion.div data-id="panel" style={{ order: '0' }}>Panel</motion.div>)}
+      </div>
+      <div data-id="dest" style={{ display: 'flex' }}><p data-id="x">x</p></div>
+    </div>
+  );
+}`;
+    const out = moveNodeInCode(overlay, 'panel', 'dest', undefined, 1);
+    expect(count(out, 'panel')).toBe(1);
+    expect(out).toMatch(/open &&/);
+  });
+
+  test('a ternary-gated node behaves the same', () => {
+    const tern = `export default function Page() {
+  return (
+    <div data-id="root" style={{ display: 'flex' }}>
+      <div data-id="host" style={{ display: 'flex' }}>
+        {open ? <div data-id="panel">Panel</div> : null}
+      </div>
+      <div data-id="dest" style={{ display: 'flex' }}><p data-id="x">x</p></div>
+    </div>
+  );
+}`;
+    const out = moveNodeInCode(tern, 'panel', 'dest', undefined, 1);
+    expect(count(out, 'panel')).toBe(1);
+  });
+
+  // The map body must still take its own branch (replaceMapTemplateBodyWithNull),
+  // which keeps the list as a refillable empty state.
+  test('a .map() row template still uses the map branch, not the wrapper branch', () => {
+    const out = moveNodeInCode(LIST, 'row', 'sidebar', undefined, 1);
+    expect(count(out, 'row')).toBe(1);
+    expect(out).toMatch(/=>\s*null/);
+  });
+});
+
+// A collection-list ROW TEMPLATE lives inside `{coll.map(… => <el/>)}`, so its
+// parent is the arrow function, not a JSX element. `reorderNodeInCode`'s plain
+// splice matched nothing and the clone was inserted anyway — the template
+// appeared twice in the layers tree (user report 2026-09-19, the "sdf" row).
+describe('reorderNodeInCode — collection row template', () => {
+  const LIST = `export default function Page() {
+  const [visible, setVisible] = useState(3);
+  const items = [];
+  return (
+    <div data-id="root" style={{ display: 'flex' }}>
+      <div data-id="sdfs" style={{ display: 'flex' }}>
+        {items.slice(0, visible).map((item, i) => <div data-id="sdf" key={i}>{item.title}</div>)}
+        {visible < items.length && <LoadMore data-id="more" />}
+      </div>
+    </div>
+  );
+}`;
+
+  test('reordering the row template does NOT duplicate it', () => {
+    const out = reorderNodeInCode(LIST, 'sdf', 'sdfs', 1);
+    expect(count(out, 'sdf')).toBe(1);
+  });
+
+  test('the whole .map() travels — the list is not torn apart', () => {
+    const out = reorderNodeInCode(LIST, 'sdf', 'sdfs', 1);
+    expect((out.match(/\.map\(/g) ?? []).length).toBe(1);
+    expect(out).toMatch(/items\.slice\(0, visible\)\.map/);
+  });
+
+  test('it actually moves past the Load More', () => {
+    const out = reorderNodeInCode(LIST, 'sdf', 'sdfs', 1);
+    expect(out.indexOf('data-id="sdf"')).toBeGreaterThan(out.indexOf('data-id="more"'));
+  });
+
+  test('reordering the Load More across the list still works', () => {
+    const out = reorderNodeInCode(LIST, 'more', 'sdfs', 0);
+    expect(count(out, 'more')).toBe(1);
+    expect(count(out, 'sdf')).toBe(1);
+    expect(out.indexOf('data-id="more"')).toBeLessThan(out.indexOf('data-id="sdf"'));
+  });
+
+  // A node INSIDE the row template is an ordinary child of it — reordering
+  // there must NOT escalate to moving the whole list.
+  test('a child of the row template reorders within the template', () => {
+    const nested = `export default function Page() {
+  const items = [];
+  return (
+    <div data-id="root" style={{ display: 'flex' }}>
+      <div data-id="list" style={{ display: 'flex' }}>
+        {items.map((item, i) => (
+          <div data-id="row" key={i} style={{ display: 'flex' }}>
+            <h3 data-id="title">{item.title}</h3>
+            <div data-id="thumb" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}`;
+    const out = reorderNodeInCode(nested, 'thumb', 'row', 0);
+    expect(count(out, 'thumb')).toBe(1);
+    expect((out.match(/\.map\(/g) ?? []).length).toBe(1);
+    expect(out.indexOf('data-id="thumb"')).toBeLessThan(out.indexOf('data-id="title"'));
+  });
+});
