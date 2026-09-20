@@ -2145,6 +2145,68 @@ export function flattenVariantConditionalStylesInCode(code: string, nodeId: stri
   return code.slice(0, objStart) + (rebuilt ? ` ${rebuilt} ` : '') + code.slice(pos);
 }
 
+/** Flatten `variant`/`initialVariant` conditional styles on EVERY node inside module-scope
+ *  `canvasNodes`, not just the one that was dragged.
+ *
+ *  `flattenVariantConditionalStylesInCode` takes a nodeId, so it healed the dragged node and left its
+ *  DESCENDANTS alone — and a dragged subtree carries them out too. A frame whose child held
+ *  `order: variant === 'variant-1' ? 1 : 1` therefore still referenced `variant` at module scope and the
+ *  validator blocked the whole drag ("References undefined identifier: variant", user report 2026-09-20).
+ *  Same scope as `stripCanvasNodeMotionRefsInCode`, which already sweeps every node for the ATTR half of
+ *  the same problem; this is the STYLE half. Resolving to the default branch matches the single-node
+ *  version — on the canvas there is no variant context. */
+export function flattenCanvasNodeVariantStylesInCode(code: string): string {
+  if (!code.includes('canvasNodes')) return code;
+  const ast = parseJSX(code);
+  if (!ast) return code;
+  let changed = false;
+  /** The final `alternate` of a `variant === 'x' ? … : …` chain, or null if it isn't one. */
+  const defaultBranch = (expr: any): any | null => {
+    let cursor = expr;
+    let sawVariantTest = false;
+    while (cursor?.type === 'ConditionalExpression') {
+      const t = cursor.test;
+      const isVariantTest = t?.type === 'BinaryExpression' && t.operator === '===' &&
+        t.left?.type === 'Identifier' && (t.left.name === 'variant' || t.left.name === 'initialVariant');
+      if (!isVariantTest) return null;      // some other ternary — leave it alone
+      sawVariantTest = true;
+      cursor = cursor.alternate;
+    }
+    return sawVariantTest ? cursor : null;
+  };
+  traverse(ast, {
+    VariableDeclarator(path) {
+      if (path.node.id.type !== 'Identifier' || path.node.id.name !== 'canvasNodes' || !path.node.init) return;
+      path.traverse({
+        JSXAttribute(p) {
+          if (p.node.name.type !== 'JSXIdentifier' || p.node.name.name !== 'style') return;
+          const v = p.node.value;
+          if (v?.type !== 'JSXExpressionContainer' || v.expression.type !== 'ObjectExpression') return;
+          v.expression.properties = v.expression.properties.filter((prop: any) => {
+            if (prop.type !== 'ObjectProperty') return true;
+            const def = defaultBranch(prop.value);
+            if (def === null) return true;
+            changed = true;
+            // An empty default means the property is absent on the primary — drop it.
+            if (def.type === 'StringLiteral' && def.value === '') return false;
+            prop.value = def;
+            return true;
+          });
+        },
+      });
+      path.stop();
+    },
+  });
+  if (!changed) return code;
+  try {
+    const out = generate(ast).code;
+    trace.action('generator:flatten-canvas-node-variant-styles', {});
+    return out;
+  } catch {
+    return code;
+  }
+}
+
 /** Resolve every per-viewport `__mqN ? … : …` gate ternary in a node's subtree to its BASE (else) branch.
  *  Per-viewport link/bool-nav variables write `href={(__mq2 ? var : base)}` / `target={(__mq ? a : b) ? … }`
  *  where `__mqN` are `useMediaQuery` consts DECLARED INSIDE the component fn — module-scope `canvasNodes` has

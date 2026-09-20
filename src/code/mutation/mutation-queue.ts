@@ -39,6 +39,7 @@ import {
   resolveMediaGateTernariesInCode,
   inlineCanvasNodePropRefsInCode,
   stripCanvasNodeMotionRefsInCode,
+  flattenCanvasNodeVariantStylesInCode,
   stashCanvasNodeConnectionsInCode,
   updateNodeTextInCode,
   updateVariantTextInCode,
@@ -2776,6 +2777,11 @@ function applyMutationCore(code: string, mutation: Mutation): string {
           // && <el>}` — all referencing FUNCTION-scope idents that don't exist at module scope → the validator
           // blocks the drag. Strip them (a canvas node is a static free element; it never variant-animates).
           moved = stripCanvasNodeMotionRefsInCode(moved);
+          // The per-node flatten above heals only the dragged node. A dragged SUBTREE carries its
+          // children's `variant === 'v' ? … : …` styles out too, and they reference the same
+          // out-of-scope identifier — sweep every canvas node for the style half, exactly as the
+          // line above does for the attr half.
+          moved = flattenCanvasNodeVariantStylesInCode(moved);
           // A variant CONNECTION on the dragged-out node is an `on*={() => setVariant('v')}` handler — undefined
           // at module scope. Pull the target into `data-conn-target` on the canvas node (renders the arrow on the
           // canvas to that variant + restores the live handler on drag-back) and strip the crashing handler.
