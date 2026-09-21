@@ -758,14 +758,14 @@ Not implemented:
 - production authentication and workspace administration
 - GitHub repository orchestration/credentials
 - real Docker daemon image/container proof on the development host
-- staging/production promotion
-- production blue/green routing and promotion
-- rollback UI and operational rollback workflow
+- staging/production promotion (implemented and Debian-proven with a temporary hostname)
+- production blue/green routing and promotion (implemented and proven)
+- rollback UI and operational rollback workflow (implemented and proven)
 - realtime collaboration
 
-Current upstream integration is local only and has not been pushed or merged into `origin/main`.
+The validated upstream integration and self-hosted production UI are merged into `origin/main` (`a9306529f00b04b9ac873200ffad75af1df4ea7c`).
 
-The local Phase 1/2 implementation provides authoritative self-hosted project persistence, content-addressed design assets, frozen revision manifests, and deterministic temporary website-tree materialization in `og-control-plane`. Phase 3/4 now adds a minimal Publish API that freezes and materializes an exact staging revision, assigns a stable per-site repository through a server-side `GitProvider`, commits/pushes the local provider's `staging` branch, verifies the SHA, records `sites`, `git_repositories`, `deployments`, and `deployment_events`, and ends at `ready-for-build`. Phase 6 now adds an opt-in server-side deployment worker and routing seam: it checks out the exact SHA, builds a SHA-tagged image, starts a new slot, health-checks `/healthz`, and switches a local or controlled Nginx route only after success. Docker production promotion remains separate; the Debian host proof is still pending.
+The local Phase 1/2 implementation provides authoritative self-hosted project persistence, content-addressed design assets, frozen revision manifests, and deterministic temporary website-tree materialization in `og-control-plane`. Phase 3/4 now adds a minimal Publish API that freezes and materializes an exact staging revision, assigns a stable per-site repository through a server-side `GitProvider`, commits/pushes the local provider's `staging` branch, verifies the SHA, records `sites`, `git_repositories`, `deployments`, and `deployment_events`, and ends at `ready-for-build`. Phase 6 now adds an opt-in server-side deployment worker and routing seam: it checks out the exact SHA, builds a SHA-tagged image, starts a new slot, health-checks `/healthz`, and switches a local or controlled Nginx route only after success. Phase 7/8 now add server-derived production promotion and rollback: only an active complete staging deployment can be promoted, production uses separate ports and blue/green slots, rollback selects a retained production artifact and records a new deployment/event, and failed candidates leave the healthy route unchanged. Debian proof completed on 2026-09-21 using a temporary hostname; real customer production remains out of scope.
 
 ## 21. Implementation Roadmap
 
