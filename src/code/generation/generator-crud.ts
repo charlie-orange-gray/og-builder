@@ -2145,6 +2145,59 @@ export function flattenVariantConditionalStylesInCode(code: string, nodeId: stri
   return code.slice(0, objStart) + (rebuilt ? ` ${rebuilt} ` : '') + code.slice(pos);
 }
 
+/** One rotation channel per canvas node.
+ *
+ *  The canvas applies BOTH the CSS `transform` string and the `rotate` property, so an element
+ *  carrying `rotate: "-190.3"` alongside `transform: 'rotate(-190.3deg) …'` is rotated TWICE —
+ *  -380.6°, which is 180° from where it belongs. A flex column's children then look reordered,
+ *  which is how it was reported (user 2026-09-20: "the moment i drag it out they SWITCH order").
+ *
+ *  Two healers each write one channel and neither can see the other, because they run in DIFFERENT
+ *  mutations of the same flush: `moveNodeInCode` folds `variants.default.rotate` into the `rotate`
+ *  property while no transform exists yet, and the drag's own `updateStyles` adds the folded
+ *  `transform` afterwards. So this has to be a sweep over the finished batch rather than a guard
+ *  inside either one. The `transform` string wins — it is what a plain (non-motion) canvas element
+ *  renders from. */
+export function enforceSingleRotationChannelInCode(code: string): string {
+  if (!code.includes('canvasNodes')) return code;
+  const ast = parseJSX(code);
+  if (!ast) return code;
+  let changed = false;
+  traverse(ast, {
+    VariableDeclarator(path) {
+      if (path.node.id.type !== 'Identifier' || path.node.id.name !== 'canvasNodes' || !path.node.init) return;
+      path.traverse({
+        JSXAttribute(p) {
+          if (p.node.name.type !== 'JSXIdentifier' || p.node.name.name !== 'style') return;
+          const v = p.node.value;
+          if (v?.type !== 'JSXExpressionContainer' || v.expression.type !== 'ObjectExpression') return;
+          const keyOf = (prop: any): string =>
+            prop.type !== 'ObjectProperty' ? ''
+            : prop.key.type === 'Identifier' ? prop.key.name
+            : prop.key.type === 'StringLiteral' ? prop.key.value : '';
+          const transform = v.expression.properties.find((prop: any) => keyOf(prop) === 'transform') as any;
+          const hasRotateInTransform = !!transform
+            && transform.value?.type === 'StringLiteral'
+            && /\brotate\s*\(/.test(transform.value.value);
+          if (!hasRotateInTransform) return;
+          const before = v.expression.properties.length;
+          v.expression.properties = v.expression.properties.filter((prop: any) => keyOf(prop) !== 'rotate');
+          if (v.expression.properties.length !== before) changed = true;
+        },
+      });
+      path.stop();
+    },
+  });
+  if (!changed) return code;
+  try {
+    const out = generate(ast).code;
+    trace.action('generator:enforce-single-rotation-channel', {});
+    return out;
+  } catch {
+    return code;
+  }
+}
+
 /** Flatten `variant`/`initialVariant` conditional styles on EVERY node inside module-scope
  *  `canvasNodes`, not just the one that was dragged.
  *
@@ -2839,6 +2892,17 @@ export function moveNodeInCode(
         openingEl.attributes.push(styleAttr);
       }
       const obj = (styleAttr.value as t.JSXExpressionContainer).expression as t.ObjectExpression;
+      // ONE CHANNEL ONLY. The drag commit may ALREADY have folded this element's
+      // motion props into a CSS `transform` string (foldEffectiveTransform), and
+      // the canvas renders BOTH channels — so adding `rotate` on top applied the
+      // angle twice: -190.3° became -380.6° (≈ -20.6°), a ~180° flip that made a
+      // flex column's children look reordered on drag-out (user report
+      // 2026-09-20). If a rotation is already represented in `transform`, this
+      // fold has nothing to add.
+      const transformProp = obj.properties.find(
+        (p) => t.isObjectProperty(p) && ((t.isIdentifier(p.key) && p.key.name === 'transform') || (t.isStringLiteral(p.key) && p.key.value === 'transform')),
+      ) as t.ObjectProperty | undefined;
+      if (transformProp && t.isStringLiteral(transformProp.value) && /\brotate\s*\(/.test(transformProp.value.value)) return;
       const existing = obj.properties.find(
         (p) => t.isObjectProperty(p) && ((t.isIdentifier(p.key) && p.key.name === 'rotate') || (t.isStringLiteral(p.key) && p.key.value === 'rotate')),
       ) as t.ObjectProperty | undefined;

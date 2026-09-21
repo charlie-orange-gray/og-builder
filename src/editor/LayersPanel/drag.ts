@@ -101,12 +101,27 @@ export function layerAcceptsInsideDrop(
  * and no-layout destination — and a plain tree node dropped into a FLEX/GRID
  * frame hit neither, so it kept `position: 'fixed'` with `flex`/`order`
  * bolted on (live find 2026-09-06). Returns the style delta or null.
- * Pins (left/top/right/bottom) are kept: they now anchor to the frame.
+ *
+ * ENTERING A LAYOUT (flex/grid) is the other half, and it was missing: an
+ * ABSOLUTE node dropped into a flex frame kept `position: absolute` with its
+ * pins, so it ignored the layout entirely and sat wherever its old
+ * `left`/`top` put it (user report 2026-09-21, B14). A layout child has to join
+ * the flow — same delta the canvas drag commits on layout entry
+ * (`CanvasDragStrategy.ts:2910`): relative, and every inset cleared, because a
+ * stale `left: 27%` still offsets a relatively-positioned box.
+ *
+ * Outside a layout the pins are still KEPT: they now anchor to the new frame.
  */
 export function positionFixupForLayersReparent(
   draggedStyles: Record<string, string> | undefined,
+  parentLayout?: string,
 ): Record<string, string> | null {
-  if (draggedStyles?.position === 'fixed') return { position: 'absolute' };
+  const pos = draggedStyles?.position;
+  const destIsLayout = parentLayout === 'flex' || parentLayout === 'grid';
+  if (destIsLayout && (pos === 'absolute' || pos === 'fixed')) {
+    return { position: 'relative', left: '', top: '', right: '', bottom: '' };
+  }
+  if (pos === 'fixed') return { position: 'absolute' };
   return null;
 }
 
@@ -397,11 +412,36 @@ export function startLayerDrag(ctx: LayerDragContext, e: ReactMouseEvent, layerI
       // commitOrderAssignments. Explicit grid placement
       // (`gridColumn: '1 / 3'`) ignores `order` — skip in that case
       // (matches the arrow-nudge guard).
-      const parentLayout = detectParentLayoutById(finalParentId, dropVpId);
+      // The live layout, or — when the parent is HIDDEN on this viewport and so
+      // has nothing to measure — the one it is authored with.
+      const measuredLayout = detectParentLayoutById(finalParentId, dropVpId);
+      const parentLayout = (measuredLayout === 'flex' || measuredLayout === 'grid')
+        ? measuredLayout
+        : (authoredLayoutOfParent(nodes.get(finalParentId)) ?? measuredLayout);
+      if (parentLayout !== measuredLayout) {
+        trace.action('layers-drag:authored-layout-fallback', { parentId: finalParentId, dropVpId, measuredLayout, parentLayout });
+      }
       let isOrderedLayout = parentLayout === 'flex';
       if (parentLayout === 'grid') {
         const gc = findNodeComputedStyle(finalParentId, dropVpId, 'gridColumn');
         if (!gc || gc === 'auto' || gc === 'auto / auto') isOrderedLayout = true;
+      }
+      // The layout is read on the DROP viewport, so a parent that is flex only
+      // on ANOTHER band reads as unordered here — a frame `display: none` at
+      // base with `display: flex !important` in an @media rule reads as `none`
+      // on Desktop. The drop then queued a bare JSX reorder while the children
+      // kept their existing `order: 0` / `order: 1`, so the layers panel and the
+      // source moved but the mobile tile did not (user report 2026-09-21).
+      //
+      // The condition the comment above already states is the exact one: a plain
+      // reorder is invisible whenever ANY sibling carries an explicit `order`.
+      // Test that directly instead of inferring it from this viewport's display
+      // — it is true regardless of which band the parent is laid out on, and it
+      // stays false for a parent whose children have no `order` at all (there a
+      // JSX move really is enough).
+      if (!isOrderedLayout && siblingsCarryExplicitOrder(nodes, finalParentId)) {
+        isOrderedLayout = true;
+        trace.action('layers-drag:ordered-by-explicit-order', { parentId: finalParentId, dropVpId, parentLayout });
       }
 
       flushNow();
@@ -497,10 +537,10 @@ export function startLayerDrag(ctx: LayerDragContext, e: ReactMouseEvent, layerI
       // `fixed` never survives a reparent into a frame — see the helper. Only
       // when no earlier branch already decided the position (canvas-source
       // flow entry / no-layout absolute both take precedence).
-      const fixedFix = positionFixupForLayersReparent(draggedNode.styles);
+      const fixedFix = positionFixupForLayersReparent(draggedNode.styles, parentLayout);
       if (fixedFix && !('position' in moveStyles)) {
         Object.assign(moveStyles, fixedFix);
-        trace.action('layers:drop-fixed-to-absolute', { draggedId, finalParentId, dropVpId, parentLayout });
+        trace.action('layers:drop-position-fixup', { draggedId, finalParentId, dropVpId, parentLayout, fix: fixedFix });
       }
       // Out-of-flow children (absolute/fixed) don't take part in flex layout —
       // don't stamp inert `flex` on them.
@@ -721,4 +761,50 @@ export function startLayerDrag(ctx: LayerDragContext, e: ReactMouseEvent, layerI
 
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+}
+
+/** Does any child of this parent carry an explicit CSS `order`?
+ *
+ *  When one does, paint order is decided by `order` and a plain JSX reorder
+ *  changes nothing visible — so the drop has to renumber. Checked independently
+ *  of the drop viewport's computed display, because a parent can be laid out on
+ *  a band this viewport does not show (hidden at base, flex in an @media rule).
+ *  Reads the node tree, not the DOM: on the viewport where the parent is hidden
+ *  there is nothing laid out to measure. */
+export function siblingsCarryExplicitOrder(nodes: Map<string, CanvasNode>, parentId: string | null): boolean {
+  if (!parentId) return false;
+  const parent = nodes.get(parentId);
+  if (!parent) return false;
+  for (const childId of parent.children) {
+    const v = nodes.get(childId)?.styles?.order;
+    if (v != null && String(v).trim() !== '') return true;
+  }
+  return false;
+}
+
+/** The layout a parent is AUTHORED with, when the live one can't be measured.
+ *
+ *  `detectParentLayoutById` reads the computed display, so a frame hidden on the
+ *  drop viewport reports `none`/`absolute` and a drop into it took the
+ *  no-layout branch: the child was stamped `position: absolute` with pins, and
+ *  stayed absolute after the frame was unhidden (user report 2026-09-21).
+ *
+ *  Hiding only swaps `display`; the layout properties stay on the node, which is
+ *  what lets unhide restore the frame intact. So they are a reliable record of
+ *  what the frame IS. Only the layout-defining properties count —
+ *  `flexDirection` / `gridTemplate*` / `gridAutoFlow` — never `gap` or
+ *  `alignItems` alone, which a block frame can legitimately carry. */
+export function authoredLayoutOfParent(parent: CanvasNode | null | undefined): 'flex' | 'grid' | null {
+  const st = parent?.styles;
+  if (!st) return null;
+  const display = (st.display || '').trim();
+  if (display === 'flex' || display === 'inline-flex') return 'flex';
+  if (display === 'grid' || display === 'inline-grid') return 'grid';
+  // Only fall back to the authored props when the frame isn't laid out at all
+  // — a real `display: block` frame must stay a no-layout destination.
+  if (display !== 'none' && display !== '') return null;
+  const has = (k: string) => !!st[k] && st[k].trim() !== '';
+  if (has('gridTemplateColumns') || has('gridTemplateRows') || has('gridAutoFlow')) return 'grid';
+  if (has('flexDirection')) return 'flex';
+  return null;
 }

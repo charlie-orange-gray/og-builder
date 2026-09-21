@@ -106,3 +106,41 @@ describe('sortChildrenByVisualOrder', () => {
     expect(sort(parent, nodes).sort()).toEqual(['a', 'ghost']);
   });
 });
+
+// B18 — a frame that is flex only on a BAND. The sort read the parent's BASE
+// `display`, so on the tile where the frame IS flex it bailed to JSX order,
+// while the drag path's `isOrderedLayout` resolved display properly and ran the
+// commit regardless. The two disagreeing flattened a hand-built arrangement
+// into source order in a single drag.
+describe('sortChildrenByVisualOrder — display resolved per band', () => {
+  const VPS = [
+    { id: 'desktop', width: 1440, isPrimary: true },
+    { id: 'mobile', width: 450, isPrimary: false },
+  ];
+  const mk = (id: string, styles: Record<string, string>, children: string[] = []) =>
+    ({ id, type: 'div', name: 'Frame', parentId: null, children, styles, attrs: {}, textContent: '' } as unknown as CanvasNode);
+
+  /** Parent: display:none at base, flex via the mobile @container override. */
+  const build = () => {
+    const nodes = new Map<string, CanvasNode>();
+    nodes.set('a', mk('a', { order: '1' }));
+    nodes.set('b', mk('b', { order: '0' }));
+    const parent = mk('p', { display: 'none' }, ['a', 'b']);
+    nodes.set('p', parent);
+    const overrides = new Map([['p', new Map([[450, new Map([['display', 'flex']])]])]]);
+    return { parent, nodes, overrides };
+  };
+
+  test('sorts by order on the viewport where the parent IS flex', () => {
+    const { parent, nodes, overrides } = build();
+    expect(sortChildrenByVisualOrder(parent, ['a', 'b'], 'mobile', nodes, VPS, overrides, false))
+      .toEqual(['b', 'a']);   // order 0 before order 1
+  });
+
+  test('still bails to JSX order where the parent really is not a layout', () => {
+    const { parent, nodes } = build();
+    const none = new Map<string, Map<number, Map<string, string>>>();
+    expect(sortChildrenByVisualOrder(parent, ['a', 'b'], 'desktop', nodes, VPS, none, false))
+      .toEqual(['a', 'b']);
+  });
+});

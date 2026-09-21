@@ -51,6 +51,7 @@ import {
   replaceNodeTextContent,
   stripInlineSpanStyleInCode,
   healDanglingModuleJsxInCode,
+  enforceSingleRotationChannelInCode,
   healStyleBlockSelectorAttrsInCode,
   addNodeInCode,
   addCanvasNodeInCode,
@@ -1154,6 +1155,11 @@ export function flushNow(): void {
     // only fixed by a later async processQueue). Mirrors the processQueue heal.
     if (code.indexOf('const canvasNodes') !== -1) {
       code = healDanglingCanvasNodeBindings(code, resolveDetailPageRow(code));
+      // A drag-out writes the rotation into BOTH channels across two mutations
+      // of one flush (the move's fold, then the drag's own transform), and the
+      // canvas applies both — doubling the angle. Collapse to one here, where
+      // the whole batch is visible.
+      code = enforceSingleRotationChannelInCode(code);
       // A search field / dynamic CMS filter pasted onto the canvas references a
       // page useState var at module scope → "X is not defined". Neutralize it.
       code = dormantizePageVarBindingsInCanvas(code);
@@ -2147,6 +2153,9 @@ function processQueue(): void {
   // dormantize it (placeholder + Missing) so it stops blocking EVERY later mutation.
   if (codeChanged && code.indexOf('const canvasNodes') !== -1) {
     code = healDanglingCanvasNodeBindings(code, resolveDetailPageRow(code));
+    // Same one-channel collapse as the synchronous drag-commit path above: the
+    // rotation must not land in `rotate` AND `transform`, or it applies twice.
+    code = enforceSingleRotationChannelInCode(code);
     // A whole <form> dragged onto the canvas carries onSubmit + FormSubmit
     // initialVariant + responsive-attr __mq gates that reference page-fn vars
     // out of scope in module-scope canvasNodes → dormantize them (no crash).
