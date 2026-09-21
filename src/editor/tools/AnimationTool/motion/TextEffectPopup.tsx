@@ -2,7 +2,12 @@
 // Reuses MotionPropsEditor for properties (same controls as hover/tap/appear).
 // Adds preset dropdown, split type selector, stagger delay, transition row.
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
+import { useAtomValue } from 'jotai';
+import { activeFilePathAtom } from '@/code/project/active-file-store';
+import { getAnchorsForPage } from '../../LinkTool/LinkUrlControl';
+import { findEnclosingAnchorId } from '../enclosing-section';
+import { ViewportIcon } from './ScrollEditor';
 import { ToolSelect, ToolSegmentedControl, ControlLabel, ControlActionRow } from '../../../controls';
 import { useToolPopup } from '../../../ui/ToolPopup';
 import { SliderRow } from '../shared';
@@ -13,6 +18,7 @@ import TextEffectPreview from './TextEffectPreview';
 import {
   type TextAnimConfig,
   type TextAnimScope,
+  type TextAnimTrigger,
   TEXT_ANIM_PRESETS,
   ANIM_TYPE_OPTIONS,
   detectTextAnimPreset,
@@ -122,6 +128,9 @@ export default function TextEffectPopup({ nodeId, config, scope = null, onChange
   const emit = useCallback((next: TextAnimConfig) => onChange(setTextAnimScoped(config, next, scope)), [config, scope, onChange]);
 
   const activePreset = detectTextAnimPreset(view);
+  const trigger: TextAnimTrigger = view.trigger ?? 'view';
+  const activeFilePath = useAtomValue(activeFilePathAtom);
+  const anchors = useMemo(() => (activeFilePath ? getAnchorsForPage(activeFilePath) : []), [activeFilePath]);
   const transitionRecord = transitionToRecord(view.transition);
 
   // MotionPropsEditor onChange → update config (scoped via emit)
@@ -158,9 +167,93 @@ export default function TextEffectPopup({ nodeId, config, scope = null, onChange
   );
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2">
       {/* Live Preview */}
       <TextEffectPreview config={view} />
+
+      {/* Trigger — On Appear / Layer in View / Section in View, plus the
+          scrubbed On Scroll. Layer in View: Start line + Replay. Section in View: the
+          section anchor, the viewport line it must reach, and Replay. */}
+      <div className="flex items-center justify-between w-full">
+        <ControlLabel label="Trigger" property="" plain />
+        <div className="w-full">
+          <ToolSelect
+            value={trigger}
+            onChange={(v) => {
+              const next = v as TextAnimTrigger;
+              trace.action('text-effect:trigger', { nodeId, trigger: next, scoped: !!scope });
+              // Section in View defaults to the section the text sits in.
+              const sectionId = next === 'section' ? (view.sectionId || findEnclosingAnchorId(nodeId) || undefined) : view.sectionId;
+              emit({ ...view, trigger: next, sectionId });
+            }}
+            options={[
+              { value: 'appear', label: 'On Appear' },
+              { value: 'view', label: 'Layer in View' },
+              { value: 'section', label: 'Section in View' },
+              { value: 'scroll', label: 'On Scroll' },
+            ]}
+          />
+        </div>
+      </div>
+
+      {trigger === 'section' && (
+        <div className="flex items-center justify-between w-full">
+          <ControlLabel label="Section" property="" plain />
+          <div className="w-full">
+            <ToolSelect
+              value={view.sectionId ?? ''}
+              onChange={(v) => emit({ ...view, sectionId: v || undefined })}
+              options={[
+                { value: '', label: anchors.length === 0 ? 'No Sections' : 'Select…' },
+                ...anchors.map((id) => ({ value: id, label: `#${id}` })),
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {(trigger === 'view' || trigger === 'section') && (
+        <>
+          <div className="flex items-center justify-between w-full">
+            <ControlLabel label={trigger === 'view' ? 'Start' : 'Viewport'} property="" plain />
+            <ToolSegmentedControl
+              value={view.viewport ?? 'bottom'}
+              onChange={(v) => emit({ ...view, viewport: v as 'top' | 'middle' | 'bottom' })}
+              options={[
+                { value: 'top', icon: <ViewportIcon position="top" /> },
+                { value: 'middle', icon: <ViewportIcon position="middle" /> },
+                { value: 'bottom', icon: <ViewportIcon position="bottom" /> },
+              ]}
+              size="sm"
+            />
+          </div>
+          <div className="flex items-center justify-between w-full">
+            <ControlLabel label="Replay" property="" plain />
+            <ToolSegmentedControl
+              value={view.replay ? 'yes' : 'no'}
+              onChange={(v) => emit({ ...view, replay: v === 'yes' })}
+              options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]}
+              size="sm"
+            />
+          </div>
+        </>
+      )}
+
+      {/* Scroll behavior — only in scroll mode. Start/End = viewport position (% from top) of the
+          element's top edge when the reveal begins / completes. Default 90 (entering from bottom) → 35. */}
+      {trigger === 'scroll' && (
+        <>
+          <SliderRow label="Start" value={view.scrollStart ?? 90} min={0} max={100} step={5}
+            onChange={(v) => emit({ ...view, scrollStart: v })} suffix="%" />
+          <SliderRow label="End" value={view.scrollEnd ?? 35} min={0} max={100} step={5}
+            onChange={(v) => emit({ ...view, scrollEnd: v })} suffix="%" />
+          {/* Overlap: how much of the scrub each unit spans. 40% (default) blends a dozen
+              units into a soft gradient; 0% steps one unit at a time (sharp, per word). */}
+          <SliderRow label="Overlap" value={Math.round((view.scrollWindow ?? 0.4) * 100)} min={0} max={100} step={5}
+            onChange={(v) => emit({ ...view, scrollWindow: v / 100 })} suffix="%" />
+        </>
+      )}
+
 
       {/* Preset */}
       <div className="flex items-center justify-between w-full">
@@ -172,7 +265,7 @@ export default function TextEffectPopup({ nodeId, config, scope = null, onChange
               const preset = TEXT_ANIM_PRESETS.find(p => p.name === name);
               if (preset) {
                 trace.action('text-effect:preset', { name, scoped: !!scope });
-                emit({ ...preset.config, animationType: view.animationType, delay: view.delay, trigger: view.trigger, scrollStart: view.scrollStart, scrollEnd: view.scrollEnd });
+                emit({ ...preset.config, animationType: view.animationType, delay: view.delay, trigger: view.trigger, viewport: view.viewport, replay: view.replay, sectionId: view.sectionId, scrollStart: view.scrollStart, scrollEnd: view.scrollEnd, scrollWindow: view.scrollWindow });
               }
             }}
             options={presetOptions}
@@ -209,30 +302,6 @@ export default function TextEffectPopup({ nodeId, config, scope = null, onChange
           />
         </div>
       </div>
-
-      {/* Play — View (reveal once on enter) vs Scroll (reveal scrubbed to scroll progress) */}
-      <div className="flex items-center justify-between w-full">
-        <ControlLabel label="Play" property="" plain />
-        <div className="w-full">
-          <ToolSegmentedControl
-            value={view.trigger ?? 'view'}
-            onChange={(v) => emit({ ...view, trigger: v as 'view' | 'scroll' })}
-            options={[{ value: 'view', label: 'View' }, { value: 'scroll', label: 'Scroll' }]}
-            size="sm"
-          />
-        </div>
-      </div>
-
-      {/* Scroll behavior — only in scroll mode. Start/End = viewport position (% from top) of the
-          element's top edge when the reveal begins / completes. Default 90 (entering from bottom) → 35. */}
-      {view.trigger === 'scroll' && (
-        <>
-          <SliderRow label="Start" value={view.scrollStart ?? 90} min={0} max={100} step={5}
-            onChange={(v) => emit({ ...view, scrollStart: v })} suffix="%" />
-          <SliderRow label="End" value={view.scrollEnd ?? 35} min={0} max={100} step={5}
-            onChange={(v) => emit({ ...view, scrollEnd: v })} suffix="%" />
-        </>
-      )}
 
       {/* Properties — reuses full MotionPropsEditor with all ToolAtom controls */}
       <MotionPropsEditor

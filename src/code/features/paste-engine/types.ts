@@ -64,6 +64,10 @@ export interface ClipboardNode {
    *  text effect (live find 2026-09-09). Paste re-applies it through
    *  `addTextAnimInCode` on the new id. */
   textAnim?: Record<string, unknown>;
+  /** Code overrides (`<Override with={…}>` wrapper) resolved to file + export
+   *  at copy time, so a duplicate / paste — also into another page — re-wraps
+   *  the new id and imports the override there. */
+  codeOverrides?: Array<{ file: string; name: string }>;
   /** Same, per translatable ATTR: attr → locale → string. */
   attrTranslations?: Record<string, Record<string, string>>;
   /** Per-breakpoint style overrides captured from the source page's @media
@@ -210,6 +214,20 @@ export interface PasteContext {
 
   /** Map of viewport/variant IDs → widths. Required when interactingVpId is set. */
   viewportWidths?: Record<string, number>;
+
+  /**
+   * Does the selected node's PARENT lay its children out, ON THE VIEWPORT
+   * BEING EDITED?
+   *
+   * `node.styles.display` is the BASE style, and a frame added on one replica
+   * is stored hidden there (`display: 'none'` + a band rule that shows it) — so
+   * reading the base said "no layout" for a perfectly good flex parent, and
+   * Cmd+D inside a mobile overlay pasted an absolute node instead of a flex
+   * sibling (user report 2026-09-18). The caller lives in the canvas layer and
+   * can resolve the real computed display, so it answers this; the engine falls
+   * back to the base style when it is absent (tests, headless paths).
+   */
+  parentHasLayout?: boolean;
 
   /**
    * Active file path — needed to decide whether the paste is happening in a

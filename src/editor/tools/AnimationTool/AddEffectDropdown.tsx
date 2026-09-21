@@ -13,7 +13,7 @@ import { type AnimEntryType } from './shared';
  *  'scrollAnimation' (the On-Scroll trigger of the `appear` effect — shares
  *  the `appear` entry so it's mutually exclusive with Appear), 'scrollVariant'
  *  (placeholder, disabled), and 'scrollGroup' (the Scroll submenu header). */
-export type AddActionType = AnimEntryType | 'scrollAnimation' | 'scrollVariant' | 'scrollGroup' | 'pageTransition';
+export type AddActionType = AnimEntryType | 'scrollAnimation' | 'scrollVariant' | 'scrollGroup' | 'pageTransition' | 'smoothScroll';
 
 interface AddOption {
   type: AddActionType;
@@ -78,6 +78,8 @@ const ADD_OPTIONS: AddOption[] = [
   // Page Transition — page-level enter/exit via the View Transitions API. Only
   // offered on a page viewport/root (glideOnly), alongside Glide.
   { type: 'pageTransition', label: 'Page Transition', desc: 'Animate the page in/out on navigation (View Transitions).' },
+  // Smooth Scroll (Lenis) — page-level, like Page Transition, set per page.
+  { type: 'smoothScroll', label: 'Smooth Scroll', desc: 'Smooth, eased scrolling on this page (Lenis).' },
   { type: 'keyframe', label: 'Keyframe', desc: '@keyframes block. No JS. Visual scrubber.' },
   // Text
   { type: 'textEffect', label: 'Text', desc: 'Character/word/line stagger via Motion.', textOnly: true },
@@ -306,15 +308,17 @@ export default function AddEffectDropdown({ onAdd, existing, isTextNode, isSketc
   // node. A submenu group stays visible only while it has at least one addable child.
   const visibleOptions = ADD_OPTIONS.filter(o =>
     !HIDDEN_ADD_TYPES.has(o.type) &&
-    (!noGlide || (o.type !== 'glide' && o.type !== 'pageTransition')) &&
+    (!noGlide || (o.type !== 'glide' && o.type !== 'pageTransition' && o.type !== 'smoothScroll')) &&
     // Glide is a CONTAINER effect (children glide when one resizes) — a text
     // node has no element children, so the option never shows there
     // (user decision 2026-08-18).
     (o.type !== 'glide' || !isTextNode) &&
-    (!glideOnly || o.type === 'glide' || o.type === 'pageTransition') &&
+    (!glideOnly || o.type === 'glide' || o.type === 'pageTransition' || o.type === 'smoothScroll') &&
     // Page Transition is a PAGE-LEVEL effect — only when a viewport/root is the
     // selection (glideOnly), never on a normal element node.
-    (o.type === 'pageTransition' ? !!glideOnly : o.submenu ? submenuKids(o).length > 0 : childVisible(o)));
+    (o.type === 'pageTransition' ? !!glideOnly
+      : o.type === 'smoothScroll' ? !!glideOnly && childVisible(o)
+      : o.submenu ? submenuKids(o).length > 0 : childVisible(o)));
 
   return (
     <div className="relative" ref={ref}>

@@ -19,6 +19,7 @@ import { flushNow } from '@/code/mutation/mutation-queue';
 import { activeFilePathAtom, filePathToSlug, isComponentFilePath, getVariantBasePage } from '@/code/project/active-file-store';
 import { templateGroupFromLayoutFile, templatePreviewRoute } from '@/preview/template-preview';
 import { migrateLegacyDarkBlock } from '@/code/project/preset-ops';
+import { canvasThemeMode } from '@/canvas/canvas-theme';
 import { activePreviewSlugAtom } from '@/code/stores/cms-page-store';
 import { selectedNodeAtom, codeAtom, getNodesSnapshot } from '@/code/stores/store';
 import { interactingViewportIdAtom, interactingViewportWidthAtom } from '@/code/stores/viewport-store';
@@ -349,13 +350,12 @@ export default function PreviewOverlay({ open, onClose }: Props) {
       }
       files.push([path, content]);
     }
-    // Pin the preview to the same theme the canvas always uses (light) so
-    // user edits to `:root { --foo: … }` show up. The canvas Renderer
-    // skips `:root.dark` by design — without this, next-themes' `enableSystem`
-    // can flip the iframe to dark and the user's light-mode preset edits
-    // never appear in the preview. Sent BEFORE files so the iframe's
-    // theme is set on the first paint, not a flash of dark.
-    iframe.contentWindow.postMessage({ type: 'preview:force-theme', theme: 'light' }, POST_MESSAGE_TARGET);
+    // Pin the preview to the theme the CANVAS shows — the editor's own mode
+    // (canvas-theme.ts) — so canvas, preview and chrome agree. Without a pin,
+    // next-themes' `enableSystem` follows the OS instead. Sent BEFORE files so
+    // the iframe's theme is set on the first paint, not a flash of the other
+    // mode. A Theme Toggle on the page can still switch it afterwards.
+    iframe.contentWindow.postMessage({ type: 'preview:force-theme', theme: canvasThemeMode() }, POST_MESSAGE_TARGET);
     // Pin the LOCALE too, same reasoning as the theme above. The generated
     // `providers.tsx` resolves an unprefixed route's locale from
     // `localStorage.getItem('locale')` — and the preview iframe runs on its OWN

@@ -23,7 +23,10 @@ import { isCodeComponentSource } from './checks/shared';
 import { trace } from '@/shared/debug-trace';
 
 /** Violations that mean the published site crashes or does not build. */
-export const PUBLISH_FATAL_CODES = new Set(['SYNTAX_ERROR', 'STRING_STYLE_ATTR', 'WOULD_CRASH']);
+export const PUBLISH_FATAL_CODES = new Set(['SYNTAX_ERROR', 'STRING_STYLE_ATTR', 'WOULD_CRASH',
+  // `<Override>` around zero/several elements throws in React.Children.only;
+  // an un-imported override is a ReferenceError at render.
+  'OVERRIDE_CHILD_COUNT', 'OVERRIDE_NOT_IMPORTED']);
 
 export interface PreflightIssue {
   path: string;

@@ -85,7 +85,7 @@ export function layerInViewExitOffset(pos: 'top' | 'center' | 'middle' | 'bottom
  *  timing control on re-open. */
 export function detectLayerExitFromOffset(offset: string | null): boolean {
   if (!offset) return false;
-  return /,\s*"end start"\s*\]/.test(offset.replace(/\s+/g, ' ').trim());
+  return /,\s*"end start"\s*\]/.test(canonicalOffset(offset.replace(/\s+/g, ' ').trim()));
 }
 
 /** Detect the section viewport variant ('top' / 'middle' / 'bottom') from
@@ -95,7 +95,7 @@ export function detectLayerExitFromOffset(offset: string | null): boolean {
  *  match one of the known shapes (sensible default). */
 export function detectSectionViewportFromOffset(offset: string | null): 'top' | 'middle' | 'bottom' {
   if (!offset) return 'middle';
-  const clean = offset.replace(/\s+/g, ' ').trim();
+  const clean = canonicalOffset(offset.replace(/\s+/g, ' ').trim());
   if (clean === `["start end", "start start"]`) return 'top';
   if (clean === `["start end", "end end"]`) return 'bottom';
   if (clean === `["start end", "start center"]`) return 'middle';
@@ -131,10 +131,60 @@ export function detectLayerRangeFromOffset(offset: string | null): string | null
   return String(range);
 }
 
+/** The named viewport edge each percentage container edge stands for. */
+const PCT_EDGE: Record<string, string> = { '0%': 'start', '50%': 'center', '100%': 'end' };
+const EDGE_PCT: Record<string, string> = { start: '0%', center: '50%', end: '100%' };
+
+/** A Section-in-View offset spelled so framer-motion stays on its JS scroll path.
+ *
+ *  Motion 12.38+ recognises the named pairs `["start end", "end start"]`,
+ *  `["start start", "end start"]`, `["start end", "end end"]` and
+ *  `["start start", "end end"]` as its ScrollOffset presets and accelerates
+ *  them through a browser ViewTimeline. That timeline is created when the
+ *  animated element mounts, which is BEFORE the page's mount effect fills the
+ *  section ref (children mount first), so it captures `target: undefined` and
+ *  the scrub silently tracks the whole page — an imported hero image faded
+ *  over 16,000px instead of its 900px section. A percentage container edge
+ *  (`"start 100%"` for `"start end"`) resolves to the same pixel in motion's
+ *  JS resolver but never matches a preset. Layer-in-View keeps the named form:
+ *  its ref sits on the element itself, hydrated at commit. */
+export function sectionSafeOffset(offset: string): string {
+  return offset.replace(/"(start|center|end)\s+(start|center|end)"/g, (_m, a: string, b: string) => `"${a} ${EDGE_PCT[b]}"`);
+}
+
+/** The named spelling of a percentage-edged Section-in-View offset (the inverse
+ *  of sectionSafeOffset); any other offset is returned untouched, so a
+ *  Layer-in-View custom range (`["start end", "start 37%"]`) is never rewritten. */
+export function canonicalOffset(offset: string): string {
+  const m = /^\["(start|center|end) (0%|50%|100%)", "(start|center|end) (0%|50%|100%)"\]$/.exec(offset.replace(/\s+/g, ' ').trim());
+  if (!m) return offset;
+  return `["${m[1]} ${PCT_EDGE[m[2]]}", "${m[3]} ${PCT_EDGE[m[4]]}"]`;
+}
+
+/** Load-time heal: a SECTION-driven `useScroll({ target, offset })` written
+ *  with the named spelling (before 2026-09-16) is rewritten to the percentage
+ *  spelling, so framer-motion 12.38+ stops fast-pathing it through a
+ *  ViewTimeline that never sees the section (see sectionSafeOffset). Section
+ *  mode is the target ref that is filled by `getElementById` and never
+ *  attached as a JSX `ref={}`; Layer-in-View (ref on the element itself) and
+ *  the page-level `useScroll()` are left alone. Idempotent. */
+export function healSectionOffsets(src: string): string {
+  if (!src.includes('useScroll({') || !src.includes('getElementById(')) return src;
+  return src.replace(
+    /useScroll\(\{\s*target:\s*([A-Za-z_$][\w$]*)\s*,\s*offset:\s*(\[\s*(["'])(start|center|end) (start|center|end)\3\s*,\s*(["'])(start|center|end) (start|center|end)\6\s*\])\s*\}\)/g,
+    (whole, ref: string, _offset: string, q1: string, a: string, b: string, q2: string, c: string, d: string) => {
+      const bound = new RegExp(`\\b${ref}\\.current\\s*=\\s*document\\.getElementById\\(`).test(src);
+      const attached = new RegExp(`ref=\\{${ref}\\}`).test(src);
+      if (!bound || attached) return whole;
+      return `useScroll({ target: ${ref}, offset: [${q1}${a} ${EDGE_PCT[b]}${q1}, ${q2}${c} ${EDGE_PCT[d]}${q2}] })`;
+    },
+  );
+}
+
 export function detectTriggerFromOffset(offset: string | null, hasRef: boolean, hasSection = false): ScrollTrigger {
   if (!hasRef) return 'onScroll';
   if (!offset) return hasSection ? 'sectionInView' : 'layerInView';
-  const clean = offset.replace(/\s+/g, ' ').trim();
+  const clean = canonicalOffset(offset.replace(/\s+/g, ' ').trim());
   // Section binding is the strongest signal — when present, it's
   // sectionInView regardless of offset shape.
   if (hasSection) return 'sectionInView';
@@ -411,6 +461,9 @@ export function updateScrollAnimInCode(code: string, config: ScrollAnimConfig): 
     if (vp === 'top') offsetStr = `["start end", "start start"]`;
     else if (vp === 'bottom') offsetStr = `["start end", "end end"]`;
     else offsetStr = `["start end", "start center"]`; // middle (default)
+    // The section ref is filled by a mount effect, after the animated element
+    // mounted: keep motion off its preset fast path (see sectionSafeOffset).
+    offsetStr = sectionSafeOffset(offsetStr);
   } else if (trigger === 'layerInView') {
     // Layer-in-View EXIT (scrub as the layer leaves off the top) — mirror of the
     // entrance scrub. Needed for the "shrink a sticky element only as it releases"

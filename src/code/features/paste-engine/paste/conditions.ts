@@ -121,21 +121,21 @@ const RELATIVE_PARENT_SELECTED: ConditionChecker = ctx => {
   return !!node.parentId && !isPageRoot(node) && node.styles.isAbsoluteFrame !== 'true';
 };
 
-const NO_LAYOUT_PARENT: ConditionChecker = ctx => {
-  if (ctx.selectedIds.length === 0) return false;
+/** Layout on the viewport being edited — the caller's answer wins over the
+ *  base style, which cannot see a band that makes the parent a flex container
+ *  (see `parentHasLayout` in types.ts). */
+const parentLaysOut = (ctx: PasteContext): boolean | null => {
+  if (ctx.selectedIds.length === 0) return null;
   const node = ctx.nodes.get(ctx.selectedIds[0]);
-  if (!node?.parentId) return false;
+  if (!node?.parentId) return null;
   const parent = ctx.nodes.get(node.parentId);
-  return parent ? !hasLayout(parent) : false;
+  if (!parent) return null;
+  return ctx.parentHasLayout ?? hasLayout(parent);
 };
 
-const HAS_LAYOUT_PARENT: ConditionChecker = ctx => {
-  if (ctx.selectedIds.length === 0) return false;
-  const node = ctx.nodes.get(ctx.selectedIds[0]);
-  if (!node?.parentId) return false;
-  const parent = ctx.nodes.get(node.parentId);
-  return parent ? hasLayout(parent) : false;
-};
+const NO_LAYOUT_PARENT: ConditionChecker = ctx => parentLaysOut(ctx) === false;
+
+const HAS_LAYOUT_PARENT: ConditionChecker = ctx => parentLaysOut(ctx) === true;
 
 const CANVAS_NODE_NO_LAYOUT_SELECTED: ConditionChecker = ctx => {
   if (!CANVAS_NODE_SELECTED(ctx)) return false;

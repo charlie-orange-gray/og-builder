@@ -15,8 +15,11 @@ import { getCanvasBridge } from '@/canvas/canvas-bridge';
 import { getViewportWidths } from '@/code/stores/viewport-store';
 import type { CanvasNode } from '@/code/parsing/parser';
 import { WRAPPER_ONLY_STYLE_PROPS } from '@/shared/constants';
-import { serializeSlotChildren } from './slot-children';
+import { serializeSlotChildren, mergeSlotConnections } from './slot-children';
 import { getAllSlotConnections } from '@/code/generation/slot-ops';
+import { activeFilePathAtom, getLayoutForPage, getLayoutClientPath } from '@/code/project/active-file-store';
+import { projectVersionAtom } from '@/code/project/project-fs';
+import { parseProjectFile } from '@/code/parsing/project-parser';
 
 import { getCdnComponent, loadCdnComponent } from '@/cloud/components/cdn-component-cache';
 
@@ -297,29 +300,70 @@ export default function CodeComponentHost() {
   // it composes fine on the live site (real JSX, identifiers resolve in
   // the component file's own scope).
   const code = useAtomValue(codeAtom);
+  const activeFilePath = useAtomValue(activeFilePathAtom);
+  const projectVersion = useAtomValue(projectVersionAtom);
+  /** The template this page is built on, if any. */
+  const templateFilePath = useMemo(() => {
+    const layoutPath = getLayoutForPage(activeFilePath);
+    if (!layoutPath) return null;
+    const clientPath = getLayoutClientPath(layoutPath);
+    return projectFS.readFile(clientPath) != null ? clientPath : layoutPath;
+  }, [activeFilePath, projectVersion]);
+
+  /**
+   * The template's CANVAS NODES, `layout::`-prefixed.
+   *
+   * The template merge deliberately drops them from the page tree — they are
+   * off-canvas authoring artifacts and would render as stray boxes beside
+   * every page. But they are exactly what the template's slots are wired to,
+   * so slot serialization still needs to see them. They live HERE rather
+   * than in `nodes`: nothing else (layers, selection, hit-testing) should
+   * ever meet them on a page.
+   */
+  const templateSlotNodes = useMemo(() => {
+    if (!templateFilePath) return null;
+    const parsed = parseProjectFile(templateFilePath, projectFS);
+    const out = new Map<string, CanvasNode>();
+    // Each canvas node and everything under it — nothing else from the
+    // template, which the page already holds in its own merged form.
+    const take = (id: string) => {
+      const n = parsed.get(id);
+      if (!n || out.has('layout::' + id)) return;
+      out.set('layout::' + id, {
+        ...n,
+        id: 'layout::' + id,
+        parentId: n.parentId ? 'layout::' + n.parentId : null,
+        children: n.children.map((c) => 'layout::' + c),
+      } as CanvasNode);
+      n.children.forEach(take);
+    };
+    for (const [id, n] of parsed) if (n.isCanvasNode) take(id);
+    return out.size > 0 ? out : null;
+  }, [templateFilePath, projectVersion]);
+  const templateSlotNodesRef = useRef(templateSlotNodes);
+  templateSlotNodesRef.current = templateSlotNodes;
+
   const slotConnections = useMemo(() => {
-    const merged = new Map<string, string[]>(getAllSlotConnections(code));
-    // Visit each top-level instance — `componentInstanceId == null` means
-    // this IS the instance node, not one of its expanded children.
+    const sources: { prefix: string; connections: Map<string, string[]> }[] = [];
+    const from = (prefix: string, file: string | null | undefined) => {
+      if (!file || file.startsWith('http')) return;
+      const fileCode = projectFS.readFile(file);
+      if (fileCode) sources.push({ prefix, connections: getAllSlotConnections(fileCode) });
+    };
+    // The TEMPLATE this page is built on: its nodes merge in `layout::`-
+    // prefixed, but its slot wiring lives only in the template FILE.
+    from('layout::', templateFilePath);
+    // Every design-component INSTANCE, at ANY depth. The parser expands an
+    // instance by prefixing its children `${instanceId}:`, and a nested
+    // instance's own id already carries its whole path, so that id is the
+    // right prefix wherever it sits. Only TOP-LEVEL instances used to be
+    // visited, so a slot one component deeper never resolved.
     for (const node of nodes.values()) {
       if (!node.isComponentInstance) continue;
-      if (node.componentInstanceId) continue; // expanded child, skip
-      const file = node.componentFile;
-      if (!file || file.startsWith('http')) continue;
-      const compCode = projectFS.readFile(file);
-      if (!compCode) continue;
-      const inner = getAllSlotConnections(compCode);
-      for (const [compId, childIds] of inner) {
-        const prefixedComp = node.id + ':' + compId;
-        const prefixedChildren = childIds.map(c => node.id + ':' + c);
-        // If the same prefixedComp already exists (rare — same instance
-        // visited twice), concatenate so we don't lose either set.
-        const existing = merged.get(prefixedComp);
-        merged.set(prefixedComp, existing ? existing.concat(prefixedChildren) : prefixedChildren);
-      }
+      from(node.id + ':', node.componentFile);
     }
-    return merged;
-  }, [code, nodes]);
+    return mergeSlotConnections(getAllSlotConnections(code), sources);
+  }, [code, nodes, templateFilePath]);
   const slotConnectionsRef = useRef(slotConnections);
   slotConnectionsRef.current = slotConnections;
 
@@ -478,7 +522,11 @@ export default function CodeComponentHost() {
           // children). Live site already does this implicitly via JSX
           // composition; canvas needs the merged tree explicitly.
           const connectedIds = slotConnectionsRef.current.get(node.id) ?? [];
-          const slotKids = serializeSlotChildren(connectedIds, nodes, slotConnectionsRef.current);
+          // A template's connected nodes are not in the page tree (see
+          // templateSlotNodes), so serialize against both.
+          const tplNodes = templateSlotNodesRef.current;
+          const slotSource = tplNodes ? new Map([...tplNodes, ...nodes]) : nodes;
+          const slotKids = serializeSlotChildren(connectedIds, slotSource, slotConnectionsRef.current);
           if (slotKids.length > 0) props.__slotChildren = slotKids;
           const vpWidths = getViewportWidths();
           const vpWidth = vpWidths['desktop'] || 1440;

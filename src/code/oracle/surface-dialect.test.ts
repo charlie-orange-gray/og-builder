@@ -67,6 +67,17 @@ describe('TEXT_STYLE_ON_FRAME', () => {
     expect(codesOf(code)).toContain('TEXT_STYLE_ON_FRAME');
   });
 
+  it('allows typography on a form control (its value and placeholder ARE its text)', () => {
+    const code = page(`      <form data-id="f" data-form='{"sendTo":[]}' onSubmit={() => {}} style={{ position: 'relative', width: '100%', height: 'auto' }}>
+        <input data-id="in" data-name="Name" type="text" name="name" placeholder="Name" style={{ position: 'relative', width: '100%', fontFamily: 'Inter', fontSize: '16px', color: '#303030', whiteSpace: 'nowrap' }} />
+        <textarea data-id="ta" data-name="Message" name="message" style={{ position: 'relative', width: '100%', fontSize: '16px', color: '#303030', resize: 'vertical' }}></textarea>
+        <select data-id="sel" data-name="Topic" name="topic" style={{ position: 'relative', width: '100%', fontSize: '16px', color: '#303030' }}>
+          <option data-id="o1" value="a" style={{}}>A</option>
+        </select>
+      </form>`);
+    expect(codesOf(code)).not.toContain('TEXT_STYLE_ON_FRAME');
+  });
+
   it('allows the button-as-div pattern (element carries its OWN text)', () => {
     const code = page(`      <div data-id="btn" style={{ position: 'relative', width: '160px', height: '44px', color: '#fff', fontSize: '14px', fontWeight: '500' }}>Request access</div>`);
     expect(codesOf(code)).not.toContain('TEXT_STYLE_ON_FRAME');
@@ -99,8 +110,15 @@ describe('ELEMENT_UNSUPPORTED_TAG', () => {
   });
 
   it('rejects unsupported input types, keeps the supported list', () => {
-    const bad = page(`      <input data-id="c" type="checkbox" name="ok" style={{ position: 'relative', width: '20px', height: '20px' }} />`);
+    const bad = page(`      <input data-id="c" type="color" name="ok" style={{ position: 'relative', width: '20px', height: '20px' }} />`);
     expect(codesOf(bad)).toContain('ELEMENT_UNSUPPORTED_TAG');
+    // Checkbox and radio are native form fields (the form's "+", the Input
+    // tool's Checked row, the Styles tool's Checked / Focus states).
+    for (const type of ['checkbox', 'radio']) {
+      const native = page(`      <input data-id="b" type="${type}" name="ok" style={{ position: 'relative', appearance: 'none', width: '16px', height: '16px' }} />`);
+      expect(codesOf(native)).not.toContain('ELEMENT_UNSUPPORTED_TAG');
+      expect(codesOf(native)).not.toContain('STYLE_PROP_NO_CONTROL');
+    }
     const good = page(`      <input data-id="e" type="email" name="email" style={{ position: 'relative', width: '100%', height: '44px' }} />`);
     expect(codesOf(good)).not.toContain('ELEMENT_UNSUPPORTED_TAG');
   });
@@ -169,5 +187,39 @@ describe('PAGE_EXTRA_EXPORT', () => {
   it('a page exporting only its default component passes', () => {
     expect(codesOf(page(`      <p data-id="t" style={{ position: 'relative', width: '100%', height: 'auto' }}>Hi</p>`)))
       .not.toContain('PAGE_EXTRA_EXPORT');
+  });
+});
+
+describe('surface — a 3D flip card is a controlled surface', () => {
+  it('backfaceVisibility and perspective are not dead-end styles', () => {
+    const code = `'use client';
+import React from 'react';
+export default function Page() {
+  return (
+    <div data-id="root" data-name="Page" style={{ position: 'relative' }}>
+      <div data-id="flip" data-name="Flip" style={{ position: 'relative', transformStyle: 'preserve-3d', perspective: '1200px' }}>
+        <div data-id="front" data-name="Front" style={{ position: 'absolute', backfaceVisibility: 'hidden' }}></div>
+      </div>
+    </div>
+  );
+}
+`;
+    const codes = checkFile(code, { kind: 'page' }).map((x) => x.code);
+    expect(codes).not.toContain('STYLE_PROP_NO_CONTROL');
+  });
+
+  it('mixBlendMode is a controlled style: the Styles panel has a Blend Mode row', () => {
+    const code = `'use client';
+import React from 'react';
+export default function Page() {
+  return (
+    <div data-id="root" data-name="Page" style={{ position: 'relative' }}>
+      <div data-id="grain" data-name="Grain" style={{ position: 'absolute', mixBlendMode: 'multiply', opacity: '0.2' }}></div>
+    </div>
+  );
+}
+`;
+    const codes = checkFile(code, { kind: 'page' }).map((x) => x.code);
+    expect(codes).not.toContain('STYLE_PROP_NO_CONTROL');
   });
 });

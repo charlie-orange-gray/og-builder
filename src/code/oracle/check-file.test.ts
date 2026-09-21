@@ -154,6 +154,24 @@ describe('checkFile — tier 2 dialect', () => {
     expect(codes(checkFile(bad, { kind: 'component' }))).toContain('FORBIDDEN_IMPORT');
   });
 
+  it('allows next-themes — the Theme Toggle template and imported theme switches read useTheme from it', () => {
+    const code = `'use client';
+/** @label "Switch" */
+/** @comment "Theme switch" */
+/** @defaultWidth 40 */
+/** @defaultHeight 20 */
+/** @controls {} */
+import { useTheme } from 'next-themes';
+import { withResponsiveProps } from '@revyme/runtime';
+function Switch(props) {
+  const { resolvedTheme, setTheme } = useTheme();
+  return <div data-id={props['data-id']} onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')} style={{ width: '40px', height: '20px', ...props.style }} />;
+}
+export default withResponsiveProps(Switch);
+`;
+    expect(codes(checkFile(code, { kind: 'code-component' }))).not.toContain('FORBIDDEN_IMPORT');
+  });
+
   it('flags gsap.* calls even without an import', () => {
     const code = CLEAN_COMPONENT.replace(
       'return (',

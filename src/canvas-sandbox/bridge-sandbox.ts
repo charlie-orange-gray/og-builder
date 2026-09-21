@@ -401,6 +401,9 @@ const api: SandboxApi = {
   previewRestoreStyles,
   injectCSS,
   removeCSS,
+  setThemeMode(mode: 'light' | 'dark'): void {
+    document.documentElement.classList.toggle('dark', mode === 'dark');
+  },
   setCanvasTokenVar,
   loadFontInIframe,
   setCanvasTokensCSS,

@@ -15,6 +15,35 @@
    (even just * { box-sizing }) would take priority over utility classes.
    ──────────────────────────────────────────────────────────────────── */
 
+/* Native form controls are painted by the BROWSER (select popups, date pickers,
+   scrollbars); their colours come from `color-scheme`. Undeclared, they default
+   to light — on Windows Chrome every <select> opened a white list with a blue
+   highlight inside the dark editor (user report 2026-09-17). Scoped to the
+   controls, NOT the root: `color-scheme` on the root propagates into the canvas
+   iframe, whose transparent backdrop then paints opaque and hides the stage. */
+select, input[type="date"], input[type="datetime-local"], input[type="time"],
+input[type="month"], input[type="week"], input[type="color"] {
+  color-scheme: light;
+}
+.dark select, .dark input[type="date"], .dark input[type="datetime-local"],
+.dark input[type="time"], .dark input[type="month"], .dark input[type="week"],
+.dark input[type="color"] {
+  color-scheme: dark;
+}
+
+/* …and `color-scheme` alone is NOT enough for the select POPUP: Chromium draws
+   it as native chrome, which on Windows stayed white with unreadable options
+   while macOS looked fine. Chromium does honour colours set on the <option>
+   elements themselves, so paint them from the same tokens as the closed box.
+   (Reported by a Windows 11 / Chrome user, 2026-09-17.) */
+select option, select optgroup {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+select option:disabled {
+  color: var(--text-disabled);
+}
+
 @layer theme {
   :root {
     /* SURFACES — the original neutral ladder, unchanged.

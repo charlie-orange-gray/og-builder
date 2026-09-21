@@ -6,7 +6,7 @@ import { escapeRegExp } from '@/shared/regex-utils';
 import { nodeIdToVarName } from '@/shared/id-utils';
 import { parseScrollHooks, getScrollDataForNode, parseScrollDirection, parseRange } from '../parsing/scroll-parser';
 import { trace } from '@/shared/debug-trace';
-import { findTagClose, findJSXDataIdIndex, insertBeforeRenderReturn, findStyleObjectEnd, stripTagAttrBalanced, readTagAttrRaw, getJsonAttr } from './generator-utils';
+import { findTagClose, findJSXDataIdIndex, insertBeforeRenderReturn, findStyleObjectEnd, stripTagAttrBalanced, readTagAttrRaw, getJsonAttr, opensAcrossLines } from './generator-utils';
 import { setScrollVariantInCode } from './scroll-variant-gen';
 import { setInstanceFxInCode } from './instance-fx-gen';
 import { type ResolvedScope } from '@/code/animations/animation-scope';
@@ -543,14 +543,22 @@ export function clearNodeScrollFx(code: string, nodeId: string): string {
   result = result.replace(new RegExp(`\\s*useEffect\\(\\(\\)\\s*=>\\s*\\{\\s*if\\s*\\(${e}(?!${TEXT_ANIM_TAIL})[A-Z]\\w*\\)[\\s\\S]*?\\},\\s*\\[${e}(?!${TEXT_ANIM_TAIL})[A-Z]\\w*\\]\\);`, 'g'), '');
   result = result.split('\n').filter((line) => {
     const t = line.trim();
-    // A line that OPENS a multi-line block (ends with `{`) is NOT a single-line
+    // A line that OPENS something it does not close is NOT a single-line
     // declaration — dropping only its first line orphans the body. The node's
     // variant object `const <cn>Variants = {` matches the `[A-Z]\w*` pattern below
     // (the uppercase `V`), so without this guard deleting e.g. `nl2` would strip
     // `const nl2Variants = {` and leave `default: {…}, …};` dangling (a syntax
     // error → "AI changes blocked"). Variant objects are removed wholesale by
-    // removeOrphanedVariantConsts; leave block openers alone here.
-    if (t.endsWith('{')) return true;
+    // removeOrphanedVariantConsts; leave openers alone here.
+    //
+    // COUNT the brackets rather than looking at the last character: a
+    // declaration reformatted by a previous mutation opens and closes on the
+    // same line and still continues —
+    //   const divVariants = { default: { flex: '0 0 auto' }
+    //   };
+    // ends with `}`, so an `endsWith('{')` test let it through and deleting a
+    // node inside a component left the stray `};` behind (reported 2026-09-18).
+    if (opensAcrossLines(t)) return true;
     const fx = `${e}(?!${TEXT_ANIM_TAIL})[A-Z]`;
     const protectedRef = clearProtectRef && new RegExp(`^const ${e}Ref\\s*=`).test(t);
     if (protectedRef) return true;

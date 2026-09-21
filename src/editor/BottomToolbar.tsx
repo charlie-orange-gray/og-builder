@@ -9,7 +9,7 @@ import { motion } from 'framer-motion';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { toolModeAtom, panHighlightAtom, isShapeMode, isLayoutMode, type ToolMode } from '@/code/stores/tool-store';
 import { transformManager, zoomIn, zoomOut, zoomTo100, zoomToFit, zoomToFitSelection } from '@/canvas/transform';
-import { getContentRoot } from '@/canvas/node-ops';
+import { getContentRoot, refreshCanvasTokens } from '@/canvas/node-ops';
 import { selectedNodeAtom } from '@/code/stores/store';
 import { activeFilePathAtom, isIconSetFilePath } from '@/code/project/active-file-store';
 import { i18nConfigAtom, activeLocaleAtom, isDefaultLocaleAtom } from '@/code/stores/locale-store';
@@ -442,6 +442,9 @@ function ThemeSwitcher() {
     if (next) root.classList.add('dark');
     else root.classList.remove('dark');
     window.setTimeout(() => root.classList.remove('theme-transition'), 200);
+    // The canvas shows the website in the editor's mode: re-lift the token
+    // blocks so `:root.dark` values apply (or stop applying) right away.
+    refreshCanvasTokens();
     trace.action('toolbar:theme-toggle', { dark: next });
   }, [isDark]);
 

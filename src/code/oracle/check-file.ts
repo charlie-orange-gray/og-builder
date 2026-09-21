@@ -34,6 +34,7 @@ import { checkCanvasConfig } from './checks/canvas-config';
 import { checkOverlayDialect } from './checks/overlay-dialect';
 import { checkSvgShapeDialect, checkShapeVariantDForm } from './checks/svg-shape-dialect';
 import { checkMotionAppearHidden, checkMotionTransformDrift } from './checks/motion-appear';
+import { checkCodeOverrides } from './checks/code-override';
 import { checkMotionPropsNeedMotionTag } from './checks/motion-tag';
 import { checkTranslationDialect } from './checks/translation-dialect';
 import { checkMediaBandDialect, checkDuplicateBreakpointStack } from './checks/media-band-dialect';
@@ -57,10 +58,17 @@ const IMPORT_ALLOWLIST = [
   /^react$/, /^react-dom$/, /^framer-motion$/,
   /^next\//, /^@revyme\/runtime$/, /^@\/components\//,
   /^@\/icons\//,
+  // Code overrides — `import { withX } from '@/overrides/<File>'` feeds `<Override with={withX}>`.
+  /^@\/overrides\//,
   // next-intl — the localization dialect MANDATES `import { useTranslations }
   // from 'next-intl'` for every t() page (TRANSLATION_HOOK_MISSING), so the
   // import must pass or a translated page can never be resubmitted.
   /^next-intl$/,
+  // next-themes — the builder's own Theme Toggle template and an imported
+  // theme switch read `useTheme` from it; it resolves on the live site
+  // through the site's ThemeProvider and on the canvas through the code
+  // component runtime's stub.
+  /^next-themes$/,
   // Marketplace share bundles (the Copy-URL pipeline's CDN). The MCP's
   // marketplace browse tool hands the model these URLs so it can compose
   // FREE community components/vector sets straight into a design — the
@@ -447,7 +455,7 @@ export function checkFile(
       if (!IMPORT_ALLOWLIST.some((re) => re.test(src))) {
         v.push({
           code: 'FORBIDDEN_IMPORT', tier: 2, line: path.node.loc?.start.line,
-          message: `Cannot import "${src}" — it does not resolve in this builder. Allowed imports: react, react-dom, framer-motion, next/*, @revyme/runtime, @/components/*, @/icons/*, and marketplace share bundles (https://assets.revyme.app/components|vectors/<name>@<hash>.js — discover free ones via the marketplace browse tool). CSS imports are forbidden: all styling is inline style objects (that is what the properties panel edits).`,
+          message: `Cannot import "${src}" — it does not resolve in this builder. Allowed imports: react, react-dom, framer-motion, next/*, next-themes, @revyme/runtime, @/components/*, @/icons/*, @/overrides/*, and marketplace share bundles (https://assets.revyme.app/components|vectors/<name>@<hash>.js — discover free ones via the marketplace browse tool). CSS imports are forbidden: all styling is inline style objects (that is what the properties panel edits).`,
         });
       }
     },
@@ -1178,6 +1186,11 @@ export function checkFile(
   //    deviation renders but is invisible to the Animation panel. ─────────────
   if (kind === 'page' && /useScroll|useTransform|useSpring|useMotionTemplate/.test(code)) {
     checkScrollDialect(ast, v);
+  }
+
+  // ── CODE OVERRIDES — `<Override with={withX}>` wraps one element, names an import.
+  if (code.includes('<Override')) {
+    checkCodeOverrides(ast, v);
   }
 
   // ── MOTION PROPS ON A PLAIN TAG — silent everywhere the author can see.

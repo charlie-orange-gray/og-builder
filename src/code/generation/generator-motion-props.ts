@@ -461,6 +461,13 @@ export function buildTransformTemplateAttr(prefix: string): string {
  *  - a foreign (hand-written, non-canonical) template is left untouched.
  * Idempotent; returns `code` unchanged when nothing needs to move.
  */
+/** A `layout` element in a master with 2+ variants: the projection rebuilds its transform. */
+export function layoutRebuildsTransform(code: string, tag: string): boolean {
+  if (!/\slayout=\{/.test(tag)) return false;
+  const cfg = /const\s+variantConfig\s*=\s*\[([\s\S]*?)\];/.exec(code)?.[1] ?? '';
+  return (cfg.match(/\bname\s*:/g) ?? []).length >= 2;
+}
+
 export function ensureTransformTemplateInCode(code: string, nodeId: string): string {
   const idIdx = findJSXDataIdIndex(code, nodeId);
   if (idIdx === -1) return code;
@@ -496,6 +503,12 @@ export function ensureTransformTemplateInCode(code: string, nodeId: string): str
       if (styleEnd !== -1 && MOTION_TRANSFORM_KEY_RE.test(tag.slice(styleStart + 7, styleEnd + 1))) animates = true;
     }
   }
+
+  // `layout` in a design component with several variants: a variant that
+  // resizes the element OR its parent FLIPs it through the projection, which
+  // rebuilds the transform and drops a static centring translate (an imported site
+  // service card image, off-centre after a phone→desktop resize, 2026-09-17).
+  if (!animates && layoutRebuildsTransform(code, tag)) animates = true;
 
   const existing = tag.match(TT_ATTR_RE);
   const needs = staticT !== '' && !staticT.includes('`') && animates;

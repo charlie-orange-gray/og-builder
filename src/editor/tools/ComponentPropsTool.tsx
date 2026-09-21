@@ -13,6 +13,7 @@ import { codeAtom, stableCodeAtom, nodesAtom, selectedNodeAtom, selectedIdsAtom,
 import { enterComponentFile } from '@/canvas/component-navigation';
 import { projectFS, projectVersionAtom, stableProjectVersionAtom } from '@/code/project/project-fs';
 import { activeFilePathAtom, componentBreadcrumbAtom } from '@/code/project/active-file-store';
+import { getAnchorsForPage } from './LinkTool/LinkUrlControl';
 import { isComponentFilePath } from '@/code/project/file-path-kind';
 import { isReplicaViewportAtom, interactingViewportWidthAtom, isComponentVariantViewportAtom, activeComponentVariantAtom } from '@/code/stores/viewport-store';
 import { buildComponentRegistry, parseComponentInfoFromSource } from '@/code/components/component-registry';
@@ -41,6 +42,7 @@ import Button from '@/design-system/Button';
 import { parseVariantConfig, selectableVariants } from '@/code/variants/variant-config';
 import {
   parseConditionalPropExpression,
+  conditionalPropVarForVariant,
   resolveConditionalPropValue,
 } from '@/code/components/instance-conditional-prop';
 import {
@@ -182,6 +184,8 @@ export default function ComponentPropsTool() {
   const activeComponentVariant = useAtomValue(activeComponentVariantAtom);
   const setActiveFile = useSetAtom(activeFilePathAtom);
   const setBreadcrumb = useSetAtom(componentBreadcrumbAtom);
+  // The page an instance sits on — inside a master the breadcrumb's origin page.
+  const breadcrumb = useAtomValue(componentBreadcrumbAtom);
   const setSelectedIds = useSetAtom(selectedIdsAtom);
   const setInteractingVp = useSetAtom(interactingViewportIdAtom);
   const setUpdatingFromCanvas = useSetAtom(updatingFromCanvasAtom);
@@ -1746,6 +1750,12 @@ export default function ComponentPropsTool() {
   // the default tile shows the base — instead of the raw ternary source.
   const resolveVariantBranchDisplay = (raw: string | undefined): string | undefined => {
     if (raw == null || !isComponentFilePath(activeFile)) return raw;
+    // A per-variant VARIABLE binding (`value={variant === 'variant-1' ? priceYearly
+    // : priceMonthly}` — one number driven by two of the master's variables).
+    // Resolving to the ACTIVE variant's variable NAME lets the row render the
+    // ordinary bound pill below instead of the raw ternary (live find 2026-09-17).
+    const branchVar = conditionalPropVarForVariant(raw, (isComponentVariant && activeComponentVariant) || null);
+    if (branchVar && parentVarsByName.has(branchVar)) return branchVar;
     const map = parseConditionalPropExpression(raw);
     if (!map) return raw;
     return resolveConditionalPropValue(map, (isComponentVariant && activeComponentVariant) || 'default');
@@ -2109,9 +2119,14 @@ export default function ComponentPropsTool() {
               // fell through to `renderControl` (which already shows the overridden value + a Reset). Net
               // effect: per-replica override / removing the var on a replica appeared to do NOTHING. Mirrors
               // the design-component propValue (~2226). A per-viewport VARIABLE is handled by vpVarRef above.
+              // A PER-VARIANT binding (`value={variant === 'variant-1' ? priceYearly :
+              // priceMonthly}` — one control driven by two of the master's variables)
+              // resolves to the ACTIVE variant's variable, so the row shows that
+              // variable's pill like any other binding instead of the raw ternary.
               const currentLiteral = String(
                 (isReplica ? responsiveOverrides.get(propName) : undefined)
-                ?? currentValues.get(propName) ?? defaultStr,
+                ?? resolveVariantBranchDisplay(currentValues.get(propName))
+                ?? defaultStr,
               );
               // Label is "Create Variable" (not "Hoist Variable"): a code
               // component is a leaf — its control becomes a NEW variable on
@@ -2599,6 +2614,28 @@ export default function ComponentPropsTool() {
               // Yes/No segmented control — NOT the display/flex-wrap value <select>; an Option gets a
               // dropdown of its @propMeta choices; a Number gets a numeric input. Color/image/border/
               // shadow keep the richer atom path below (their full pickers beat a bare primitive editor).
+              // A SECTION variable (the Scroll Variant's "Section", Framer's Scroll
+              // Section Ref): its value is an anchor id on the page, so the instance
+              // picks from that page's anchors instead of typing the id by hand.
+              // Inside a master the page is the breadcrumb's origin.
+              if (prop.varType === 'section') {
+                const anchorPage = isComponentFilePath(activeFile) ? (breadcrumb[0] ?? activeFile) : activeFile;
+                const anchors = anchorPage ? getAnchorsForPage(anchorPage) : [];
+                const sectionOptions = [
+                  { value: '', label: anchors.length === 0 ? 'No sections on the page' : 'Select…' },
+                  ...anchors.map((id) => ({ value: id, label: `#${id}` })),
+                  // A value the page no longer has (or one from another route) stays selectable.
+                  ...(propValue && !anchors.includes(propValue) ? [{ value: propValue, label: `#${propValue}` }] : []),
+                ];
+                return (
+                  <HoistMenuItemProvider key={prop.name} item={hoistMenuItem}>
+                    <div className="flex items-center justify-between w-full">
+                      <ControlLabel label={prop.label || prop.name} property="" plain={false} hideLocalize overridden={propOverridden} onResetOverride={propResetOverride} subLabel="Scroll Section" />
+                      <ToolSelect value={propValue} onChange={(v) => handlePropChange(prop.name, v, prop.defaultValue)} options={sectionOptions} />
+                    </div>
+                  </HoistMenuItemProvider>
+                );
+              }
               if (prop.varType === 'toggle') {
                 return (
                   <HoistMenuItemProvider key={prop.name} item={hoistMenuItem}>

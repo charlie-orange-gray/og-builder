@@ -16,7 +16,7 @@
 import { toast } from 'sonner';
 import type { CanvasNode } from '../../parsing/parser';
 import { transformManager } from '@/canvas/transform';
-import { getInteractingViewport, getActiveFilePath } from '@/canvas/node-ops';
+import { getInteractingViewport, getActiveFilePath, findNodeComputedStyle } from '@/canvas/node-ops';
 import { getViewportWidths } from '@/code/stores/viewport-store';
 import { flushNow } from '@/code/mutation/mutation-queue';
 import { trace } from '@/shared/debug-trace';
@@ -78,6 +78,7 @@ export function executePaste(
       viewportWidths: getViewportWidths(),
       activeFilePath,
       overrideClipboard,
+      parentHasLayout: resolveParentHasLayout(nodes, selectedId ?? undefined, interactingVpId),
     });
 
   // Mirror old behaviour: select the first newly-created node so the user
@@ -153,4 +154,30 @@ export function executePaste(
       finish(runEngine(data));
       toast.error('Component linking failed — pasted without linking', { id: tId });
     });
+}
+
+/**
+ * Does the selected node's PARENT lay its children out, ON THE VIEWPORT THE
+ * USER IS EDITING?
+ *
+ * `node.styles.display` is the base style, and a frame added on one replica is
+ * stored hidden there (`display: 'none'` plus a band rule that shows it as a
+ * flex container) — so the base says "no layout" for a perfectly good flex
+ * parent. Cmd+D on a flex child inside a mobile overlay then matched the
+ * no-layout paste rule and produced an absolute node (user report 2026-09-18,
+ * same root cause as the Add-Layout bug on those frames). The rendered
+ * element's computed display is the truth; `undefined` when it can't be read,
+ * which leaves the engine on its base-style fallback.
+ */
+export function resolveParentHasLayout(
+  nodes: Map<string, CanvasNode>,
+  selectedId: string | undefined,
+  vpId: string,
+): boolean | undefined {
+  if (!selectedId) return undefined;
+  const parentId = nodes.get(selectedId)?.parentId;
+  if (!parentId) return undefined;
+  const display = findNodeComputedStyle(parentId, vpId, 'display');
+  if (!display) return undefined;
+  return /^(inline-)?(flex|grid)$/.test(display);
 }

@@ -69,10 +69,13 @@ export default function VariantTransitionControl() {
       const match = code.match(/<MotionConfig\s+transition=\{\{([^}]*)\}\}/);
       if (!match) return {};
       const result: Record<string, string> = {};
-      const propRegex = /(\w+)\s*:\s*(?:'([^']*)'|"([^"]*)"|(\d+(?:\.\d+)?))/g;
+      // A bezier ease is a bare ARRAY in code (`ease: [0.12, 0.23, 0.5, 1]` —
+      // what the writer emits and framer-motion needs); read it back as the
+      // panel's `[…]` string or the popup shows the preset curve instead.
+      const propRegex = /(\w+)\s*:\s*(?:'([^']*)'|"([^"]*)"|(\d+(?:\.\d+)?)|(\[[^\]]*\]))/g;
       let m;
       while ((m = propRegex.exec(match[1])) !== null) {
-        result[m[1]] = m[2] ?? m[3] ?? m[4] ?? '';
+        result[m[1]] = m[2] ?? m[3] ?? m[4] ?? m[5] ?? '';
       }
       return result;
     }
@@ -93,10 +96,10 @@ export default function VariantTransitionControl() {
       const transMatch = entrySlice.match(/transition\s*:\s*\{([^}]*)\}/);
       if (!transMatch) return {};
       const result: Record<string, string> = {};
-      const propRegex = /(\w+)\s*:\s*(?:'([^']*)'|"([^"]*)"|(\d+(?:\.\d+)?))/g;
+      const propRegex = /(\w+)\s*:\s*(?:'([^']*)'|"([^"]*)"|(\d+(?:\.\d+)?)|(\[[^\]]*\]))/g;
       let m;
       while ((m = propRegex.exec(transMatch[1])) !== null) {
-        result[m[1]] = m[2] ?? m[3] ?? m[4] ?? '';
+        result[m[1]] = m[2] ?? m[3] ?? m[4] ?? m[5] ?? '';
       }
       return result;
     }

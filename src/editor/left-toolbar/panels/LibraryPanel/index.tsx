@@ -66,6 +66,7 @@ import {
   DisplayCategorySection,
 } from './presets/CategorySection';
 import { TemplatesSection } from './sections/TemplatesSection';
+import { CodeOverridesSection } from './sections/CodeOverridesSection';
 import { VectorsSection } from './sections/VectorsSection';
 import { ComponentsSection } from './sections/ComponentsSection';
 
@@ -616,6 +617,9 @@ export default function LibraryPanel({ mode = 'all' }: { mode?: 'all' | 'library
             setBreadcrumb([]);
           }}
         />
+
+        {/* Code Overrides — overrides/*.tsx files, their exports and usages */}
+        <CodeOverridesSection searchQuery={searchQuery} />
 
         {/* Plugins Section — installed/dev-URL plugins. Pass 1
             scope: list installed + add dev URL. */}

@@ -14,7 +14,7 @@
 // old + inject fresh), so the spec is the single source of truth.
 import { trace } from '@/shared/debug-trace';
 import { nodeIdToVarName } from '@/shared/id-utils';
-import { findJSXDataIdIndex, insertBeforeRenderReturn, setTagAttr, getJsonAttr } from './generator-utils';
+import { findJSXDataIdIndex, insertBeforeRenderReturn, setTagAttr, getJsonAttr, opensAcrossLines } from './generator-utils';
 import { parseJSX } from '@/code/parsing/ast-utils';
 import { buildScopedScalarExpr, sweepOrphanMediaGates, type SerScope } from './scoped-expr';
 import { presentOn, isPresenceOverride, hidePresenceOn, resetPresenceScope, scopeEq, type PresenceState } from '@/code/animations/presence';
@@ -74,7 +74,10 @@ export interface ScrollVariantSpec {
   // target a DIFFERENT page section per page. Runtime resolves
   // `getElementById(sectionVar)` (the var is reassigned per-route via
   // usePathname); `sectionId` is kept as the authoring default + anchor-picker value.
-  sections?: { sectionId: string; to: string; sectionVar?: string }[];
+  // A section's `responsive` holds ITS per-viewport targets (a per-breakpoint
+  // section targets: about → Desktop-1 on desktop, Tablet-1 on tablet); the flat
+  // `responsive[].to` above is the single-section header shortcut and stays the fallback.
+  sections?: { sectionId: string; to: string; sectionVar?: string; responsive?: { scope: SerScope; to: string }[] }[];
   // `fromVar` (optional) binds the RESTING / STARTING variant to a variable
   // (a LayoutClient/component param) — the analog of `sectionVar` for the
   // resting state. When set, the machine starts at `fromVar || <per-viewport
@@ -274,9 +277,24 @@ function buildScrollVariant(code: string, cn: string, spec: ScrollVariantSpec): 
   // PER-VIEWPORT gated (base `to` ⊕ this scope's `responsive[].to`) — same as Scroll Transform.
   lines.push(`  useMotionValueEvent(${sv}ScrollY, "change", () => {`);
   lines.push(`    let v = ${restVar(restingGated)};`);
+  // A section's target per tile: its OWN per-viewport target first, else the flat
+  // per-scope `to`, else the base. Same gates, same ordering as every other scoped value.
+  const gateSection = (s: NonNullable<ScrollVariantSpec['sections']>[number]): string => {
+    const entries: Array<{ scope: SerScope; v: string }> = [];
+    for (const r of resp) if (r.to) entries.push({ scope: r.scope, v: r.to });
+    for (const o of s.responsive ?? []) {
+      const at = entries.findIndex((e) => scopeEq(e.scope, o.scope));
+      if (at >= 0) entries[at] = { scope: o.scope, v: o.to }; else entries.push({ scope: o.scope, v: o.to });
+    }
+    const ovs = entries.filter((e) => !!e.v && e.v !== s.to).map((e) => ({ scope: e.scope, value: q(e.v) }));
+    if (!ovs.length) return q(s.to);
+    const built = buildScopedScalarExpr(result, q(s.to), ovs);
+    result = built.code;
+    return built.expr;
+  };
   secs.forEach((s, i) => {
     const idExpr = s.sectionVar ? s.sectionVar : q(s.sectionId);
-    const toExpr = gateName(s.to, (r) => r.to);
+    const toExpr = gateSection(s);
     lines.push(`    const ${sv}Sec${i}El = document.getElementById(${idExpr});`);
     lines.push(`    if (${sv}Sec${i}El && ${sv}Sec${i}El.getBoundingClientRect().top < ${lineExpr}) v = ${toExpr};`);
   });
@@ -371,8 +389,11 @@ export function setScrollVariantFieldScoped(
  *  override lives in `responsive[scope].to` (flat — meant for the single-section header pattern,
  *  same shape Scroll Transform uses). Resolve = base ⊕ this scope's override. */
 export function resolveSectionTarget(spec: ScrollVariantSpec, sectionIndex: number, scope: SerScope | null): string {
-  const base = spec.sections?.[sectionIndex]?.to ?? '';
+  const section = spec.sections?.[sectionIndex];
+  const base = section?.to ?? '';
   if (!scope) return base;
+  const own = (section?.responsive ?? []).find((r) => scopeEq(r.scope, scope))?.to;
+  if (own) return own;
   return (spec.responsive ?? []).find((r) => scopeEq(r.scope, scope))?.to ?? base;
 }
 /** Write a sectionInView target for the active tile: base `sections[i].to` on the primary, or
@@ -382,20 +403,37 @@ export function setSectionTargetScoped(spec: ScrollVariantSpec, sectionIndex: nu
     const sections = (spec.sections ?? []).map((s, j) => (j === sectionIndex ? { ...s, to } : s));
     return { ...spec, sections };
   }
-  return setScrollVariantFieldScoped(spec, { to }, scope);
+  // Per SECTION on a replica — one section's tablet target must not rewrite
+  // the others' (the flat `responsive[].to` did exactly that).
+  const sections = (spec.sections ?? []).map((s, j) => {
+    if (j !== sectionIndex) return s;
+    const responsive = (s.responsive ?? []).filter((r) => !scopeEq(r.scope, scope));
+    responsive.push({ scope, to });
+    return { ...s, responsive };
+  });
+  return { ...spec, sections };
 }
 
 /** Drop the active scope's whole config override (Reset Override). */
 function resetScrollVariantTargetScope(spec: ScrollVariantSpec, scope: SerScope): ScrollVariantSpec {
-  if (!spec.responsive) return spec;
-  const resp = spec.responsive.filter((r) => !scopeEq(r.scope, scope));
   const next = { ...spec };
-  if (resp.length) next.responsive = resp; else delete next.responsive;
+  if (spec.responsive) {
+    const resp = spec.responsive.filter((r) => !scopeEq(r.scope, scope));
+    if (resp.length) next.responsive = resp; else delete next.responsive;
+  }
+  if (spec.sections?.some((s) => s.responsive?.some((r) => scopeEq(r.scope, scope)))) {
+    next.sections = spec.sections.map((s) => {
+      const responsive = (s.responsive ?? []).filter((r) => !scopeEq(r.scope, scope));
+      const { responsive: _drop, ...rest } = s;
+      return responsive.length ? { ...rest, responsive } : rest;
+    });
+  }
   return next;
 }
 /** Whether the active scope has any config override (override dot/Reset). */
 export function hasScrollVariantTargetScope(spec: ScrollVariantSpec, scope: SerScope | null): boolean {
   if (!scope) return false;
+  if (spec.sections?.some((s) => s.responsive?.some((x) => scopeEq(x.scope, scope)))) return true;
   const r = (spec.responsive ?? []).find((x) => scopeEq(x.scope, scope));
   if (!r) return false;
   // A real user OVERRIDE carries a per-tile `to` or `direction`. A `from`-only entry is just the
@@ -588,6 +626,9 @@ function stripScrollVariant(code: string, nodeId: string, cn: string): string {
   // Single-line decls + destructures + useState referencing <cn>Sv.
   result = result.split('\n').filter((line) => {
     const t = line.trim();
+    // A declaration that continues on the next line must not lose its head:
+    // dropping only the first line orphans the body (see opensAcrossLines).
+    if (opensAcrossLines(t)) return true;
     if (new RegExp(`^const ${cnE}Sv\\w*\\s*=`).test(t)) return false;
     if (new RegExp(`^const \\[${cnE}Sv\\b`).test(t)) return false;
     if (new RegExp(`^const \\{[^}]*:\\s*${cnE}Sv\\w*\\s*\\}\\s*=`).test(t)) return false;

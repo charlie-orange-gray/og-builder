@@ -522,6 +522,57 @@ export default function InputTool() {
     );
   }
 
+  // ─── Checkbox / Radio (native form booleans) ──────────────────────────────
+  // Added by the form's "+". Their panel is Name, Value (radio),
+  // Checked and Required; their look (fill, border, radius, Checked / Focus
+  // states, the check icon) is the Styles tool's, since they draw themselves.
+  const boolType = node.type === 'input' && (attrs.type === 'checkbox' || attrs.type === 'radio') ? attrs.type : null;
+  if (boolType) {
+    const isRadio = boolType === 'radio';
+    const setChecked = (yes: boolean) => {
+      if (!nodeId) return;
+      if (yes && isRadio && attrs.name) {
+        // One radio per name is checked: clear its siblings in the same group.
+        const nodes = getNodesSnapshot();
+        let form = node.parentId ? nodes.get(node.parentId) : undefined;
+        while (form && form.type !== 'form' && form.parentId) form = nodes.get(form.parentId);
+        const scope = form ?? (node.parentId ? nodes.get(node.parentId) : undefined);
+        const walk = (id: string) => {
+          const n = nodes.get(id);
+          if (!n) return;
+          if (n.id !== nodeId && n.type === 'input' && n.attrs?.type === 'radio' && n.attrs?.name === attrs.name && n.attrs?.checked) {
+            queueMutation({ type: 'updateHtmlAttrs', nodeId: n.id, attrs: { checked: '' } });
+          }
+          n.children.forEach(walk);
+        };
+        if (scope) walk(scope.id);
+      }
+      queueMutation({ type: 'updateHtmlAttrs', nodeId, attrs: { checked: yes ? 'true' : '' } });
+      commitNow();
+      trace.action('input-tool:set-checked', { nodeId, type: boolType, checked: yes });
+    };
+    return (
+      <ToolSection title="Input">
+        <ToolRow label="Name" {...ov('name')}>
+          <ToolInput value={displayAttr('name')} onChange={(v) => writeAttr('name', v)} placeholder={isRadio ? 'Radio' : 'Newsletter'} />
+        </ToolRow>
+        {isRadio && (
+          <ToolRow label="Value" {...ov('value')}>
+            <ToolInput value={displayAttr('value')} onChange={(v) => writeAttr('value', v)} placeholder="Option 1" />
+          </ToolRow>
+        )}
+        <ToolRow label="Checked">
+          <ToolSegmentedControl value={isToggleOn('checked') ? 'yes' : 'no'} onChange={(v) => setChecked(v === 'yes')}
+            options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} />
+        </ToolRow>
+        <ToolRow label="Required">
+          <ToolSegmentedControl value={isToggleOn('required') ? 'yes' : 'no'} onChange={(v) => setAttrs({ required: v === 'yes' ? 'true' : '' })}
+            options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} />
+        </ToolRow>
+      </ToolSection>
+    );
+  }
+
   return (
     <ToolSection title="Input" action={<AddPropMenu available={availableExtras} onAdd={addExtra} />}>
       <ToolRow label="Type" {...ov('type')}>

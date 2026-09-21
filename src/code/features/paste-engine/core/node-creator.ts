@@ -112,15 +112,21 @@ function applyStyleTransform(
  * sanity passes based on the *target parent* — flex parents shouldn't get
  * absolute children, no-layout parents shouldn't get static children, etc.
  */
-function fixupPositionForParent(
+export function fixupPositionForParent(
   styles: Record<string, string>,
   parentNode: CanvasNode | undefined,
   positionOverride?: { x: number; y: number },
+  /** The caller's answer for the viewport being edited, when it has one — a
+   *  parent hidden at the base (`display:'none'` + a band that makes it a flex
+   *  container) reads as "no layout" from `styles.display` alone, and this
+   *  function would then force every pasted child absolute. See
+   *  PasteContext.parentHasLayout. */
+  parentHasLayout?: boolean,
 ): Record<string, string> {
   const out = { ...styles };
   if (!parentNode) return out;
 
-  const parentLayout = hasLayout(parentNode);
+  const parentLayout = parentHasLayout ?? hasLayout(parentNode);
   const isAbsOrFixed = out.position === 'absolute' || out.position === 'fixed';
   const wasAbsInFrame = out.isAbsoluteInFrame === 'true';
 
@@ -353,7 +359,14 @@ export function createNode(opts: CreateNodeOptions): string {
 
   // 2. Layout-aware fixup against target parent (root only).
   if (target.parentId !== null) {
-    styles = fixupPositionForParent(styles, parentNode, positionOverride);
+    // The caller's answer describes the SELECTED node's parent. That is the
+    // target here for a sibling paste, but a paste-INTO rule targets the
+    // selected frame itself — so only trust it when the ids agree.
+    const selectedParentId = ctx.selectedIds.length
+      ? ctx.nodes.get(ctx.selectedIds[0])?.parentId ?? null
+      : null;
+    const resolvedLayout = target.parentId === selectedParentId ? ctx.parentHasLayout : undefined;
+    styles = fixupPositionForParent(styles, parentNode, positionOverride, resolvedLayout);
   }
 
   // 3. Canvas-mode: no parent — set absolute + clipboard's computed dims + position.

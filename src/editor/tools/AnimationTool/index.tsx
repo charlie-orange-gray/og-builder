@@ -38,6 +38,9 @@ import { getEffectsForPage, setPageEffectForPage, removePageEffectForPage, route
 import { applyPreset } from '@/code/generation/view-transition-css';
 import { isHomeRoute, type PageEffect } from '@/code/project/page-effects-config';
 import PageEffectPopup from '../PageEffectTool/PageEffectPopup';
+import SmoothScrollPopup from './SmoothScrollPopup';
+import { getSmoothScrollForPage, setSmoothScrollForPage, removeSmoothScrollForPage } from '@/code/project/smooth-scroll-ops';
+import { createDefaultSmoothScroll, type SmoothScrollConfig } from '@/code/project/smooth-scroll-config';
 import { ScrollVariantEditor } from './motion/ScrollVariantEditor';
 import { getScrollVariant, scrollVariantPresentOn, scrollVariantIsOverride, hasScrollVariantTargetScope, hideScrollVariantOn, resetScrollVariantScope, type ScrollVariantSpec, ensureComponentAcceptsRef } from '@/code/generation/scroll-variant-gen';
 import { getInstanceFx, resetTransformScope, hasTransformScope, resetFxValueScope, hasFxValueScope, resetSpeedScope, hasSpeedScope, instanceFxNeedsRef, instanceFxPresentOn, instanceFxIsOverride, addInstanceFxScope, hideInstanceFxOn, resetInstanceFxScope, type InstanceFxSpec, type FxKey } from '@/code/generation/instance-fx-gen';
@@ -237,6 +240,22 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
     removePageEffectForPage(activePageFile, target);
     setProjVersion((v) => v + 1);
     if (activePopup === 'pageTransition:' + target) setActivePopup(null);
+  };
+  // ─── Smooth Scroll (Lenis) — page-level like Page Transition, one setting per page.
+  const smoothScroll = (glideOnly && activePageFile) ? getSmoothScrollForPage(activePageFile) : null;
+  // The popup's `config` is only its INITIAL draft (it owns the live values),
+  // so the memoized popup must not rebuild on every committed tick.
+  const smoothScrollOpen = !!smoothScroll?.own;
+  const commitSmoothScroll = (cfg: SmoothScrollConfig) => {
+    if (!activePageFile) return;
+    setSmoothScrollForPage(activePageFile, cfg);
+    setProjVersion((v) => v + 1);
+  };
+  const removeSmoothScroll = () => {
+    if (!activePageFile) return;
+    removeSmoothScrollForPage(activePageFile);
+    setProjVersion((v) => v + 1);
+    if (activePopup === 'smoothScroll') setActivePopup(null);
   };
   const allTextAnims = useAtomValue(textAnimCallsAtom);
   const cssHoverStyles = useAtomValue(cssHoverStylesAtom);
@@ -709,6 +728,14 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
         // so siblings glide smoothly when one resizes (e.g. an accordion opening).
         queueMutation({ type: 'updateGlide', nodeId, spec: { transition: { type: 'spring', duration: '0.5', bounce: '0.25', delay: '0' } } });
         setActivePopup('glide'); break;
+      case 'smoothScroll': {
+        if (activePageFile) {
+          setSmoothScrollForPage(activePageFile, createDefaultSmoothScroll());
+          setProjVersion((v) => v + 1);
+          setActivePopup('smoothScroll');
+        }
+        break;
+      }
       case 'pageTransition': {
         // Page Transition (View Transitions) — page-level enter/exit. Seeds a
         // crossfade effect + opens its editor. Default target = 'all' on the
@@ -1016,6 +1043,14 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
   const popup = useMemo(() => {
     if (!activePopup || !node) return null;
     // Page Transition (View Transitions) — the editor popup for one effect.
+    if (activePopup === 'smoothScroll') {
+      const cfg = smoothScroll?.own;
+      if (!cfg) return null;
+      return {
+        title: 'Smooth Scroll',
+        content: <SmoothScrollPopup config={cfg} onChange={commitSmoothScroll} />,
+      };
+    }
     if (activePopup.startsWith('pageTransition:')) {
       const target = activePopup.slice('pageTransition:'.length);
       const eff = pageEffects.find((e) => e.target === target);
@@ -1141,7 +1176,7 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
       default:
         return null;
     }
-  }, [activePopup, node, nodeId, detected, allTextAnims, cssHoverStyles, writeInstanceFx, pageEffects, pageTargetOptions]);
+  }, [activePopup, node, nodeId, detected, allTextAnims, cssHoverStyles, writeInstanceFx, pageEffects, pageTargetOptions, smoothScrollOpen]);
 
   const handleCreateKeyframe = useCallback((kfName: string) => {
     expediteStableAtomSync();
@@ -1188,8 +1223,8 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
 
   return (
     <LocalizeGate hidden>
-      <ToolSection title="Animation" collapsible hasContent={detected.length > 0 || pageEffects.length > 0}
-        action={<AddEffectDropdown onAdd={handleAdd} existing={existingTypes} isTextNode={!!node && isTextTag(node.type)}
+      <ToolSection title="Animation" collapsible hasContent={detected.length > 0 || pageEffects.length > 0 || !!smoothScroll?.own}
+        action={<AddEffectDropdown onAdd={handleAdd} existing={smoothScroll?.own ? new Set([...existingTypes, 'smoothScroll'] as any) : existingTypes} isTextNode={!!node && isTextTag(node.type)}
           pasteItem={pasteItem}
           isComponentInstance={!!node?.componentFile}
           appearOnly={isOverlayNode}
@@ -1330,6 +1365,21 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
                 </ToolRow>,
               );
             });
+            // Smooth Scroll row (viewport only) — the config authored on this page.
+            if (smoothScroll?.own) {
+              const own = smoothScroll.own;
+              out.push(
+                <ToolRow key="smooth-scroll" label="Scroll">
+                  <ControlActionRow className="!pr-2" onClick={() => setActivePopup('smoothScroll')}>
+                    <span className="flex items-center justify-center w-5 h-5 rounded shrink-0" style={{ backgroundColor: 'var(--accent)' }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent-fg)" strokeWidth="2.5" strokeLinecap="round"><path d="M12 4v16M7 15l5 5 5-5" /></svg>
+                    </span>
+                    <span className="truncate flex-1">{own.enabled ? `Smooth · ${own.intensity}` : 'Smooth · Off'}</span>
+                    <RemoveButton onClick={removeSmoothScroll} />
+                  </ControlActionRow>
+                </ToolRow>,
+              );
+            }
             return out;
           })()}
         </div>

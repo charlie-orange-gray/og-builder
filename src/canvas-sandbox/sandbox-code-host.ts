@@ -21,6 +21,7 @@ import { emitRectAndCornersForElement, scheduleRemeasureAllRects } from './sandb
 import { isSandboxDragSettling } from './sandbox-dnd-host';
 import { trace } from '@/shared/debug-trace';
 import { coerceScalar } from '@/code/values/value-eval';
+import { elementSvgScope } from '@/shared/svg-id-scope';
 
 /**
  * Build the inner React element for a mounted code component, threading any
@@ -60,7 +61,10 @@ function isCdnUrl(code: string): boolean {
  *  snapping. The `if (!name) return master;` line is unique to the icon-set
  *  instance branch (same marker `upgradeVectorSetInstanceBranch` keys on). */
 export function isVectorSetSource(code: string): boolean {
-  return code.includes('  if (!name) return master;');
+  // `scoped(master)` is the current shape (per-mount svg id scoping); the bare
+  // `master` form is every file written before it.
+  return code.includes('  if (!name) return master;')
+    || code.includes('  if (!name) return scoped(master);');
 }
 
 /** Suppress framer-motion animation on the CANVAS for CDN imports AND vector
@@ -490,7 +494,11 @@ export function mountCodeComponent(
         }
       }
 
-      const root = createRoot(container);
+      // Per-container identifierPrefix: each viewport tile mounts its own root,
+      // and React restarts useId() numbering per root — without this two tiles
+      // hand their svg defs the SAME scoped ids and we're back to the
+      // document-scoped-id collision (see svg-id-scope).
+      const root = createRoot(container, { identifierPrefix: elementSvgScope(container) });
       const coercedProps = coerceProps(cProps);
 
       const inner = makeInner(Component, coercedProps, containerVpWidth);

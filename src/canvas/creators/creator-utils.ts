@@ -89,10 +89,20 @@ export function findParentAtPoint(
 
   // Overlay edit fallback: no eligible hit inside the overlay → drop into the
   // overlay itself (in the viewport under the cursor), NOT the page root behind it.
+  //
+  // ONLY over a viewport. The point can be out on the open canvas beside the
+  // tiles, where there is nothing to be inside of — drawing a frame there means
+  // a canvas node, exactly as it does outside overlay mode. Claiming it for the
+  // overlay regardless put the frame inside the overlay at `left: -529px`,
+  // parented to something the user had drawn well clear of (2026-09-18).
   if (overlayEditId && nodes.get(overlayEditId)) {
     const rh = findRootHitAtPoint(screenX, screenY);
-    trace.fn('creator.findParentAtPoint:overlay-fallback', { overlayEditId, vpPrefix: rh?.vpPrefix ?? '' });
-    return { nodeId: overlayEditId, vpPrefix: rh?.vpPrefix ?? '' };
+    if (rh) {
+      trace.fn('creator.findParentAtPoint:overlay-fallback', { overlayEditId, vpPrefix: rh.vpPrefix });
+      return { nodeId: overlayEditId, vpPrefix: rh.vpPrefix };
+    }
+    trace.fn('creator.findParentAtPoint:overlay-outside-viewport', { overlayEditId, screenX, screenY });
+    return null;
   }
 
   // Fallback: cursor is over a viewport but no smaller eligible frame is

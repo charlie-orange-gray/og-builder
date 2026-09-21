@@ -2122,7 +2122,7 @@ export default function Page() {
     expectParses(r);
     expect(r).toContain('const [ovl2Open, setOvl2Open] = useState(false)');
     expect(r).toContain('data-id="modal-card"');         // child preserved
-    expect(r).toContain('event1={() => setOvl2Open(true)}'); // event-trigger handler
+    expect(r).toContain('event1={() => setOvl2Open(!ovl2Open)}'); // event-trigger handler (toggle)
     expect(parseOverlayCalls(r)[0].config.type).toBe('fixed');
   });
 

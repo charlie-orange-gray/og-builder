@@ -36,6 +36,9 @@ export const leftPanelAtom = atom<LeftPanelId>(DEFAULT_LEFT_PANEL);
 
 /** Whether the floating code editor popup is open. */
 export const codeEditorOpenAtom = atom(false);
+/** A file the code editor should show next time it renders (e.g. "Edit Code"
+ *  on a code override). The editor consumes it and resets it to null. */
+export const codeEditorViewRequestAtom = atom<string | null>(null);
 
 /** Derived write atom: clicking the active panel falls back to the home panel
  *  instead of closing. */

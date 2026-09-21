@@ -65,7 +65,7 @@ const KNOWN_DIVERGENCES: Record<string, { codes: string[]; why: string }> = {
   // identifier — an artifact of testing one step of a two-step drop.
   __embedsAndCodeComponents: { codes: ['WOULD_CRASH'], why: 'harness: instance import added by the drop path, not by addNodeInCode' },
   'text-link': { codes: ['PAGE_LINK_NOT_NEXTLINK', 'NEXTLINK_IMPORT_MISSING'], why: 'harness: the drop path adds the next/link import via syncImports' },
-  'custom-form': { codes: ['FORM_MISSING_ONSUBMIT', 'FORM_NO_DESTINATION', 'TEXT_STYLE_ON_FRAME'], why: 'harness: the form drop wires onSubmit/endpoint in a follow-up mutation; open: the form title wrapper styles text via inheritance (fontSize on a div) — move onto the text child' },
+  'custom-form': { codes: ['FORM_MISSING_ONSUBMIT', 'FORM_NO_DESTINATION'], why: 'harness: the form drop wires onSubmit/endpoint in a follow-up mutation' },
 
   // ── DIVERGENCE (open) ──
   // The shape items insert native <rect>/<polygon>; the oracle wants geometry on

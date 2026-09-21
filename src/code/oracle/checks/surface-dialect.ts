@@ -30,7 +30,7 @@ const MOTION_CHANNELS = new Set<string>(['x', 'y', 'z', ...MOTION_TRANSFORM_PROP
 /** Keys some panel reads/writes, or a generator emits. Kept deliberately
  *  GENEROUS — the rule exists for the confirmed dead-end cluster, not to
  *  bounce harmless CSS. */
-const CONTROLLED_STYLE_PROPS = new Set<string>([
+export const CONTROLLED_STYLE_PROPS = new Set<string>([
   // Size / position / layout (SizeTool, PositionTool, LayoutTool)
   'width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight',
   'flex', 'flexGrow', 'flexShrink', 'flexBasis', 'alignSelf', 'aspectRatio',
@@ -61,6 +61,17 @@ const CONTROLLED_STYLE_PROPS = new Set<string>([
   'maskImage', 'WebkitMaskImage', 'maskComposite', 'WebkitMaskComposite',
   'maskSize', 'maskPosition', 'maskRepeat', 'clipPath',
   'transform', 'transformStyle', 'transformOrigin', 'zIndex',
+  // A 3D flip card: the faces hide their backs and turn in a perspective.
+  // Motion's own transformPerspective is a channel; these two are the CSS
+  // that make the faces a card at all (imported flip card, 2026-09-14).
+  'backfaceVisibility', 'perspective',
+  // The whole element composited with the page behind it — the Styles
+  // panel's Blend Mode row (MixBlendModeControl, 2026-09-16); the Fill
+  // panel's per-layer blend is backgroundBlendMode above.
+  'mixBlendMode',
+  // A checkbox/radio draws itself (`appearance: none`) so its box, fill and
+  // check icon are editable; the Input tool owns the property for them.
+  'appearance',
   'pointerEvents', 'userSelect', 'cursor', 'visibility',
   // Typography (TextStyleTool — WHERE they may sit is TEXT_STYLE_ON_FRAME's business)
   'color', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'letterSpacing', 'lineHeight',
@@ -92,7 +103,6 @@ const KNOWN_DEAD_ENDS: Record<string, string> = {
   scrollSnapAlign: 'scroll-snap carousels are not a native pattern — build a variants-driven slider or use a Carousel code component',
   scrollSnapStop: 'scroll-snap carousels are not a native pattern',
   overscrollBehavior: 'no control exists; overlays already manage body scroll natively',
-  mixBlendMode: 'no element-level Blend control exists yet — use the per-fill-layer blend in the Fill panel (backgroundBlendMode), or leave blending out',
   float: 'floats are not a layout the builder expresses — use flex or grid',
   clear: 'floats are not a layout the builder expresses — use flex or grid',
   listStyle: 'lists are not native elements — build stacked frames (see the element rule)',
@@ -192,6 +202,8 @@ export function checkStyleSurface(
 
 // ─── A9: typography lives ON the text node, never a parent ──────────────────
 
+const FORM_CONTROL_TAGS = new Set(['input', 'textarea', 'select', 'option', 'optgroup']);
+
 const TEXT_STYLE_PROPS = new Set<string>([
   'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing',
   'textTransform', 'textAlign', 'textDecoration', 'textDecorationLine', 'textDecorationStyle',
@@ -223,6 +235,10 @@ export function checkTextStyleOnFrame(
       // Text tags carry typography by design; SVG paints with stroke/fill, and
       // an INSTANCE'S internal styling is INSTANCE_INTERNAL_STYLE's business.
       if (TEXT_TAGS.has(base)) return;
+      // A form control's text is its OWN — its value, its placeholder — and
+      // the Input tool writes `color`/`fontSize` straight onto it (there is
+      // no inner text element to move them to).
+      if (FORM_CONTROL_TAGS.has(base)) return;
       if (isSvgTag(base) || base === 'path') return;
       if (base[0] && base[0] !== base[0].toLowerCase()) return;
       // An element with DIRECT text of its own IS the text carrier — the
@@ -278,6 +294,10 @@ const UNSUPPORTED_TAGS: Record<string, string> = {
 const SUPPORTED_INPUT_TYPES = new Set([
   'text', 'textarea', 'email', 'number', 'tel', 'url', 'date', 'time', 'select',
   'submit', 'button', 'reset', 'search',
+  // Native form booleans (2026-09-16): the form's "+" adds
+  // them, the Input tool edits Name / Value / Checked / Required, and the
+  // Styles tool edits their Checked and Focus states.
+  'checkbox', 'radio',
 ]);
 
 export function checkElementSurface(

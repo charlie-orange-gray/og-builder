@@ -4,7 +4,8 @@
 // Armed by ProjectLoader when a cloud site loads with ZERO files (the
 // dashboard's New Website flow creates the row empty). Card order: a
 // white "start from scratch" tile first, then the FREE approved
-// marketplace templates, then the PAID ones. Picking a free one calls
+// marketplace templates, then the PAID ones — each group ranked by
+// MOST VIEWED, not newest, so the strongest work leads. Picking a free one calls
 // the remix endpoint with `intoWebsiteId` so the template is applied
 // INTO this website (assets deep-copied, `is_remix` stamped — same
 // royalty path as a normal remix) and the page reloads on the same
@@ -53,8 +54,18 @@ export default function NewWebsiteTemplatesModal() {
           setTemplatePromptArmed(false);
           return;
         }
-        // Free first, paid after — paid cards deep-link to the marketplace.
-        setTemplates([...rows.filter(isFreeTemplate), ...rows.filter((t) => !isFreeTemplate(t))]);
+        // Free first, paid after — paid cards deep-link to the marketplace —
+        // and MOST VIEWED within each group. `/approved` sorts by
+        // `approved_at desc`, which put whatever shipped last in the opening
+        // row regardless of how it performed; this is the first thing a new
+        // user sees, so it should lead with the templates people actually
+        // pick. Array#sort is stable, so equal view counts keep the
+        // backend's recency order as a natural tie-break.
+        const byViews = (a: ApprovedTemplate, b: ApprovedTemplate) => (b.views ?? 0) - (a.views ?? 0);
+        setTemplates([
+          ...rows.filter(isFreeTemplate).sort(byViews),
+          ...rows.filter((t) => !isFreeTemplate(t)).sort(byViews),
+        ]);
       })
       .catch((err) => {
         if (cancelled) return;

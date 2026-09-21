@@ -11,6 +11,8 @@ export const PARSER_TRANSPARENT_TAGS: ReadonlySet<string> = new Set([
   'RevymeSplitText',
   // Page-transition wrapper in LayoutClient templates (runtime import).
   'PageTransitions',
+  // Code-override wrapper — `<Override with={withX}><El data-id/></Override>`.
+  'Override',
 ]);
 
 /** Name of the JSX tag whose opening tag contains offset `idx` (best effort:

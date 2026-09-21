@@ -127,6 +127,13 @@ export function buildAutoImports(body) {
   // in this list — see runtime-exports-covered.test.ts, which fails when one
   // is missing.
   if (/\blocalizeRows\b/.test(body)) revymeRuntime.push('localizeRows');
+  // Code overrides: the page-side wrapper, and the store / host stand-ins
+  // that override files (`overrides/*.tsx`) import.
+  // Skipped when the file declares its own binding of the same name.
+  const declares = (name) => new RegExp(`(?:function|class|type|interface|const|let|var)\\s+${name}\\b`).test(body);
+  if (/\bOverride\b/.test(body) && !declares('Override')) revymeRuntime.push('Override');
+  if (/\bcreateStore\b/.test(body) && !declares('createStore')) revymeRuntime.push('createStore');
+  if (/\bhostCompat\b/.test(body)) revymeRuntime.push('hostCompat');
   if (revymeRuntime.length > 0) {
     lines.push(`import { ${revymeRuntime.join(', ')} } from '@revyme/runtime';`);
   }

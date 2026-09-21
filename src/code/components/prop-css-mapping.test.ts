@@ -11,6 +11,17 @@ describe('localCssPropForVar — prop → cssProp resolution', () => {
   it('per-variant ternary (alternate branch)', () => {
     expect(localCssPropForVar('z', `style={{ opacity: variant === 'v' ? '1' : z }}`)).toBe('opacity');
   });
+  it('does NOT match a variable name that is a word INSIDE a string branch (`end` in flex-end)', () => {
+    // An imported Number Card: `end` is the counter's target, forwarded into a child code
+    // component; the root's alignItems ternary carries 'flex-end' / 'flex-start'.
+    const code = `function NumberCard({ end = 12, ...rest }) {
+      return <motion.div style={{ alignItems: variant === 'variant-1' ? 'flex-end' : 'flex-start', width: 'min-content' }}>
+        <AnimatedNumber end={end} />
+      </motion.div>; }`;
+    expect(localCssPropForVar('end', code)).toBe('');
+    expect(localCssPropForVar('start', code)).toBe('');
+  });
+
   it('does NOT false-match a CHAINED MotionConfig ternary consequent as a cssProp', () => {
     // chained per-variant transition — `… ? transition2 : variant === 'variant-1' ? transition1 …`. Neither var
     // is a STYLE binding, so cssProp must be '' (NOT the preceding consequent `transition2` / `transition`). This
