@@ -3874,16 +3874,39 @@ export class LayoutLiftedStrategy implements DragStrategy {
    *  left the other reporting `siblingCount: 0`. Same store the `order` read at
    *  drag start consults, for the same reason: an override wins at render time
    *  but never reaches the inline style. */
-  private isLayoutParticipant(childId: string, childNode: { styles?: Record<string, string> } | null | undefined): boolean {
-    let override: string | undefined;
-    if (!isPrimaryViewport(this.currentVpId)) {
+  private isLayoutParticipant(
+    childId: string,
+    childNode: {
+      styles?: Record<string, string>;
+      motionVariants?: Record<string, Record<string, string>> | null;
+      conditionalStyles?: Record<string, Record<string, string>> | null;
+    } | null | undefined,
+  ): boolean {
+    let effective: string | undefined;
+    if (isComponentFilePath(getActiveFilePath())) {
+      // DESIGN COMPONENT: a master stores per-variant position in the variants
+      // OBJECT (and layout props as inline ternaries), not in an @media rule.
+      // Reading only the container overrides missed it, so a frame given a
+      // layout on ONE VARIANT filtered both its children out on that tile and
+      // the reorder had nothing to work with — the @media bug again, third
+      // channel (user report 2026-09-21). Renderer precedence: base, then the
+      // always-on `default` entry, then this tile's own.
+      const variantKey = isPrimaryViewport(this.currentVpId) ? 'default' : this.currentVpId;
+      const mv = childNode?.motionVariants;
+      const cond = childNode?.conditionalStyles;
+      effective = mv?.[variantKey]?.position
+        ?? cond?.position?.[variantKey]
+        ?? mv?.default?.position
+        ?? cond?.position?.['default']
+        ?? undefined;
+    } else if (!isPrimaryViewport(this.currentVpId)) {
       try {
         const overrides = getDefaultStore().get(containerOverridesAtom);
         const vpWidth = getViewportWidths()[this.currentVpId] ?? 0;
-        if (overrides && vpWidth > 0) override = getOverrideValue(overrides, childId, 'position', vpWidth) ?? undefined;
+        if (overrides && vpWidth > 0) effective = getOverrideValue(overrides, childId, 'position', vpWidth) ?? undefined;
       } catch { /* jotai graph unstubbed in tests — fall back to inline */ }
     }
-    const pos = (override ?? childNode?.styles?.position ?? '').trim();
+    const pos = (effective ?? childNode?.styles?.position ?? '').trim();
     return pos !== 'absolute' && pos !== 'fixed';
   }
 
