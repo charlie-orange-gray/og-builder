@@ -8,6 +8,7 @@ import { liveInsetWrites } from './live-inset-writes';
 import { isComponentFilePath, isIconSetFilePath, isVectorSetComponentFile } from '@/code/project/active-file-store';
 import { parseIconSetConfig, iconConfigPx } from '@/code/icons/icon-set-config';
 import { updateIconPosition, updateIconSize } from '@/code/icons/icon-set-ops';
+import { readFitDim, fitModeAfterHandResize, FIT_DIM_ATTR } from '@/code/icons/vector-set-fit';
 import { projectFS } from '@/code/project/project-fs';
 import { parseVariantConfig } from '@/code/variants/variant-config';
 import { syncQueueCode, queueMutation, flushNow } from '@/code/mutation/mutation-queue';
@@ -2753,6 +2754,15 @@ export function startResize(
     if (isVectorSet) {
       if (liveStyles.width) finalStyles.width = liveStyles.width;
       if (liveStyles.height) finalStyles.height = liveStyles.height;
+      // "Both rows on Fit" means the variant's NATURAL size — a hand resize just
+      // left it, so the panel would go on showing auto / auto over a size that
+      // is no longer automatic. A single Fit row survives: the handles keep the
+      // aspect, which is all that row promises.
+      const nextFit = fitModeAfterHandResize(readFitDim(nodeData?.attrs));
+      if (nextFit !== undefined) {
+        trace.action('resize:vector-set-fit-cleared', { nodeId, vpId });
+        queueMutation({ type: 'updateHtmlAttrs', nodeId, attrs: { [FIT_DIM_ATTR]: nextFit } });
+      }
     }
 
     // Commit the box-centre pivot for a rotated single-shape svg so a baked-px
