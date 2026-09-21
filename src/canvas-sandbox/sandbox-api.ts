@@ -189,6 +189,14 @@ export interface SandboxApi {
 
   // ─── Stylesheet ────────────────────────────────────────────────────────
   injectCSS(selector: string, cssBody: string): void | Promise<void>;
+  /**
+   * Mirror the EDITOR's colour mode onto this document (`<html class="dark">`).
+   * The token lift runs in here (Renderer) and reads the mode off its own
+   * <html>, which never carried the editor's class — so the first paint was
+   * always the light scheme, whatever the editor showed, until a toggle
+   * re-lifted from the parent. Code components' `useTheme` reads it too.
+   */
+  setThemeMode(mode: 'light' | 'dark'): void | Promise<void>;
   removeCSS(selector: string): void | Promise<void>;
   /** Replace the design-tokens block (between the canvas-tokens-start/end
    *  markers) in the iframe's canvas style element. Lets preset edits push

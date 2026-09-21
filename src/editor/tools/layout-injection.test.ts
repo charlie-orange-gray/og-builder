@@ -18,8 +18,10 @@ vi.mock('@/canvas/node-ops', () => ({
   updateNodeStyles: (args: unknown) => updateNodeStyles(args),
   findNodeSize: (id: string, vp: string) => findNodeSize(id, vp),
   // Cold computed cache in tests → measureCssPx falls back to
-  // findNodeSize / scale (scale mocked to 1 below).
-  findNodeComputedStyle: () => '',
+  // findNodeSize / scale (scale mocked to 1 below). Tests that care about the
+  // display ON THE ACTIVE VIEWPORT set `computedDisplay`.
+  findNodeComputedStyle: (_id: string, _vp: string, prop: string) =>
+    (prop === 'display' ? computedDisplay : ''),
   getContentRoot: () => getContentRoot(),
 }));
 
@@ -52,6 +54,9 @@ vi.mock('@/canvas/drag/replica-context', () => ({
 
 const replicaCtxArgs: Array<{ vpId: string; filePath: string; vpWidths: Record<string, number> }> = [];
 
+/** What `display` computes to on the viewport being edited ('' = cold cache). */
+let computedDisplay = '';
+
 // Import AFTER mocks so the module picks up the mocked node-ops.
 import { injectFlexLayoutOnFrame, shouldInjectLayoutOnAuto, rebaseChildrenForDirectionFlip } from './layout-injection';
 
@@ -74,6 +79,7 @@ describe('injectFlexLayoutOnFrame', () => {
     getContentRoot.mockClear();
     getContentRoot.mockReturnValue(document.createElement('div'));
     findNodeSize.mockReturnValue({ width: 200, height: 100 });
+    computedDisplay = '';
   });
 
   it('no-ops when content root is null', () => {
@@ -750,5 +756,45 @@ describe('injectFlexLayoutOnFrame — sheds the other tiles placement overrides'
   it('a childless frame queues nothing', () => {
     injectFlexLayoutOnFrame('parent', makeNodes(makeNode('parent', [])), 'desktop');
     expect(stripCalls()).toHaveLength(0);
+  });
+});
+
+// A node added on ONE replica is stored as an inline `display: 'none'` plus a
+// band rule that shows it on its own viewport (`data-replica-solo`). The base
+// `none` is the storage mechanism, not a hide — reading it as one meant adding
+// Layout wrote the flex properties but never `display: flex`, so the band kept
+// the `block` that removing Layout had left. The frame stayed a block, its flex
+// props were inert, its children fell back to inline and disappeared, and the
+// Position tool greyed out Relative for them because the parent genuinely had
+// no layout (user report 2026-09-18, mobile overlay inside a template).
+describe('injectFlexLayoutOnFrame — a frame hidden in the BASE but shown here', () => {
+  beforeEach(() => {
+    updateNodeStyles.mockClear();
+    getContentRoot.mockReturnValue(document.createElement('div'));
+    findNodeSize.mockReturnValue({ width: 200, height: 100 });
+    computedDisplay = '';
+  });
+
+  const parentStyles = (): Record<string, string> | undefined =>
+    updateNodeStyles.mock.calls.find(c => c[0].id === 'parent')?.[0].styles;
+
+  it('writes display:flex for a replica-solo frame (base none, visible here)', () => {
+    computedDisplay = 'block';
+    injectFlexLayoutOnFrame('parent', makeNodes(makeNode('parent', [], { display: 'none' })), 'mobile');
+    expect(parentStyles()).toMatchObject({ display: 'flex', flexDirection: 'column' });
+  });
+
+  it('still leaves display alone when the frame is hidden HERE too', () => {
+    computedDisplay = 'none';
+    injectFlexLayoutOnFrame('parent', makeNodes(makeNode('parent', [], { display: 'none' })), 'mobile');
+    const styles = parentStyles();
+    expect(styles).toMatchObject({ flexDirection: 'column' });
+    expect(styles).not.toHaveProperty('display');
+  });
+
+  it('falls back to the base style when the computed cache is cold', () => {
+    computedDisplay = '';
+    injectFlexLayoutOnFrame('parent', makeNodes(makeNode('parent', [], { display: 'none' })), 'mobile');
+    expect(parentStyles()).not.toHaveProperty('display');
   });
 });

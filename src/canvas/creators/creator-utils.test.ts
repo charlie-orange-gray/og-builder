@@ -4,6 +4,8 @@ import { generateNodeId } from '@/shared/id-utils';
 import { setActiveBridge } from '@/canvas/canvas-bridge';
 import type { CanvasBridge } from '@/canvas/canvas-bridge';
 import type { CanvasNode } from '@/code/parsing/parser';
+import { getDefaultStore } from 'jotai';
+import { overlayEditingIdAtom } from '@/code/stores/overlay-store';
 
 describe('generateNodeId', () => {
   it('generates unique IDs', () => {
@@ -264,5 +266,44 @@ export default function Page() {
     expect(dupBody).toContain('border-style: dashed');
     expect(extractBorderAfterRuleBody(css, 'ring-1')).toContain('border-width: 4px');
     expect(extractBorderAfterRuleBody(css, 'dup-plain-9')).toBeNull();
+  });
+});
+
+// ─── Overlay editing: the canvas is still the canvas ────────────────────────
+//
+// While an overlay is open, a draw that finds no eligible frame falls back to
+// the overlay itself rather than the page root behind it — you are editing the
+// overlay, not the page. But that fallback fired for ANY point, including out
+// on the open canvas beside the tiles, where there is nothing to be inside of:
+// a frame drawn well clear of the overlay was parented to it at `left: -529px`
+// (user report 2026-09-18).
+describe('findParentAtPoint — overlay editing', () => {
+  const overlayId = 'overlay-frame-1';
+  const nodes = () => new Map<string, CanvasNode>([
+    ['root', { id: 'root', type: 'div', styles: {}, children: [overlayId] } as any],
+    [overlayId, { id: overlayId, type: 'div', styles: {}, children: [], parentId: 'root' } as any],
+  ]);
+
+  beforeEach(() => {
+    getDefaultStore().set(overlayEditingIdAtom, overlayId);
+    setActiveBridge(makeFakeBridge([
+      { key: ':root', rect: new DOMRect(0, 0, 1440, 900) },
+      { key: `:${overlayId}`, rect: new DOMRect(200, 200, 400, 300) },
+    ]));
+  });
+  afterEach(() => {
+    getDefaultStore().set(overlayEditingIdAtom, null);
+    setActiveBridge(makeFakeBridge([]));
+  });
+
+  it('claims a point inside the viewport for the overlay', () => {
+    // Over the page but not over any eligible frame → the overlay, not `root`.
+    const parent = findParentAtPoint(900, 700, nodes());
+    expect(parent?.nodeId).toBe(overlayId);
+  });
+
+  it('leaves a point OUT on the canvas parentless (a canvas node)', () => {
+    expect(findParentAtPoint(-300, -200, nodes())).toBeNull();
+    expect(findParentAtPoint(3000, 2000, nodes())).toBeNull();
   });
 });

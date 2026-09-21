@@ -218,6 +218,16 @@ function checkScrollDialect(ast: t.File, v: OracleViolation[]): void {
           n.arguments.length > 0 && t.isStringLiteral(n.arguments[0]) &&
           n.arguments[0].value.includes('data-id')
         ) selectsDataId = true;
+        // Section-in-View resolves its target by ANCHOR id — the shape
+        // updateScrollAnimInCode writes (`xRef.current = document.getElementById('about') || document.body`)
+        // and the scroll parser reads back. The anchor is the link, the same
+        // way the data-id selector is above; the first rule only knew the
+        // selector form and flagged the builder's own section transforms.
+        if (
+          t.isCallExpression(n) && t.isMemberExpression(n.callee) &&
+          t.isIdentifier(n.callee.property, { name: 'getElementById' }) &&
+          n.arguments.length > 0 && t.isStringLiteral(n.arguments[0])
+        ) selectsDataId = true;
       });
       if (selectsDataId && refAttachments.get(left.object.name) !== true) {
         refAttachments.set(left.object.name, true);

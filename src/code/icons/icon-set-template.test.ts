@@ -28,7 +28,7 @@ describe('buildIconSetFile', () => {
     // forwardRef + motion root so instance EFFECTS (ref + motion-value styles) bind.
     expect(code).toContain("import { motion } from 'framer-motion';");
     expect(code).toMatch(/const TestSet = React\.forwardRef\(function TestSet\(\{ name, style, children, \.\.\.rest \}, ref\) \{/);
-    expect(code).toContain('React.createElement(motion.div, { layout: true, ...childRest, ...rest, ...animExtra, ref: safeRef, style: safeStyle }, filledKids)');
+    expect(code).toContain('React.createElement(motion.div, { layout: true, ...childRest, ...rest, ...animExtra, ref: safeRef, style: safeStyle }, React.Children.map(filledKids, scoped))');
     // Motion transform props ride on `animate` so per-variant rotation springs.
     expect(code).toContain('const animExtra = Object.keys(animateProps).length > 0 ? { animate: animateProps } : {};');
     // Guards against canvas `var:` placeholders (string ref / motion-value styles).
@@ -85,7 +85,7 @@ describe('upgradeVectorSetInstanceBranch (migration to forwardRef + motion)', ()
     it(`upgrades a ${name} file to the guarded forwardRef + motion render`, () => {
       const out = upgradeVectorSetInstanceBranch(f);
       expect(out).toContain('const Foo = React.forwardRef(function Foo({ name, style, children, ...rest }, ref) {');
-      expect(out).toContain('React.createElement(motion.div, { layout: true, ...childRest, ...rest, ...animExtra, ref: safeRef, style: safeStyle }, filledKids)');
+      expect(out).toContain('React.createElement(motion.div, { layout: true, ...childRest, ...rest, ...animExtra, ref: safeRef, style: safeStyle }, React.Children.map(filledKids, scoped))');
       expect(out).toContain('const safeRef =');
       // Migration also wraps the export in withResponsiveProps + adds the import.
       expect(out).toContain('export default withResponsiveProps(Foo);');

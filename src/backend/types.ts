@@ -102,6 +102,20 @@ export interface ProjectBackend {
     stagingUrl: string | null;
     createdAt: string;
   }>;
+  /** Promote an active staging deployment without accepting browser-supplied artifact identity. */
+  promoteProduction?(deploymentId: string): Promise<{
+    deploymentId: string; siteId: string; projectId: string; environment: 'production'; action: 'promote' | 'rollback'; status: string;
+    projectRevision: number; frozenRevisionId: string | null; materializationHash: string | null;
+    git: { repository: string; branch: string; sha: string } | null; image: { tag: string; digest: string; id: string } | null;
+    slot: 'blue' | 'green' | null; containerId: string | null; productionUrl: string | null; sourceDeploymentId: string | null; createdAt: string;
+  }>;
+  /** Roll back to the previous successful production deployment selected server-side. */
+  rollbackProduction?(deploymentId: string): Promise<{
+    deploymentId: string; siteId: string; projectId: string; environment: 'production'; action: 'promote' | 'rollback'; status: string;
+    projectRevision: number; frozenRevisionId: string | null; materializationHash: string | null;
+    git: { repository: string; branch: string; sha: string } | null; image: { tag: string; digest: string; id: string } | null;
+    slot: 'blue' | 'green' | null; containerId: string | null; productionUrl: string | null; sourceDeploymentId: string | null; createdAt: string;
+  }>;
 
   /** Optional versioned-persistence hook: retain loaded settings while the editor
    *  serializes file changes. Explicit settings in `data` take precedence. */

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parse } from '@babel/parser';
 import _generate from '@babel/generator';
-import { setScrollVariantInCode, getScrollVariant, scrollVariantPresentOn, scrollVariantIsOverride, hideScrollVariantOn, resetScrollVariantScope, hasScrollVariantTargetScope, dormantizeScrollVariant, rehydrateScrollVariant, substituteScrollVariantFromVarForCanvas, removeScrollVariantFromVarRefs, type ScrollVariantSpec } from './scroll-variant-gen';
+import { setScrollVariantInCode, getScrollVariant, scrollVariantPresentOn, scrollVariantIsOverride, hideScrollVariantOn, resetScrollVariantScope, hasScrollVariantTargetScope, dormantizeScrollVariant, rehydrateScrollVariant, substituteScrollVariantFromVarForCanvas, removeScrollVariantFromVarRefs, resolveSectionTarget, setSectionTargetScoped, type ScrollVariantSpec } from './scroll-variant-gen';
 import type { SerScope } from './generator-motion';
 import { parseJSX } from '@/code/parsing/ast-utils';
 import { syncImports, validateGeneratedCode } from '@/code/mutation/mutation-queue';
@@ -53,6 +53,42 @@ describe('Scroll Variant — page-level initialVariant control', () => {
     // …and its gate must be the 375px query, with tablet next, base last.
     expect(out).toMatch(new RegExp(`const ${first![1]} = useMediaQuery\\('\\(max-width: 375px\\)'\\)`));
     expect(init).toMatch(/'variant-4' : __mq\d+ \? 'variant-2' : 'default'/);
+  });
+
+  it('each section carries its OWN per-viewport target (a scroll variant with tablet targets per section)', () => {
+    // An imported About Card: four sections, each with a desktop AND a tablet target,
+    // and the phone switched off (every section resolves to the phone resting).
+    const tablet: SerScope = { query: '(max-width: 1199px)' };
+    const phone: SerScope = { query: '(max-width: 809px)' };
+    const spec = {
+      trigger: 'sectionInView', from: 'default', viewport: 'middle', replay: true,
+      sections: [
+        { sectionId: 'about', to: 'default', responsive: [{ scope: tablet, to: 'variant-4' }] },
+        { sectionId: 'service', to: 'variant-1', responsive: [{ scope: tablet, to: 'variant-5' }] },
+      ],
+      responsive: [
+        { scope: tablet, from: 'variant-4' },
+        { scope: phone, from: 'variant-8', to: 'variant-8' },
+      ],
+    } as ScrollVariantSpec;
+    const out = setScrollVariantInCode(PAGE, 'hero', spec);
+    expect(parseJSX(out)).not.toBeNull();
+    const mqOf = (q: string) => out.match(new RegExp(`const (__mq\\d+) = useMediaQuery\\('${q.replace(/[()]/g, '\\$&')}'\\)`))?.[1];
+    const t = mqOf('(max-width: 1199px)'), ph = mqOf('(max-width: 809px)');
+    expect(t && ph).toBeTruthy();
+    // Section 0: tablet → variant-4 (its own), phone → variant-8 (the flat off target), else default.
+    expect(out).toContain(`if (heroSvSec0El && heroSvSec0El.getBoundingClientRect().top < window.innerHeight * 0.5) v = (${ph} ? 'variant-8' : ${t} ? 'variant-4' : 'default');`);
+    // Section 1 keeps ITS tablet target — not section 0's.
+    expect(out).toContain(`v = (${ph} ? 'variant-8' : ${t} ? 'variant-5' : 'variant-1');`);
+    // Read-back per tile, per section.
+    expect(resolveSectionTarget(spec, 1, tablet)).toBe('variant-5');
+    expect(resolveSectionTarget(spec, 1, phone)).toBe('variant-8');
+    expect(resolveSectionTarget(spec, 1, null)).toBe('variant-1');
+    // Writing a replica's target touches ONE section, and the override dot sees it.
+    const next = setSectionTargetScoped(spec, 0, 'variant-6', tablet);
+    expect(resolveSectionTarget(next, 0, tablet)).toBe('variant-6');
+    expect(resolveSectionTarget(next, 1, tablet)).toBe('variant-5');
+    expect(hasScrollVariantTargetScope(next, tablet)).toBe(true);
   });
 
   it('section bound to a VARIABLE re-queries getElementById(<var>) inside the handler (no cached ref)', () => {

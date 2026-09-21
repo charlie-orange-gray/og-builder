@@ -230,7 +230,19 @@ export function injectFlexLayoutOnFrame(
   // Layout config (standard). The flex props alone are enough;
   // a later unhide auto-restores `display: 'flex'` via
   // `updateNodeStyles`'s auto-display-restore.
-  const isHidden = node.styles?.display === 'none';
+  //
+  // HIDDEN WHERE THE USER IS LOOKING, not hidden in the base style. A node
+  // added on one replica is STORED as an inline `display: 'none'` plus a band
+  // rule that shows it on its own viewport (`data-replica-solo`) — the base
+  // `none` is the storage mechanism, not a hide. Reading it as one meant
+  // adding Layout to such a frame wrote the flex properties and never
+  // `display: flex`, so its band kept the `block` that removing Layout had
+  // left: the frame stayed a block, its flex props were inert, its children
+  // fell back to inline and vanished, and the Position tool — correctly
+  // reading a non-layout parent — greyed out Relative for them (user report
+  // 2026-09-18, mobile overlay inside a template).
+  const displayHere = findNodeComputedStyle(nodeId, vpId, 'display');
+  const isHidden = (displayHere || node.styles?.display) === 'none';
   const layoutStyles: Record<string, string> = {
     flexDirection: 'column',
     alignItems: 'center',

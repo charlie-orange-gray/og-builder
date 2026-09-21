@@ -115,7 +115,7 @@ export function UsagePopup({ usages, triggerRef, onClose }: UsagePopupProps) {
             >
               <div className="flex-1 min-w-0">
                 <span className="block text-xs font-medium text-[var(--text-primary)] truncate">{u.nodeName}</span>
-                <span className="block text-[10px] text-[var(--text-disabled)] truncate">{u.fileLabel}</span>
+                <span className="block text-[10px] text-[var(--text-disabled)] truncate">{u.detail ? `${u.detail} · ${u.fileLabel}` : u.fileLabel}</span>
               </div>
               <span className="opacity-0 group-hover:opacity-100 px-1.5 py-0.5 rounded text-[10px] font-medium bg-white/10 text-[var(--text-secondary)] transition-opacity">View</span>
             </div>

@@ -569,3 +569,67 @@ ${ROOT_CLOSE}`);
     expect(codesOf(code)).not.toContain('INTERACTION_HANDLER_BODY_UNREADABLE');
   });
 });
+
+describe('page hooks — the builder\'s own Scroll Transform shapes are not hand-written', () => {
+  const single = `'use client';
+import React, { useRef, useEffect } from 'react';
+import { motion, useScroll, useTransform } from 'framer-motion';
+
+export default function Page() {
+  const cardRef = useRef(null);
+  useEffect(() => { cardRef.current = document.getElementById('next') || document.body; }, []);
+  const { scrollYProgress: cardProgress } = useScroll({ target: cardRef, offset: ["start end", "end end"] });
+  const cardScale = useTransform(cardProgress, [0, 1], [1, 0.8]);
+  return (
+    <div data-id="root" data-name="Page" style={{ position: 'relative' }}>
+      <motion.div data-id="card" data-name="Card" style={{ position: 'relative', scale: cardScale }}></motion.div>
+      <div data-id="next" data-name="Next" id="next" style={{ position: 'relative' }}></div>
+    </div>
+  );
+}
+`;
+  const multi = `'use client';
+import React, { useRef, useState, useEffect } from 'react';
+import { motion, useScroll, useTransform, useSpring } from 'framer-motion';
+
+export default function Page() {
+  const heroSec0Ref = useRef(null);
+  const heroSec1Ref = useRef(null);
+  const [heroSecPositions, setHeroSecPositions] = useState(() => Array(2).fill(0));
+  useEffect(() => {
+    heroSec0Ref.current = document.getElementById('service');
+    heroSec1Ref.current = document.getElementById('about');
+    const compute = () => {
+      const pageH = document.documentElement.scrollHeight - window.innerHeight;
+      if (pageH <= 0) return;
+      const offsetPx = window.innerHeight;
+      setHeroSecPositions([heroSec0Ref.current ? Math.max(0, Math.min(1, (heroSec0Ref.current.offsetTop - offsetPx) / pageH)) : 0, heroSec1Ref.current ? Math.max(0, Math.min(1, (heroSec1Ref.current.offsetTop - offsetPx) / pageH)) : 0]);
+    };
+    compute();
+    window.addEventListener('resize', compute);
+    return () => window.removeEventListener('resize', compute);
+  }, []);
+  const { scrollYProgress: heroProgress } = useScroll();
+  const heroSmooth = useSpring(heroProgress, { stiffness: 500, damping: 60, mass: 1, restDelta: 0.001 });
+  const heroX = useTransform(heroSmooth, [0, heroSecPositions[0], heroSecPositions[1], 1], [0, 340, 340, 340]);
+  return (
+    <div data-id="root" data-name="Page" style={{ position: 'relative' }}>
+      <motion.div data-id="hero" data-name="Hero" style={{ position: 'relative', x: heroX }}></motion.div>
+      <div data-id="service" data-name="Service" id="service" style={{ position: 'relative' }}></div>
+      <div data-id="about" data-name="About" id="about" style={{ position: 'relative' }}></div>
+    </div>
+  );
+}
+`;
+  it('single-section: the anchor-resolve effect is generated, not hand-written', () => {
+    expect(checkFile(single, { kind: 'page' }).map((x) => x.code)).not.toContain('PAGE_HOOK_UNRESOLVED');
+  });
+  it('multi-section: the positions state and its resize-aware effect are generated', () => {
+    expect(checkFile(multi, { kind: 'page' }).map((x) => x.code)).not.toContain('PAGE_HOOK_UNRESOLVED');
+  });
+  it('a hand-rolled resize listener is still flagged', () => {
+    const hand = single.replace("useEffect(() => { cardRef.current = document.getElementById('next') || document.body; }, []);",
+      "useEffect(() => { const f = () => {}; window.addEventListener('resize', f); return () => window.removeEventListener('resize', f); }, []);");
+    expect(checkFile(hand, { kind: 'page' }).map((x) => x.code)).toContain('PAGE_HOOK_UNRESOLVED');
+  });
+});

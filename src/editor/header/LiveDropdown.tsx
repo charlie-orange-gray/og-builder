@@ -91,6 +91,10 @@ interface Props {
   publishSuccess: boolean;
   publishNotice?: string | null;
   stagingUrl?: string | null;
+  productionPromotion?: boolean;
+  productionNotice?: string | null;
+  onPromoteProduction?: () => void;
+  onRollbackProduction?: () => void;
   stagingDeployment?: boolean;
   selfHosted?: boolean;
   /** 0–1, advances during publishing. The dropdown renders a fill bar
@@ -113,7 +117,7 @@ interface Props {
   onOpenStaging?: () => void;
 }
 
-export function LiveDropdown({ open, meta, publishing, publishSuccess, publishNotice, stagingUrl, stagingDeployment = false, selfHosted = false, progress, onPublish, onClose, onOpenBackups, onAddDomain, onOpenStaging }: Props) {
+export function LiveDropdown({ open, meta, publishing, publishSuccess, publishNotice, stagingUrl, productionPromotion = false, productionNotice, onPromoteProduction, onRollbackProduction, stagingDeployment = false, selfHosted = false, progress, onPublish, onClose, onOpenBackups, onAddDomain, onOpenStaging }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Outside-click close — but only when the click is genuinely outside the
@@ -296,6 +300,17 @@ export function LiveDropdown({ open, meta, publishing, publishSuccess, publishNo
               Open staging <ExternalLink size={10} />
             </a>
           )}
+          {productionPromotion && onPromoteProduction && (
+            <button type="button" onClick={onPromoteProduction} disabled={publishing} className="w-full h-7 px-3 text-xs cut-corners font-medium flex items-center justify-center bg-[var(--button-secondary-bg)] hover:bg-[var(--button-secondary-hover)] text-[var(--text-primary)] disabled:opacity-50 transition-colors cursor-pointer">
+              Promote to production
+            </button>
+          )}
+          {productionPromotion && onRollbackProduction && (
+            <button type="button" onClick={onRollbackProduction} disabled={publishing} className="w-full h-7 px-3 text-xs cut-corners font-medium flex items-center justify-center text-amber-400 border border-amber-400/40 hover:bg-amber-400/10 disabled:opacity-50 transition-colors cursor-pointer">
+              Rollback production
+            </button>
+          )}
+          {productionNotice && <p className="px-2 py-1 text-[10px] text-[var(--text-secondary)]">{productionNotice}</p>}
         </div>
       </div>
     </motion.div>

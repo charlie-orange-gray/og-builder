@@ -53,6 +53,9 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
   const [publishSuccess, setPublishSuccess] = useState(false);
   const [publishNotice, setPublishNotice] = useState<string | null>(null);
   const [stagingUrl, setStagingUrl] = useState<string | null>(null);
+  const [stagingDeploymentId, setStagingDeploymentId] = useState<string | null>(null);
+  const [productionDeploymentId, setProductionDeploymentId] = useState<string | null>(null);
+  const [productionNotice, setProductionNotice] = useState<string | null>(null);
   // Publish failures used to go through window.alert(), which is unstyled,
   // blocks the tab, and gives a plan-limit rejection no way to act on itself.
   // `upgradable` marks the PAYMENT_REQUIRED case so the dialog can offer the
@@ -98,6 +101,8 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
       const res = await fetch(`/api/websites/${id}`);
       if (!res.ok) return;
       const w = await res.json();
+      setStagingDeploymentId(typeof w.deployment_id === 'string' ? w.deployment_id : null);
+      setProductionDeploymentId(typeof w.production_deployment_id === 'string' ? w.production_deployment_id : null);
       const parsed = parseWebsiteMeta(w);
       setMeta(parsed);
       // Mirror into the shared atom so non-header chrome (the bottom
@@ -217,6 +222,7 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
         if (release.status !== 'ready-for-build' && release.status !== 'active') throw new Error('The staging source was not published.');
         const sha = release.git?.sha ?? 'unavailable';
         const url = release.stagingUrl;
+        setStagingDeploymentId(release.deploymentId);
         setStagingUrl(url);
         setPublishNotice(release.status === 'active'
           ? `Staging deployed · revision ${release.projectRevision} · ${sha.slice(0, 12)}${url ? ` · ${url}` : ''}`
@@ -256,6 +262,30 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
       setPublishing(false);
     }
   }, [publishing, startProgress, stopProgress, fetchMeta]);
+
+  const handlePromoteProduction = useCallback(async () => {
+    if (!backendCapabilities.productionPromotion || !backend.promoteProduction || !stagingDeploymentId || publishing) return;
+    setPublishing(true); setProductionNotice('Promoting to production…');
+    try {
+      const release = await backend.promoteProduction(stagingDeploymentId);
+      setProductionDeploymentId(release.deploymentId);
+      setProductionNotice(release.productionUrl ? `Production active · ${release.productionUrl}` : 'Production promotion queued');
+      await fetchMeta();
+    } catch (error) { setProductionNotice(error instanceof Error ? error.message : 'Production promotion failed'); }
+    finally { setPublishing(false); }
+  }, [stagingDeploymentId, publishing, fetchMeta]);
+
+  const handleRollbackProduction = useCallback(async () => {
+    if (!backendCapabilities.productionPromotion || !backend.rollbackProduction || !productionDeploymentId || publishing) return;
+    setPublishing(true); setProductionNotice('Rolling back production…');
+    try {
+      const release = await backend.rollbackProduction(productionDeploymentId);
+      setProductionDeploymentId(release.deploymentId);
+      setProductionNotice(release.productionUrl ? `Production rolled back · ${release.productionUrl}` : 'Production rollback queued');
+      await fetchMeta();
+    } catch (error) { setProductionNotice(error instanceof Error ? error.message : 'Production rollback failed'); }
+    finally { setPublishing(false); }
+  }, [productionDeploymentId, publishing, fetchMeta]);
 
   // Toggle dropdown — clicks on the Live button itself open/close it.
   // The dropdown's outside-click handler skips clicks on
@@ -409,6 +439,10 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
             publishSuccess={publishSuccess}
             publishNotice={publishNotice}
             stagingUrl={stagingUrl}
+            productionPromotion={backendCapabilities.productionPromotion}
+            productionNotice={productionNotice}
+            onPromoteProduction={handlePromoteProduction}
+            onRollbackProduction={handleRollbackProduction}
             stagingDeployment={backendCapabilities.stagingDeployment}
             selfHosted={backendCapabilities.persistence === 'self-hosted'}
             progress={progress}

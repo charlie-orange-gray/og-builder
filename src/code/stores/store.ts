@@ -59,11 +59,39 @@ export const codeAtom = atom(
  * index keeps behavior for exotic hand-written markup.
  */
 export function jsxDataIdIndex(code: string, dataId: string): number {
-  const esc = dataId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp('<[A-Za-z][\\w.]*[^>]*?data-id="' + esc + '"');
-  const m = re.exec(code);
-  if (m) return m.index;
-  return code.indexOf(`data-id="${dataId}"`);
+  // Every occurrence of the attribute, tested for sitting INSIDE a JSX
+  // opening tag. A `[^>]*?` scan from the tag's `<` cannot reach an id whose
+  // tag carries an arrow-function handler (`onSubmit={(e) => {…}}` — the
+  // `>` of `=>` ends it), and the raw-substring fallback then found the
+  // id's `[data-id="…"]` BAND RULE in the page's <style> block above the
+  // slot — an imported home page spliced itself into the footer's
+  // subscription form (2026-09-16).
+  const needle = `data-id="${dataId}"`;
+  let fallback = -1;
+  for (let i = code.indexOf(needle); i !== -1; i = code.indexOf(needle, i + 1)) {
+    if (fallback === -1) fallback = i;
+    const tag = jsxOpeningTagStart(code, i);
+    if (tag !== -1) return tag;
+  }
+  return fallback;
+}
+
+/** The `<` of the JSX opening tag whose attribute list contains position `i`,
+ *  or -1 when `i` sits in an expression (`{…}`), a string, or text. Walks
+ *  back at brace depth 0: a `{` met at depth 0 means `i` is inside an
+ *  expression; a `>` at depth 0 means a tag closed before `i`. */
+function jsxOpeningTagStart(code: string, i: number): number {
+  let depth = 0;
+  for (let j = i - 1; j >= 0; j--) {
+    const c = code[j];
+    if (c === '}') depth++;
+    else if (c === '{') { if (depth === 0) return -1; depth--; }
+    else if (depth === 0) {
+      if (c === '>') return -1;
+      if (c === '<' && /[A-Za-z]/.test(code[j + 1] ?? '')) return j;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -586,15 +614,24 @@ export function getVariantOverriddenKeys(nodeId: string, variantName: string): S
   const variantStyles = node.motionVariants?.[variantName];
   if (variantStyles) {
     for (const k of Object.keys(variantStyles)) keys.add(k);
-    // Motion transform props (x/y translate deltas, rotate, scale, skews —
-    // plus legacy attrX/attrY absolutes) PAINT as this variant's own
-    // `transform` (foldMotionTransforms). The component-primary mid-drag
-    // mirror writes `transform` — without this mapping it clobbers the
-    // variant's independent position/rotation live (the child visually syncs
-    // to the primary drag, then snaps back on commit; live finds 2026-06-11).
-    // A variant that owns any motion transform owns its transform.
+    // POSITION-bearing motion props (x/y translate deltas, plus legacy
+    // attrX/attrY absolutes) PAINT as this variant's own `transform`
+    // (foldMotionTransforms). The component-primary mid-drag mirror writes
+    // `transform` — without this mapping it clobbers the variant's independent
+    // POSITION live (the child visually syncs to the primary drag, then snaps
+    // back on commit; live finds 2026-06-11).
+    //
+    // A rotation/scale/skew is NOT position, and used to be listed here too.
+    // That was right while the mirror wrote a bare `translate(dx, dy)` — which
+    // would have wiped the tile's angle — but the drag fan-out now composes
+    // `translate(dx, dy)` with THAT TILE's own transform
+    // (foldEffectiveTransform), so its rotation survives. Keeping them here
+    // only froze such a tile: a variant whose sole override was `rotate` stopped
+    // following the primary's position live and jumped on mouse-up instead
+    // (user report 2026-09-21 — Tablet synced, Mobile didn't; Mobile's entry
+    // was `{ rotate: 141.9, skewX: 0 }`).
     const hasOwn = (k: string) => variantStyles[k] != null && variantStyles[k] !== '';
-    if (['x', 'y', 'attrX', 'attrY', 'rotate', 'rotateX', 'rotateY', 'rotateZ', 'scale', 'scaleX', 'scaleY', 'skewX', 'skewY'].some(hasOwn)) {
+    if (['x', 'y', 'attrX', 'attrY'].some(hasOwn)) {
       keys.add('transform');
     }
     // POSITION-channel override (top-level svg wrapper / absolute box whose

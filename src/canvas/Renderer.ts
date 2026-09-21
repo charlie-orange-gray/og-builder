@@ -15,7 +15,7 @@ import { resolveOverlayConfig } from '@/code/parsing/overlay-parser';
 import { trace, pauseDOMObserver, resumeDOMObserver } from '@/shared/debug-trace';
 import { jsxStyleToHTML, coerceCssNumberToPx, mergeStyleLayers } from '@/shared/css-utils';
 import { isSvgTag, isTextTag, WRAPPER_ONLY_STYLE_PROPS, isFitSize, isInlineLevelTag } from '@/shared/constants';
-import { resolveResponsiveUnits, resolveContainerQueryUnits } from '@/shared/responsive-units';
+import { resolveResponsiveUnits, resolveContainerQueryUnits, canvasFixedAnchor } from '@/shared/responsive-units';
 import { hasMotionTransformProp, motionPropsToCSSTransform, MOTION_TRANSFORM_PROPS } from '@/shared/motion-transform';
 import { simpleHash } from '@/shared/hash-utils';
 import { getOrCreateCanvasStyleEl, getActiveFilePath } from './node-ops';
@@ -31,6 +31,8 @@ import { positionOverlayInPortal, positionCanvasNodeOverlays, collectOverlayElsF
 import { applyStrokeAlignment, setElStyle, clearElStyle, resolveInstanceWrapperOverflow } from './renderer/style-apply';
 import { initCanvasImagePreview, isPreviewAppliedSrc } from './renderer/canvas-image-preview';
 import { applyNodeCmsBindings, applyBindingDataToTree, applyLocaleOverrides, clearLocaleStyleResidue } from './renderer/bindings';
+import { extractCanvasGlobals, canvasThemeMode } from './canvas-theme';
+import { scopeSvgMarkupIds, elementSvgScope } from '../shared/svg-id-scope';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -974,83 +976,13 @@ export function renderNodes(
     // re-apply the font), flashing custom-font text → FOUT on every pan/render.
     let fontsCSS = '';
     if (rawGlobalsCSS) {
-      const safeBlocks: string[] = [];
-      const fontFaceBlocks: string[] = [];
-      // Extract @import rules (typically Google Fonts) and keep them — without
-      // them the iframe falls back to default fonts even when the user's CSS
-      // references custom families. They MUST appear before any other rule
-      // per CSS spec, so we collect them up front and prepend at output time.
-      const fontImports: string[] = [];
-      const withoutImports = rawGlobalsCSS.replace(/@import\s+url\([^)]*\)[^;]*;/g, (match) => {
-        fontImports.push(match);
-        return '';
-      });
-      // Extract :root and [data-theme] blocks — scope them to canvas content
-      const rootRx = /:root\s*\{([^}]*)\}/gs;
-      let m;
-      while ((m = rootRx.exec(withoutImports)) !== null) {
-        // Scope to canvas content area so tokens don't leak to builder UI
-        safeBlocks.push(`[data-content-root] {${m[1]}}`);
-      }
-      // Also extract @keyframes (safe to include globally)
-      // Use brace-depth counting instead of regex (nested braces break regex)
-      {
-        const KF = '@keyframes';
-        let ki = 0;
-        while (ki < withoutImports.length) {
-          const kfStart = withoutImports.indexOf(KF, ki);
-          if (kfStart === -1) break;
-          let j = kfStart + KF.length;
-          while (j < withoutImports.length && withoutImports[j] !== '{') j++;
-          if (j >= withoutImports.length) break;
-          let depth = 1; j++;
-          while (j < withoutImports.length && depth > 0) {
-            if (withoutImports[j] === '{') depth++;
-            else if (withoutImports[j] === '}') depth--;
-            j++;
-          }
-          safeBlocks.push(withoutImports.slice(kfStart, j));
-          ki = j;
-        }
-      }
-      // Extract @font-face blocks (custom / workspace fonts). Safe to include
-      // globally — they only DECLARE a face for the iframe to resolve, they
-      // don't reset or style anything. Without this, text bound to a custom
-      // family falls back to a system font on the canvas even though the
-      // @font-face exists in globals.css. Brace-depth scan (same as
-      // @keyframes) so the single block is captured exactly.
-      {
-        const FF = '@font-face';
-        let fi = 0;
-        while (fi < withoutImports.length) {
-          const ffStart = withoutImports.indexOf(FF, fi);
-          if (ffStart === -1) break;
-          let j = ffStart + FF.length;
-          while (j < withoutImports.length && withoutImports[j] !== '{') j++;
-          if (j >= withoutImports.length) break;
-          let depth = 1; j++;
-          while (j < withoutImports.length && depth > 0) {
-            if (withoutImports[j] === '{') depth++;
-            else if (withoutImports[j] === '}') depth--;
-            j++;
-          }
-          fontFaceBlocks.push(withoutImports.slice(ffStart, j));
-          fi = j;
-        }
-      }
-      // Extract [data-theme] blocks
-      const themeRx = /\[data-theme[^\]]*\]\s*\{([^}]*)\}/gs;
-      while ((m = themeRx.exec(withoutImports)) !== null) {
-        safeBlocks.push(`[data-content-root] {${m[1]}}`);
-      }
-      // Tokens = :root vars + @keyframes + themes ONLY (NO fonts — those go to
-      // `fontsCSS` → the stable [data-canvas-fonts] sheet). This also makes the
-      // marker block match refreshCanvasTokens' regex (which never matched fonts),
-      // so live token updates stay in lockstep.
-      tokensCSS = safeBlocks.join('\n');
-      // @import MUST be the first rule in its sheet (CSS spec) → imports first,
-      // then @font-face declarations.
-      fontsCSS = [...fontImports, ...fontFaceBlocks].join('\n');
+      // Tokens = :root vars (+ the :root.dark values when the editor is in
+      // dark mode) + @keyframes + theme blocks ONLY — the same extractor
+      // refreshCanvasTokens() uses, so a live token update replaces exactly
+      // what was rendered. NEVER resets, body/html, a/img styles.
+      const lifted = extractCanvasGlobals(rawGlobalsCSS, canvasThemeMode());
+      tokensCSS = lifted.tokensCSS;
+      fontsCSS = lifted.fontsCSS;
     }
     // Tokens block contains :root vars, @keyframes, and theme blocks. Font
     // @imports were extracted separately above (they MUST appear before any
@@ -2470,6 +2402,17 @@ export function patchElement(
   for (const [key, v] of styleEntries) {
     if (v !== '' && readStyle(key) !== coerceCssNumberToPx(key, v)) setElStyle(el, key, v);
   }
+  // A `fixed` node lives inside ONE viewport height on a real screen; the
+  // canvas turned it into `absolute`, which measures `bottom` from the bottom
+  // of the whole page. Re-anchor it to the top of the tile so the dock floats
+  // over the hero instead of sitting past the footer.
+  {
+    const anchor = canvasFixedAnchor(resolvedStyles as Record<string, string>, vpWidthPx);
+    if (anchor) {
+      for (const [key, v] of Object.entries(anchor)) setElStyle(el, key, v);
+      trace.dom('renderer:canvas-fixed-anchor', { nodeId: node.id, top: anchor.top });
+    }
+  }
 
   // BLOCKIFY the inner root of an instance. On the live site the component's
   // single element IS the flex/grid item — or is absolutely positioned — and
@@ -2610,7 +2553,9 @@ export function patchElement(
   if (node.graphicMarkup !== undefined && isSvgTag(node.type)) {
     if ((el as HTMLElement & { __graphicMarkup?: string }).__graphicMarkup !== node.graphicMarkup) {
       try {
-        el.innerHTML = node.graphicMarkup;
+        // Ids are scoped per element so a culled (display:none) copy of the same
+        // graphic can't steal this one's clipPath/mask refs. See svg-id-scope.
+        el.innerHTML = scopeSvgMarkupIds(node.graphicMarkup, elementSvgScope(el));
         (el as HTMLElement & { __graphicMarkup?: string }).__graphicMarkup = node.graphicMarkup;
         trace.dom('renderer:patch-graphic-markup', { nodeId: node.id, length: node.graphicMarkup.length });
       } catch (err) {
@@ -3557,6 +3502,14 @@ function buildNodeElement(
       && (key === 'top' || key === 'left' || key === 'right' || key === 'bottom');
     if (!isOverlayPosKey) buildPatchedKeys.add(key);
   }
+  // Same re-anchor as patchElement, for the FIRST paint (see canvasFixedAnchor).
+  {
+    const anchor = canvasFixedAnchor(resolvedStyles as Record<string, string>, buildVpWidthPx);
+    if (anchor) {
+      for (const [key, v] of Object.entries(anchor)) { setElStyle(el, key, v); buildPatchedKeys.add(key); }
+      trace.dom('renderer:canvas-fixed-anchor-build', { nodeId: node.id, top: anchor.top });
+    }
+  }
   if (buildPatchedKeys.size > 0) {
     _prevPatchedKeys.set(el, buildPatchedKeys);
     if (Object.keys(buildResponsive).length > 0) {
@@ -3644,7 +3597,8 @@ function buildNodeElement(
   // graphicMarkup injection (see there for why innerHTML, not child nodes).
   if (node.graphicMarkup !== undefined && isSvg) {
     try {
-      el.innerHTML = node.graphicMarkup;
+      // Per-element id scoping — see the patch path / svg-id-scope.
+      el.innerHTML = scopeSvgMarkupIds(node.graphicMarkup, elementSvgScope(el));
       (el as HTMLElement & { __graphicMarkup?: string }).__graphicMarkup = node.graphicMarkup;
       trace.dom('renderer:build-graphic-markup', { nodeId: node.id, length: node.graphicMarkup.length });
     } catch (err) {

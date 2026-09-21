@@ -746,6 +746,12 @@ export interface ApprovedTemplate {
   preview_url: string | null;
   author: string | null;
   avatar: string | null;
+  /** Marketplace detail-page view count — the popularity signal the
+   *  fresh-site template prompt ranks by. Always sent by `/approved`. */
+  views: number;
+  /** Websites ever created from this template (counted from
+   *  `websites.remix_template_id`, so it is retroactively complete). */
+  remix_count: number;
 }
 
 /** The marketplace's canonical free/paid predicate — there is no boolean

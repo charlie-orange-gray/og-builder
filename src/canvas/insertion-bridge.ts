@@ -24,6 +24,7 @@ import { interactingViewportIdAtom, viewportWidthsAtom } from '@/code/stores/vie
 import { activeFilePathAtom } from '@/code/project/active-file-store';
 import { transformManager } from '@/canvas/transform';
 import { executePaste } from '@/code/features/paste-engine/paste';
+import { resolveParentHasLayout } from '@/code/features/paste-engine/execute-from-ui';
 import { generateNodeId } from '@/shared/id-utils';
 import { getComponentRootSize } from '@/code/components/component-registry';
 import { projectFS } from '@/code/project/project-fs';
@@ -103,6 +104,7 @@ export function insertNodes(nodes: ClipboardNode[], opts: InsertOptions = {}): s
     forcePosition: opts.forcePosition,
     forceNoLayoutPosition: opts.forceNoLayoutPosition,
     interactingVpId,
+    parentHasLayout: resolveParentHasLayout(liveNodes, selectedIds[0], interactingVpId),
     viewportWidths,
     activeFilePath,
     overrideClipboard,

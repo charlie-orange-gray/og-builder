@@ -17,6 +17,7 @@ import { parseJSXToNodes } from '../parsing/parser';
 import { extractImports, resolveImportPath } from '../components/import-resolver';
 import { trace } from '@/shared/debug-trace';
 import { deriveFileLabel, type PresetUsage } from './preset-store';
+import { OVERRIDES_DIR, liftCodeOverrides, overrideNamesInOpenTag, resolveOverrideLocal } from '../generation/code-override-gen';
 
 /** A JSX tag is a component/vector instance iff it starts uppercase and has no
  *  member access (`motion.div` is a motion element, not a library instance). */
@@ -131,4 +132,46 @@ export const componentUsageAtom = atom<Map<string, PresetUsage[]>>((get) => {
   });
 
   return result;
+});
+
+// ─── Code overrides ──────────────────────────────────────────────────────────
+
+/** Elements wrapped in `<Override with={…}>`, keyed by override file
+ *  (`overrides/File.tsx`); each usage's `detail` names the export(s) applied. */
+export function scanCodeOverrideUsage(files: Map<string, string>): Map<string, PresetUsage[]> {
+  const result = new Map<string, PresetUsage[]>();
+  const push = (key: string, u: PresetUsage) => {
+    let arr = result.get(key);
+    if (!arr) { arr = []; result.set(key, arr); }
+    arr.push(u);
+  };
+  for (const [filePath, code] of files) {
+    if (!filePath.endsWith('.tsx') || filePath.startsWith(OVERRIDES_DIR) || !code.includes('<Override')) continue;
+    const { lifted } = liftCodeOverrides(code);
+    // liftCodeOverrides walks last-to-first; list usages in source order.
+    for (const [nodeId, openTag] of [...lifted].reverse()) {
+      const nodeName = new RegExp(`data-id="${nodeId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*?data-name="([^"]*)"`).exec(code)?.[1] ?? nodeId;
+      // One usage per element per file; `detail` names the override(s) it applies.
+      const byFile = new Map<string, string[]>();
+      for (const local of overrideNamesInOpenTag(openTag)) {
+        const ref = resolveOverrideLocal(code, local);
+        if (!ref) continue;
+        byFile.set(ref.file, [...(byFile.get(ref.file) ?? []), ref.name]);
+      }
+      for (const [file, names] of byFile) {
+        push(file, { filePath, fileLabel: containerLabel(filePath), nodeId, nodeName, detail: names.join(', ') });
+      }
+    }
+  }
+  return result;
+}
+
+export const codeOverrideUsageAtom = atom<Map<string, PresetUsage[]>>((get) => {
+  get(projectVersionAtom);
+  const files = new Map<string, string>();
+  for (const path of projectFS.listFiles()) {
+    const content = projectFS.readFile(path);
+    if (content !== null && content.includes('<Override')) files.set(path, content);
+  }
+  return scanCodeOverrideUsage(files);
 });

@@ -55,8 +55,12 @@ function computeLocalCssPropForVar(varName: string, code: string): string {
   // chained MotionConfig `{ … transition2 : variant === 'variant-1' ? transition1 … }` resolved `transition1`'s
   // cssProp to `transition2` (a non-style identifier) → the variable modal / instance editor lost the transition
   // control and showed a raw input.
+  // The var must be a bare IDENTIFIER in a branch — never a word inside a string literal or a
+  // hyphenated keyword. `\\b${varName}\\b` matched the `end` of `'flex-end'` in
+  // `alignItems: variant === 'variant-1' ? 'flex-end' : 'flex-start'`, so a prop named `end` (a
+  // counter's target) resolved to alignItems and its row rendered an Align select.
   const cond = new RegExp(
-    `[{,]\\s*(['"]--[\\w-]+['"]|\\w+)\\s*:\\s*(?:initialVariant|variant)\\s*===[^,{}]*?\\?[^,{}]*?\\b${varName}\\b`,
+    `[{,]\\s*(['"]--[\\w-]+['"]|\\w+)\\s*:\\s*(?:initialVariant|variant)\\s*===[^,{}]*?\\?[^,{}]*?(?<![\\w.'"-])${varName}(?![\\w.'"-])`,
   ).exec(code);
   if (cond) {
     const key = cond[1];
@@ -75,7 +79,7 @@ function computeLocalCssPropForVar(varName: string, code: string): string {
   // bound on a replica) resolved to no CSS prop → the variable modal's Default editor fell back to a text
   // input instead of the real control (e.g. the Transform popup). `[^,{}]` keeps the match inside one value.
   const vp = new RegExp(
-    `[{,]\\s*(['"]--[\\w-]+['"]|\\w+)\\s*:\\s*\\(?\\s*__mq\\d+\\s*\\?[^,{}]*?\\b${varName}\\b`,
+    `[{,]\\s*(['"]--[\\w-]+['"]|\\w+)\\s*:\\s*\\(?\\s*__mq\\d+\\s*\\?[^,{}]*?(?<![\\w.'"-])${varName}(?![\\w.'"-])`,
   ).exec(code);
   if (vp) {
     const key = vp[1];

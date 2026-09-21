@@ -40,6 +40,8 @@ export interface PresetUsage {
   fileLabel: string; // human-friendly label (e.g. 'Home', '/about', 'Hero.tsx')
   nodeId: string;
   nodeName: string;
+  /** Extra context shown small under the name (e.g. the code override applied). */
+  detail?: string;
 }
 
 /** Pure, file-map-driven preset usage scanner — extracted from the atom so

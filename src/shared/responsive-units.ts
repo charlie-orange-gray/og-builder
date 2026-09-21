@@ -40,6 +40,42 @@ export function simulatedVpHeight(vpWidthPx: number): number {
   return vpWidthPx * heightRatio;
 }
 
+/**
+ * Canvas anchoring for a `position: fixed` node.
+ *
+ * The canvas turns `fixed` into `absolute` (a transformed ancestor breaks
+ * fixed positioning), which leaves `bottom: 50px` measured from the bottom of
+ * the WHOLE PAGE — a dock meant to float over the hero ends up 10,000px down,
+ * past the footer. On a real screen a fixed element only ever lives inside one
+ * viewport height, so the canvas has to show it there: measure from the top of
+ * the tile — the same place a real screen would put it.
+ *
+ * `bottom: B` becomes `top: <vh − B>` plus a `translateY(-100%)` so the
+ * element's BOTTOM edge lands on the `vh − B` line. A top-anchored fixed node
+ * already measures from the top of the tile and is left alone.
+ *
+ * Returns null when there is nothing to re-anchor.
+ */
+export function canvasFixedAnchor(
+  styles: Record<string, string>,
+  vpWidthPx: number,
+): Record<string, string> | null {
+  if (styles.position !== 'fixed') return null;
+  const top = styles.top;
+  if (top != null && top !== '' && top !== 'auto') return null;   // already top-anchored
+  const raw = styles.bottom;
+  if (raw == null || raw === '' || raw === 'auto') return null;
+  const bottom = parseFloat(resolveResponsiveUnits(raw, vpWidthPx));
+  if (!isFinite(bottom)) return null;
+  const existing = styles.transform && styles.transform !== 'none' ? ` ${styles.transform}` : '';
+  return {
+    top: `${Math.round(simulatedVpHeight(vpWidthPx) - bottom)}px`,
+    bottom: 'auto',
+    // Pure translations commute, so a centring `translate(-50%)` still applies.
+    transform: `translateY(-100%)${existing}`,
+  };
+}
+
 /** Default viewport width used when an element isn't inside a
  *  `[data-viewport]` container (canvas-hoisted nodes, off-canvas
  *  rendering, etc.). Mirrors the Renderer's fallback so both paths

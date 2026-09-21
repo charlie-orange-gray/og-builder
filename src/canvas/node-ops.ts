@@ -26,11 +26,13 @@ import { queueMutation, setForceRender, flushNow } from '@/code/mutation/mutatio
 // every one of those mocks responsible for re-exporting the constant.
 import { RENDER_RESOLVED_MUTATIONS } from '@/code/mutation/render-resolved-mutations';
 import { dragStateOps } from '@/canvas/drag/drag-state-store';
+import { isComponentVariantRootNode } from '@/canvas/variant-root';
 import { injectNodeIntoCache, updateNodeInCache, removeNodeFromCache, moveNodeInCache, isComponentInstanceInCache, getVariantOverriddenKeys, getNodeFromCache } from '@/code/stores/store';
 import { DEFAULT_VIEWPORT_WIDTH, SVG_SHAPE_TAGS } from '@/shared/constants';
 import { getReplicaContext, svgChildCarrierOrigin, groupChildBoxToMotion, groupChildrenCarryVariantGeometry, compensateGroupChildVariantsForBaseBox } from '@/canvas/drag/replica-context';
 import { motionPropsToCSSTransform } from '@/shared/motion-transform';
 import { trace } from '@/shared/debug-trace';
+import { extractCanvasGlobals, canvasThemeMode } from './canvas-theme';
 import { getCanvasBridge } from './canvas-bridge';
 import { transformManager } from './transform/TransformManager';
 import { moveChildAndRefitGroup, normalizeGroupOnResize, refitGroupChain } from '@/code/svg/refit-group';
@@ -107,6 +109,26 @@ const LONGHAND_TO_SHORTHAND: Record<string, string> = Object.fromEntries(
  * had independent copies of the filter, which is exactly how one of them got
  * fixed and the other kept corrupting the tiles.
  */
+
+/** Whether the variant-tile mirror must SKIP left/top/right/bottom.
+ *
+ * At commit time a component MASTER ROOT must skip: every tile's root sits at
+ * its own `variantConfig` x/y, so fanning the primary's insets out yanks each
+ * tile to the primary's spot for a frame before the re-render snaps it back.
+ * That was the original reason for the skip — but it was applied to every node
+ * in the file, so a master's CHILD kept stale insets all through a resize or a
+ * Position-panel scrub: the replicas grew around the wrong anchor, drifted, and
+ * only settled on release (user report 2026-09-20). A child shares one position
+ * across tiles, and any tile that owns its own is already dropped by
+ * `overridden`, so it mirrors like a page replica.
+ *
+ * Pages are untouched: their commit-time behaviour is unchanged. */
+function shouldSkipPositionMirror(id: string, domOnly: boolean): boolean {
+  if (domOnly) return false;                       // live tick: always mirror
+  if (!isComponentFilePath(_activeFilePath)) return true;
+  return isComponentVariantRootNode(getNodeFromCache(id));
+}
+
 function filterMirroredStyles(
   styles: Record<string, string>,
   overridden: Set<string> | null | undefined,
@@ -418,20 +440,16 @@ export function refreshCanvasTokens(): void {
 function refreshCanvasTokensImmediate(): void {
   const styleEl = getOrCreateCanvasStyleEl();
   if (!styleEl) return;
+  // The mode changes here (the toolbar toggle) — keep the sandbox's own
+  // lift, and the code components inside it, on the same one.
+  getCanvasBridge().setThemeMode?.(canvasThemeMode());
   const rawCSS = projectFS.readFile('app/globals.css');
   if (!rawCSS) return;
 
-  // Extract ONLY :root, [data-theme], and @keyframes blocks from globals.css.
-  // Global resets (*, body, a, img) must NOT leak into the editor UI.
-  const safeBlocks: string[] = [];
-  const blockRegex = /(:root\s*\{[^}]*\}|\[data-theme[^\]]*\]\s*\{[^}]*\}|@keyframes\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\})/gs;
-  let match;
-  while ((match = blockRegex.exec(rawCSS)) !== null) {
-    safeBlocks.push(match[0]);
-  }
-  // Scope :root to [data-content-root] so CSS variables don't leak into the builder UI.
-  // :root always matches <html> regardless of where the <style> element lives.
-  const tokensCSS = safeBlocks.join('\n').replace(/:root\s*\{/g, '[data-content-root] {');
+  // The token blocks for the EDITOR's colour mode (light, or dark with the
+  // `:root.dark` values winning), plus @keyframes — scoped to the content
+  // root so nothing leaks into the builder UI. See canvas-theme.ts.
+  const tokensCSS = extractCanvasGlobals(rawCSS, canvasThemeMode()).tokensCSS;
 
   const current = styleEl.textContent || '';
   const startMarker = '/* canvas-tokens-start */';
@@ -1765,6 +1783,31 @@ export function removeNode(options: {
  * No one needs to pass variant/replica context — it's read from setStyleContext().
  */
 /**
+ * Is this node held invisible by a baked `display: 'none'` — inline, or in the
+ * variant entry the unhide targets?
+ *
+ * Unhiding queues a `display: ''` write to clear exactly that. `''` means
+ * DELETE the property, so on a node hidden through the render gate ALONE it
+ * deletes whatever display the element legitimately has: unhiding the Hamburger
+ * Menu Button on the desktop stripped its `display: 'flex'` from the inline
+ * style and the `default` variant entry at once, and the burger's three bars
+ * collapsed into one bar on EVERY variant — read by the user as "unhiding
+ * desktop replaced my mobile overrides" (2026-09-18).
+ */
+export function hasBakedDisplayNone(
+  node: { styles?: Record<string, string>; motionVariants?: Record<string, Record<string, string>> | null },
+  visVariant: string,
+  isPrimary: boolean,
+): boolean {
+  if (node.styles?.display === 'none') return true;
+  const variants = node.motionVariants ?? {};
+  if (variants[visVariant]?.display === 'none') return true;
+  // Unhiding the primary shows the node everywhere, so a `none` parked on ANY
+  // variant is stale and worth clearing.
+  return isPrimary && Object.values(variants).some((v) => v?.display === 'none');
+}
+
+/**
  * Lazily wire a component master so its instances' width/height override the
  * variant size (see `instance-size-override`). Idempotent + cheap-guarded:
  * resolves the master file from the instance node's `componentFile`, skips when
@@ -2264,8 +2307,15 @@ export function updateNodeStyles(options: {
       // unhidden variant (and is a harmless no-op on clean components). The
       // canvas reads `hiddenOnVariants` (resolveVariantStyles) to hide per
       // variant.
-      if (hide) {
-        const { display: _hideDisp, ...withoutDisplay } = styles;
+      // …but only when there IS a baked `display: 'none'` to clear. `''` means
+      // DELETE the property, so on a node that was hidden through the render
+      // gate alone it deletes whatever display the element legitimately has:
+      // unhiding the Hamburger Menu Button on the desktop stripped its
+      // `display: 'flex'` from both the inline style and the `default` variant
+      // entry, and the burger's three bars collapsed into one on EVERY variant
+      // (user report 2026-09-18 — read as "my mobile overrides were replaced").
+      if (hide || !hasBakedDisplayNone(nodeForVis, visVariant, isPrimary)) {
+        const { display: _visDisp, ...withoutDisplay } = styles;
         styles = withoutDisplay;
         if (Object.keys(styles).length === 0) return;
       }
@@ -2471,7 +2521,7 @@ export function updateNodeStyles(options: {
         // DURING the live drag tick (domOnly) we DO mirror position: a synced replica (no
         // per-variant override — overridden keys already dropped) must follow the primary
         // in real time, exactly like a page-viewport replica. mouseup commit reconciles.
-        for (const [key, value] of Object.entries(filterMirroredStyles(styles, overridden, !domOnly))) {
+        for (const [key, value] of Object.entries(filterMirroredStyles(styles, overridden, shouldSkipPositionMirror(id, domOnly)))) {
           try {
             if (value === '') { (varEl.style as any)[key] = ''; }
             else { (varEl.style as any)[key] = value; }
@@ -2510,7 +2560,7 @@ export function updateNodeStyles(options: {
         // commit-time drop, the primary's left/top fanned onto every sibling tile for one frame on
         // resize-commit, then snapped back (the glitch). During the live drag tick (domOnly) we DO
         // mirror position so a synced replica follows the primary in real time (see DOM path above).
-        const mirrorStyles = filterMirroredStyles(styles, overridden, !domOnly);
+        const mirrorStyles = filterMirroredStyles(styles, overridden, shouldSkipPositionMirror(id, domOnly));
         if (Object.keys(mirrorStyles).length === 0) continue;
         // Variant overrides need !important to win against framer-motion's
         // animate-driven inline styles on the variant element.

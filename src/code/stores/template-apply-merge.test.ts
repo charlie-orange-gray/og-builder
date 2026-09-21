@@ -156,6 +156,36 @@ function mergeReal(fs: InMemoryProjectFS): Map<string, CanvasNode> {
   return cached;
 }
 
+describe('jsxDataIdIndex — the tag, never a mention', () => {
+  test('an id named in a <style> band rule above the slot, whose tag carries an arrow handler, resolves to the TAG', () => {
+    // An imported home page: the LayoutClient's band rules name the
+    // footer's form (`[data-id="fr822"] { … }`) BEFORE `{children}`, and
+    // the form's opening tag holds `onSubmit={async (e) => {…}}` — the `>`
+    // of `=>` ended the `[^>]*?` tag scan, the raw fallback found the
+    // style rule, and the page spliced itself INTO the footer's form.
+    const code = [
+      "export default function LayoutClient({ children }) {",
+      "  return <div data-id=\"root\" style={{ display: 'flex' }}>",
+      "    <style>{`@media (max-width: 809px) { [data-id=\"fr822\"] { flex-direction: column !important; } }`}</style>",
+      "    {children}",
+      "    <footer data-id=\"fr812\">",
+      "      <form onSubmit={async (e) => { e.preventDefault(); const x = { a: 1 }; }} data-id=\"fr822\" data-form='{\"sendTo\":[]}'>",
+      "        <input data-id=\"fr823\" />",
+      "      </form>",
+      "    </footer>",
+      "  </div>;",
+      "}",
+    ].join('\n');
+    const slot = code.indexOf('{children}');
+    expect(jsxDataIdIndex(code, 'fr822')).toBe(code.indexOf('<form onSubmit'));
+    expect(jsxDataIdIndex(code, 'fr822')).toBeGreaterThan(slot);
+    expect(jsxDataIdIndex(code, 'fr823')).toBe(code.indexOf('<input data-id="fr823"'));
+    expect(jsxDataIdIndex(code, 'root')).toBe(code.indexOf('<div data-id="root"'));
+    // An id that only ever appears in text keeps the substring fallback.
+    expect(jsxDataIdIndex(code, 'nowhere')).toBe(-1);
+  });
+});
+
 describe('layout merge — apply template to a page', () => {
   const merged = mergeReal(buildFs());
 

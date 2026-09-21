@@ -5,7 +5,7 @@
 // Some atoms render UNCONDITIONALLY (Fill, Radius, Padding, Margin, Overflow,
 // Opacity, Hide, Border, Shadow, Transform) — they're staple controls every
 // node may want to tweak. Others (OverflowX/Y, Mask, ClipPath, Filter,
-// ZIndex, Pseudo) are DYNAMIC: they only show up when the underlying CSS
+// ZIndex, Backface, Pseudo) are DYNAMIC: they only show up when the underlying CSS
 // property has a value somewhere on the node — directly, in a media-query
 // override, or in a variant — so the panel doesn't drown the user in 20+
 // rows of unused defaults. Currently-hidden dynamics surface in the Styles
@@ -26,119 +26,10 @@ import {
   BorderControl, ShadowControl, MaskControl,
   ClipPathControl, TransformControl, FilterControl, BackdropFilterControl, ZIndexControl,
   VariantTransitionControl, PseudoElementControl,
-  PointerEventsControl, UserSelectControl,
+  PointerEventsControl, UserSelectControl, BackfaceControl, MixBlendModeControl, FormStateControl,
   GroupFillControl, RotateControl,
 } from './atoms';
-
-// ─── Dynamic-style registry ─────────────────────────────────────────────────
-//
-// One entry per addable style. `keys` lists the CSS properties to check
-// when deciding whether the row is already "set" on the node. `defaultStyles`
-// is what the +-dropdown writes when the user picks the row — sensible
-// no-ops or safe placeholders, chosen so the row appears with a recognisable
-// preview the user can then refine. `requiresFrame` flags entries that
-// only make sense on frame-like elements (Mask/ClipPath/Filter on text are
-// noisy and the original code already gated them).
-//
-// NOTE: Pseudo is NOT in this registry — it has its own `pseudoStylesAtom`
-// detection and the PseudoElementControl ships its own "Add ::before /
-// Add ::after" affordance, so the row needs to render whenever a pseudo
-// rule exists for the node, period.
-
-interface DynamicStyleSpec {
-  id: string;
-  label: string;
-  /** CSS properties any of which means "this style is in use on this node". */
-  keys: string[];
-  /** What to write when the user picks this from the +-dropdown. */
-  defaultStyles: Record<string, string>;
-  /** Hide on text nodes (matches the existing `!isText` gates). */
-  requiresFrame?: boolean;
-}
-
-const DYNAMIC_STYLES: DynamicStyleSpec[] = [
-  {
-    id: 'overflowX',
-    label: 'Overflow X',
-    keys: ['overflowX'],
-    // 'hidden' is the most common reason to set overflowX explicitly — visible
-    // is already the default, so writing it would be a no-op.
-    defaultStyles: { overflowX: 'hidden' },
-  },
-  {
-    id: 'overflowY',
-    label: 'Overflow Y',
-    keys: ['overflowY'],
-    defaultStyles: { overflowY: 'hidden' },
-  },
-  {
-    id: 'mask',
-    label: 'Mask',
-    // Multiple keys because the Mask control reads several variants.
-    keys: ['mask', 'maskImage', 'WebkitMask', 'WebkitMaskImage'],
-    // Transparent → opaque vertical fade so the user immediately SEES a
-    // mask effect when the row appears. The previous `black, black` default
-    // was a no-op that left both gradient stops opaque — once parsed
-    // through gradient-utils, every subsequent edit (rotation, stop drag)
-    // re-emitted a black/black gradient, and the user could never make the
-    // mask visible without manually replacing the value. Match
-    // MaskControl.handleAdd's add-another-entry default so both entry
-    // points produce the same visible starting gradient.
-    defaultStyles: { maskImage: 'linear-gradient(0deg, rgba(0,0,0,0) 0%, rgb(0,0,0) 100%)', WebkitMaskImage: 'linear-gradient(0deg, rgba(0,0,0,0) 0%, rgb(0,0,0) 100%)' },
-    requiresFrame: true,
-  },
-  {
-    id: 'clipPath',
-    label: 'Clip Path',
-    keys: ['clipPath'],
-    // `inset(0)` is the identity clip — clips nothing — so the row appears
-    // visibly no-op until the user picks a real shape.
-    defaultStyles: { clipPath: 'inset(0)' },
-    requiresFrame: true,
-  },
-  {
-    id: 'filter',
-    label: 'Filter',
-    keys: ['filter'],
-    // `blur(0px)` renders identical to no filter — safe placeholder.
-    defaultStyles: { filter: 'blur(0px)' },
-  },
-  {
-    id: 'backdropFilter',
-    label: 'Backdrop',
-    // Both the standard and Safari-prefixed keys count as "in use", and the
-    // control writes them together so they never drift apart.
-    keys: ['backdropFilter', 'WebkitBackdropFilter'],
-    // A visible frosted-glass blur so the effect is obvious the moment the
-    // row is added (`blur(0px)` would render identical to no backdrop filter).
-    defaultStyles: { backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' },
-  },
-  {
-    id: 'zIndex',
-    label: 'Z-Index',
-    keys: ['zIndex'],
-    // 0 is the default stacking context but writing it explicitly opts the
-    // element into z-index participation, which is what the user asked for
-    // by adding the row.
-    defaultStyles: { zIndex: '0' },
-  },
-  {
-    id: 'pointerEvents',
-    label: 'Pointer',
-    keys: ['pointerEvents'],
-    // 'none' is the most common reason to set pointer-events explicitly —
-    // makes the element pass through clicks. 'auto' is the default and
-    // wouldn't change behaviour, so we add the meaningful one.
-    defaultStyles: { pointerEvents: 'none' },
-  },
-  {
-    id: 'userSelect',
-    label: 'User Select',
-    keys: ['userSelect'],
-    // 'none' blocks text selection — common for buttons / chrome.
-    defaultStyles: { userSelect: 'none' },
-  },
-];
+import { DYNAMIC_STYLES, type DynamicStyleSpec } from './dynamic-styles';
 
 // ─── StylesTool ────────────────────────────────────────────────────────────
 
@@ -264,7 +155,7 @@ export default function StylesTool() {
   // visual primitives the master owns (no Fill, Radius, Padding, Border,
   // Shadow, Transform → those would fight the master).
   const COMPONENT_INSTANCE_ALLOWED = new Set([
-    'filter', 'backdropFilter', 'mask', 'pointerEvents', 'userSelect', 'zIndex',
+    'filter', 'backdropFilter', 'mask', 'pointerEvents', 'userSelect', 'zIndex', 'mixBlendMode',
   ]);
 
   // Only the styles that are currently hidden are addable — we don't want
@@ -449,6 +340,7 @@ export default function StylesTool() {
           {visibleIds.has('zIndex') && <ZIndexControl />}
           {visibleIds.has('pointerEvents') && <PointerEventsControl />}
           {visibleIds.has('userSelect') && <UserSelectControl />}
+          {visibleIds.has('mixBlendMode') && <MixBlendModeControl />}
         </>
       ) : (
         <>
@@ -466,9 +358,13 @@ export default function StylesTool() {
           {!isViewportFrame && <HideControl />}
           <BorderControl />
           {!isText && <ShadowControl />}
+          {/* Form controls: Focus (inputs) and Checked (checkbox / radio) states. */}
+          <FormStateControl />
           {!isText && visibleIds.has('mask') && <MaskControl />}
           {!isText && visibleIds.has('clipPath') && <ClipPathControl />}
           <TransformControl />
+          {visibleIds.has('backfaceVisibility') && <BackfaceControl />}
+          {visibleIds.has('mixBlendMode') && <MixBlendModeControl />}
           {visibleIds.has('filter') && <FilterControl />}
           {visibleIds.has('backdropFilter') && <BackdropFilterControl />}
           {visibleIds.has('zIndex') && <ZIndexControl />}

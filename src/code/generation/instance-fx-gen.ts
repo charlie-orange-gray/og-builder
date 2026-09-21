@@ -16,7 +16,7 @@
 import { trace } from '@/shared/debug-trace';
 import { nodeIdToVarName } from '@/shared/id-utils';
 import { parseJSX } from '@/code/parsing/ast-utils';
-import { findJSXDataIdIndex, insertBeforeRenderReturn, setTagAttr, getJsonAttr } from './generator-utils';
+import { findJSXDataIdIndex, insertBeforeRenderReturn, setTagAttr, getJsonAttr, opensAcrossLines } from './generator-utils';
 import { buildScopedScalarExpr, type SerScope } from './scoped-expr';
 import { scopeEq, presentOn, isPresenceOverride, addPresenceScope, hidePresenceOn, resetPresenceScope, type PresenceState } from '@/code/animations/presence';
 
@@ -104,10 +104,14 @@ export function instanceFxNeedsRef(spec: InstanceFxSpec | null | undefined): boo
 }
 
 // useScroll offset per Section-in-View viewport alignment.
+// Percentage container edges on purpose: the section ref is filled by a mount
+// effect AFTER the instance mounted, and motion 12.38+ would otherwise fast-path
+// the named preset pairs through a ViewTimeline that captured no target and
+// tracked the whole page (see sectionSafeOffset in generator-motion-scroll).
 const SECTION_OFFSET: Record<string, string> = {
-  top: "['start start', 'end start']",
-  middle: "['start center', 'end center']",
-  bottom: "['start end', 'end end']",
+  top: "['start 0%', 'end 0%']",
+  middle: "['start 50%', 'end 50%']",
+  bottom: "['start 100%', 'end 100%']",
 };
 
 // Compose op per prop. Multiplicative props rest at 1, additive at 0.
@@ -149,7 +153,9 @@ function fmtTransition(t: FxTransition | undefined, kind: 'gesture' | 'appear' |
   if (d.damping != null) parts.push(`damping: ${d.damping}`);
   if (d.mass != null) parts.push(`mass: ${d.mass}`);
   if (d.duration != null) parts.push(`duration: ${d.duration}`);
-  if (d.ease != null) parts.push(`ease: '${d.ease}'`);
+  // A cubic-bezier curve (`[0.2,0,0.2,1]`) is an ARRAY to
+  // motion; a quoted string is an unknown easing name and throws.
+  if (d.ease != null) parts.push(/^\[\s*-?[\d.]+(\s*,\s*-?[\d.]+){3}\s*\]$/.test(String(d.ease)) ? `ease: ${String(d.ease).replace(/\s+/g, '')}` : `ease: '${d.ease}'`);
   if (d.delay != null) parts.push(`delay: ${d.delay}`);
   if (d.repeat != null) parts.push(`repeat: ${d.repeat === 'Infinity' ? 'Infinity' : d.repeat}`);
   if (d.repeatType != null) parts.push(`repeatType: '${d.repeatType}'`);
@@ -752,6 +758,9 @@ function stripInstanceFx(code: string, nodeId: string, cn: string): string {
   // them (`Identifier already declared`), so the whole regen bails + drops the edit.
   result = result.split('\n').filter((line) => {
     const t = line.trim();
+    // A declaration that continues on the next line must not lose its head:
+    // dropping only the first line orphans the body (see opensAcrossLines).
+    if (opensAcrossLines(t)) return true;
     if (new RegExp(`^const ${e}Fx\\w*\\s*=`).test(t)) return false;
     if (new RegExp(`^const \\{[^}]*:\\s*${e}Fx\\w*\\s*\\}\\s*=`).test(t)) return false;
     return true;
@@ -810,4 +819,25 @@ function clearFxStyleBindings(code: string, nodeId: string, cn: string): string 
     ? got.tag.replace(/style=\{\{[\s\S]*?\}\}/, `style={{ ${kept.join(', ')} }}`)
     : got.tag.replace(/\s*style=\{\{[\s\S]*?\}\}/, '');
   return code.slice(0, got.tagStart) + tag + code.slice(got.gt);
+}
+
+/**
+ * Generate the page-level code for every `data-instance-fx` spec in a file
+ * that carries the spec but not its code yet — a site import writes the
+ * spec (a nested link's staggered appear) and leaves the codegen to this
+ * builder, so the result is byte-for-byte what the Animation panel writes.
+ * Specs already materialised (their motion values exist) are left alone.
+ */
+export function materializeInstanceFxInCode(code: string): string {
+  if (!code.includes('data-instance-fx=')) return code;
+  let out = code;
+  for (const m of code.matchAll(/data-id="([^"]+)"[^>]*?data-instance-fx='(\{[^']*\})'/g)) {
+    const nodeId = m[1];
+    if (new RegExp(`\\b${cleanNameOf(nodeId)}Fx`).test(out)) continue;
+    let spec: InstanceFxSpec;
+    try { spec = JSON.parse(m[2]); } catch { continue; }
+    const next = setInstanceFxInCode(out, nodeId, spec);
+    if (next !== out) { out = next; trace.action('instanceFx.materialize', { nodeId }); }
+  }
+  return out;
 }

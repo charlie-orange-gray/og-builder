@@ -226,3 +226,47 @@ export function setConditionalPropEntry(
 export function hasVariantOverrides(map: ConditionalPropMap): boolean {
   return Object.keys(map).some(k => k !== 'default');
 }
+
+/**
+ * The same ternary, but for branches that are VARIABLE references rather than
+ * literals — a per-variant prop bound to the master's own variables, which is
+ * how a pricing card drives one number from two prices:
+ *
+ *   value={variant === 'variant-1' ? priceYearly : priceMonthly}
+ *
+ * `parseConditionalPropExpression` deliberately only accepts literal branches
+ * (it feeds the value editors), so the panel saw a raw ternary and showed the
+ * expression instead of the binding (live find 2026-09-17). Returns parent
+ * variant name → variable name, always including `default`, or null.
+ */
+export function parseConditionalPropVarRefs(expr: string): Record<string, string> | null {
+  const trimmed = expr.trim();
+  if (!trimmed.includes('?') || !trimmed.includes('===')) return null;
+  const IDENT = '[A-Za-z_$][\\w$]*';
+  const branchRegex = new RegExp(
+    `^\\s*(?:${PARENT_VARIANT_VARS.join('|')})\\s*===\\s*['"]([^'"]+)['"]\\s*\\?\\s*(${IDENT})\\s*:\\s*(.+)$`,
+    's',
+  );
+  const out: Record<string, string> = {};
+  let remaining = trimmed;
+  for (;;) {
+    const m = remaining.match(branchRegex);
+    if (!m) break;
+    // `undefined` is the "no value on this variant" sentinel, not a variable.
+    if (m[2] === 'undefined') return null;
+    out[m[1]] = m[2];
+    remaining = m[3].trim();
+  }
+  if (Object.keys(out).length === 0) return null;
+  const fallback = remaining.match(new RegExp(`^(${IDENT})\\s*$`));
+  if (!fallback || fallback[1] === 'undefined') return null;
+  out.default = fallback[1];
+  return out;
+}
+
+/** The variable a per-variant binding uses on `variant` (or its default branch). */
+export function conditionalPropVarForVariant(expr: string, variant: string | null): string | null {
+  const refs = parseConditionalPropVarRefs(expr);
+  if (!refs) return null;
+  return (variant && refs[variant]) ?? refs.default ?? null;
+}

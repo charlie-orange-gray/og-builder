@@ -109,7 +109,12 @@ export function ScrollVariantEditor({ nodeId, componentFile, spec }: {
   // usePathname (template-route-gen, reassignment at body top so it precedes the
   // scroll useEffect), and the Template tool surfaces it as a per-page anchor
   // picker. Only shown inside a template (per-page targeting is the point).
-  const isTemplate = isTemplateFilePath(activeFilePath);
+  // A section variable is just a prop on the file being edited, read back through
+  // `getElementById(prop)` — that works the same in a design COMPONENT as in a
+  // template (a nav master targets a different section per page exactly like a
+  // template does). Gating it to templates left imported masters carrying section
+  // variables the panel could show as pills but never create (live find 2026-09-17).
+  const canBindSection = isTemplateFilePath(activeFilePath) || isComponentFilePath(activeFilePath);
   const setVariableModalRequest = useSetAtom(variableModalRequestAtom);
   // Resolve a bound section var's DISPLAY LABEL (@propMeta) so the pill shows the
   // friendly name the user set in the Variable modal (e.g. "333"), not the raw
@@ -278,7 +283,7 @@ export function ScrollVariantEditor({ nodeId, componentFile, spec }: {
                   standard items), routing to the section-var create flow — exactly
                   how ComponentPropsTool surfaces "Hoist Variable". */}
               <div className="flex items-center justify-between w-full">
-                {isTemplate && !sec.sectionVar ? (
+                {canBindSection && !sec.sectionVar ? (
                   <HoistMenuItemProvider item={sectionMenuItems(i)}>
                     <ControlLabel label="Section" property="" hideCopyPasteStyle />
                   </HoistMenuItemProvider>

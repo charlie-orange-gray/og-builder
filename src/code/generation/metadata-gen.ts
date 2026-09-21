@@ -320,6 +320,10 @@ export function healLayoutFile(code: string): string {
     out = out.replace("import { Providers } from './providers';", "import { Providers } from './providers';\nimport { CursorPortal } from '@revyme/runtime';");
     out = out.replace('<Providers>{children}</Providers>', '<Providers>{children}</Providers>\n        <CursorPortal />');
   }
+  if (code.includes('<SmoothScroll') && !out.includes('<SmoothScroll')) {
+    out = out.replace("import { Providers } from './providers';", "import { Providers } from './providers';\nimport { SmoothScroll } from './smooth-scroll-controller';");
+    out = out.replace('<body>', '<body>\n        <SmoothScroll />');
+  }
   return moduleParses(out) ? out : ensureLayoutFile();
 }
 

@@ -25,6 +25,7 @@ import { rebuildPastedCollectionInCode } from '@/code/generation/cms-paste-gen';
 import { copySlotConnectionsInCode } from '@/code/generation/slot-ops';
 import { rehydrateCmsBindings } from '@/code/generation/cms-detach-gen';
 import { addTextAnimInCode } from '@/code/generation/text-anim-gen';
+import { setCodeOverridesInCode } from '@/code/generation/code-override-gen';
 import type { TextAnimConfig } from '@/editor/tools/AnimationTool/motion/text-anim-presets';
 import type { OverlayConfig, OverlayTriggerConfig } from '@/shared/types';
 import type { ClipboardData, PasteContext, PasteResult, ClipboardNode } from '../types';
@@ -53,6 +54,10 @@ export interface PasteOptions {
   interactingVpId?: string;
   viewportWidths?: Record<string, number>;
   activeFilePath?: string;
+
+  /** Does the selected node's parent lay out ON THE ACTIVE VIEWPORT? Resolved
+   *  by the caller from the rendered element; see PasteContext.parentHasLayout. */
+  parentHasLayout?: boolean;
 
   /**
    * If provided, skip reading from localStorage and treat this as the
@@ -100,6 +105,7 @@ export function executePaste(opts: PasteOptions): PasteResult {
     forceNoLayoutPosition: opts.forceNoLayoutPosition,
     interactingVpId: opts.interactingVpId,
     viewportWidths: opts.viewportWidths,
+    parentHasLayout: opts.parentHasLayout,
     activeFilePath: opts.activeFilePath,
     sourceFilePath: data.sourceFilePath ?? null,
   };
@@ -173,6 +179,7 @@ export function executePaste(opts: PasteOptions): PasteResult {
       // Re-apply text effects on the copies — same whole-file pass, after the
       // nodes are guaranteed in the file (the wrapper is JSX, not a style).
       reinjectTextAnims(ctx.clipboardNodes, idMapper, opts.activeFilePath);
+      reinjectCodeOverrides(ctx.clipboardNodes, idMapper, opts.activeFilePath);
     }
     return {
       success: true,
@@ -476,6 +483,25 @@ export { conditionCheckers, checkConditions } from './conditions';
  * re-wrap it: `addTextAnimInCode` writes the attribute + the `<RevymeSplitText>`
  * wrapper (+ the runtime import) on every new id the copy mapped to.
  */
+/** Code overrides travel like text effects: re-wrap every new id in the same
+ *  `<Override>`, importing the override into the destination file. */
+function reinjectCodeOverrides(clipboardNodes: ClipboardNode[], idMapper: IdMapper, destFilePath: string): void {
+  const withOverrides = clipboardNodes.filter(n => n.codeOverrides?.length);
+  if (withOverrides.length === 0) return;
+  const mappings = idMapper.getAllMappings();
+  const work: Array<{ newId: string; overrides: Array<{ file: string; name: string }> }> = [];
+  for (const n of withOverrides) {
+    for (const newId of mappings.get(n.id) ?? []) work.push({ newId, overrides: n.codeOverrides! });
+  }
+  if (work.length === 0) return;
+  modifyProjectFile(destFilePath, code => {
+    let next = code;
+    for (const w of work) next = setCodeOverridesInCode(next, w.newId, w.overrides);
+    return next;
+  });
+  trace.action('paste:code-overrides-reinjected', { count: work.length });
+}
+
 function reinjectTextAnims(clipboardNodes: ClipboardNode[], idMapper: IdMapper, destFilePath: string): void {
   const withAnim = clipboardNodes.filter(n => n.textAnim);
   if (withAnim.length === 0) return;

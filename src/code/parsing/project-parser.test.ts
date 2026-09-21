@@ -1619,3 +1619,140 @@ describe('project-parser: the instance tag\'s `display: none` stays on the WRAPP
     expect(readMasterRootDisplay(fs, 'components/Missing.tsx')).toBeUndefined();
   });
 });
+
+describe('project-parser: a nested instance with a FIXED variant under a per-tile outer instance', () => {
+  // An imported FAQ (2026-09-16): the page's FAQ instance switches variant per tile
+  // (tablet → variant-1, phone → variant-2). Inside its phone box each FAQ Item
+  // is `<FAQItem initialVariant="variant-1">` — Closed, on EVERY tile — and the
+  // item's answer is `{variant !== 'variant-1' && …}`. The outer map stamped on
+  // the item's wrapper speaks the FAQ's variant names, and resolving the item's
+  // own hidden set against it showed every answer on the mobile tile ('variant-2'
+  // is not 'variant-1'); the tablet tile only passed because both components
+  // happened to call that variant 'variant-1'.
+  const INNER_GATED_TSX = `
+import React from 'react';
+import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
+import { withResponsiveProps } from '@revyme/runtime';
+
+/** @name "Inner" */
+
+const variantConfig = [
+  { name: 'default', label: 'Open', x: 0, y: 0, isPrimary: true },
+  { name: 'variant-1', label: 'Closed', x: 200, y: 0 },
+];
+
+const innerVariants = {
+  default: { backgroundColor: '#aaaaaa' },
+  'variant-1': { backgroundColor: '#ff0000' },
+};
+
+function Inner({ style, initialVariant = 'default' }) {
+  return (
+    <LayoutGroup>
+      <motion.div data-id="inner-root" variants={innerVariants} initial={initialVariant} animate={initialVariant} style={{
+        position: 'relative',
+        width: '160px',
+        backgroundColor: '#aaaaaa',
+        ...style,
+      }}>
+        <p data-id="inner-question" style={{ position: 'relative' }}>Question</p>
+        <AnimatePresence mode="popLayout">
+        {initialVariant !== 'variant-1' && (
+        <motion.p data-id="inner-answer" key="inner-answer" style={{ position: 'relative' }}>Answer</motion.p>
+        )}
+        </AnimatePresence>
+      </motion.div>
+    </LayoutGroup>
+  );
+}
+
+export default withResponsiveProps(Inner);
+`;
+  const OUTER_FIXED_TSX = `
+import React from 'react';
+import { motion, LayoutGroup } from 'framer-motion';
+import { withResponsiveProps } from '@revyme/runtime';
+import Inner from '@/components/Inner';
+
+/** @name "Outer" */
+
+const variantConfig = [
+  { name: 'default', label: 'Desktop', x: 0, y: 0, isPrimary: true },
+  { name: 'variant-1', label: 'Tablet', x: 400, y: 0 },
+  { name: 'variant-2', label: 'Phone', x: 800, y: 0 },
+];
+
+function Outer({ style, initialVariant = 'default' }) {
+  return (
+    <LayoutGroup>
+      <motion.div data-id="outer-root" style={{
+        position: 'relative',
+        width: '300px',
+        ...style,
+      }}>
+        <Inner data-id="inner" initialVariant="variant-1" style={{ position: 'relative' }} />
+      </motion.div>
+    </LayoutGroup>
+  );
+}
+
+export default withResponsiveProps(Outer);
+`;
+  const PAGE_TSX = `
+import React from 'react';
+import Outer from '@/components/Outer';
+
+export default function Page() {
+  return (
+    <div data-id="root" style={{ position: 'relative' }}>
+      <Outer data-id="faq" data-responsive='{"1199":{"initialVariant":"variant-1"},"809":{"initialVariant":"variant-2"},"_bp":[1199,809]}' style={{ position: 'relative' }} />
+    </div>
+  );
+}
+`;
+
+  it('bakes the child variant and its visibility instead of resolving them against the parent map', () => {
+    const fs = new InMemoryProjectFS(new Map([
+      ['app/page.tsx', PAGE_TSX],
+      ['components/Outer.tsx', OUTER_FIXED_TSX],
+      ['components/Inner.tsx', INNER_GATED_TSX],
+    ]));
+    const nodes = parseProjectFile('app/page.tsx', fs);
+    const wrapper = nodes.get('faq:inner');
+    expect(wrapper).toBeDefined();
+    // The outer map still rides the wrapper (parent-keyed root hides need it)…
+    expect(wrapper!.responsiveVariantMap).toEqual({ 1199: 'variant-1', 809: 'variant-2' });
+    const root = nodes.get('faq:inner:inner-root');
+    expect(root).toBeDefined();
+    // …but the child's Closed variant is baked on every tile: styles carry it, and no child-keyed
+    // motion entry is left for a parent variant name to match by accident.
+    expect(root!.styles.backgroundColor).toBe('#ff0000');
+    expect(root!.motionVariants ?? {}).toEqual({});
+    // The answer is hidden on Closed: static display none, and NO child-keyed hidden set for the
+    // phone tile ('variant-2' in the FAQ's names) to resolve as "visible".
+    const answer = nodes.get('faq:inner:inner-answer');
+    expect(answer).toBeDefined();
+    expect(answer!.styles.display).toBe('none');
+    expect(answer!.hiddenOnVariants ?? undefined).toBeUndefined();
+    // The question is untouched.
+    expect(nodes.get('faq:inner:inner-question')!.styles.display).not.toBe('none');
+  });
+
+  it('keeps resolving a nested instance whose variant follows the parent (ternary) per tile', () => {
+    const OUTER_TERNARY = OUTER_FIXED_TSX.replace(
+      `initialVariant="variant-1"`,
+      `initialVariant={initialVariant === 'variant-2' ? 'variant-1' : 'default'}`,
+    );
+    const fs = new InMemoryProjectFS(new Map([
+      ['app/page.tsx', PAGE_TSX],
+      ['components/Outer.tsx', OUTER_TERNARY],
+      ['components/Inner.tsx', INNER_GATED_TSX],
+    ]));
+    const nodes = parseProjectFile('app/page.tsx', fs);
+    const answer = nodes.get('faq:inner:inner-answer');
+    expect(answer).toBeDefined();
+    // Closed only on the phone: hidden set remapped into the PARENT's names, nothing baked.
+    expect(answer!.styles.display).not.toBe('none');
+    expect([...(answer!.hiddenOnVariants ?? [])]).toEqual(['variant-2']);
+  });
+});

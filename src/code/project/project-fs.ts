@@ -11,6 +11,11 @@ import { findVariantRootId, insertAtRootRestSpread, stampRootDataVariantAttr } f
 import { nodeIdToVarName } from '@/shared/id-utils';
 import { healStyleBlockImportant } from '@/shared/media-important';
 import { ensureLayoutFile } from '@/code/generation/metadata-gen';
+import { healSectionOffsets } from '@/code/generation/generator-motion-scroll';
+import { healEventOverlayToggle } from '@/code/generation/event-overlay-heal';
+import { formatOverrideSource } from '@/code/generation/format-override-source';
+import { OVERRIDES_DIR } from '@/code/generation/code-override-gen';
+import { ensureSmoothScrollInLayout, SMOOTH_SCROLL_DATA_PATH, SMOOTH_SCROLL_CONTROLLER_PATH } from '@/code/generation/smooth-scroll-layout';
 import {
   ANIMATED_COUNTER_COMPONENT,
   TYPING_EFFECT_COMPONENT,
@@ -180,6 +185,24 @@ export class InMemoryProjectFS implements ProjectFS {
         return;
       }
     }
+    // TRUNCATION GUARD — the same incident class as the seed guard above, one
+    // step more destructive. A user's Home page `app/page.client.tsx` was found
+    // at ZERO bytes inside an otherwise intact project (2026-09-09, healed in
+    // the DB; the same project came back empty on 2026-09-10 when a stale
+    // client flushed its pre-heal file map). The editor's parse gate cannot
+    // catch this: `parseJSX('')` SUCCEEDS — an empty module is valid JS — so a
+    // truncation sails through every guard written in terms of parseability.
+    //
+    // No edit ever legitimately empties a file that has content. CREATING an
+    // empty file is fine (CodeEditor's "New File"), so this only fires when
+    // real content would be destroyed.
+    if (content.trim() === '') {
+      const existing = this.files.get(path);
+      if (typeof existing === 'string' && existing.trim() !== '') {
+        trace.error('project-fs:refused-truncation', `${path}: refused to replace ${existing.length} bytes with an empty file`);
+        return;
+      }
+    }
     this.files.set(path, content);
     trace.action('project-fs:write', { path, size: content.length, origin });
     this.emit({ kind: 'write', path, content, origin });
@@ -313,6 +336,57 @@ export class InMemoryProjectFS implements ProjectFS {
         trace.action('project-fs:migrated-root-data-variant', { path });
       }
     }
+    // Section-driven scroll transform heal: files written before 2026-09-16
+    // spell a Section in View offset with named viewport edges, which
+    // framer-motion 12.38+ treats as a preset and drives through a
+    // ViewTimeline created before the section ref is filled — the scrub
+    // tracks the whole page instead of the section. Rewrite to the
+    // percentage spelling the generator writes now (pages and masters;
+    // Layer-in-View and page-level scrubs are untouched, idempotent).
+    for (const [path, src] of this.files) {
+      if (!path.endsWith('.tsx')) continue;
+      const healed = healSectionOffsets(src);
+      if (healed !== src) {
+        this.files.set(path, healed);
+        trace.action('project-fs:migrated-section-offsets', { path });
+      }
+    }
+    // Event-triggered overlay heal: the trigger's event only opened the
+    // overlay; the generator now toggles it.
+    for (const [path, src] of this.files) {
+      if (!path.endsWith('.tsx')) continue;
+      const healed = healEventOverlayToggle(src);
+      if (healed !== src) {
+        this.files.set(path, healed);
+        trace.action('project-fs:migrated-event-overlay-toggle', { path });
+      }
+    }
+    // Bundled override files (imported from a site before the import
+    // formatted them): a line far longer than anyone writes by hand means
+    // bundler output. Re-print once; hand-written files never match.
+    for (const [path, src] of this.files) {
+      if (!path.startsWith(OVERRIDES_DIR) || !src.split('\n').some((l) => l.length > 400)) continue;
+      const healed = formatOverrideSource(src);
+      if (healed !== src) {
+        this.files.set(path, healed);
+        trace.action('project-fs:formatted-override-file', { path });
+      }
+    }
+    // Smooth Scroll mount heal: the data module exists (an effect was
+    // authored or imported) but the root layout lost `<SmoothScroll />` —
+    // a layout rebuilt by healLayoutFile/ensureLayoutFile, or an AI rewrite.
+    // Without the mount the site silently scrolls natively.
+    {
+      const layout = this.files.get('app/layout.tsx');
+      if (layout && this.files.has(SMOOTH_SCROLL_DATA_PATH) && this.files.has(SMOOTH_SCROLL_CONTROLLER_PATH)
+          && !layout.includes('<SmoothScroll')) {
+        const healed = ensureSmoothScrollInLayout(layout);
+        if (healed !== layout) {
+          this.files.set('app/layout.tsx', healed);
+          trace.action('project-fs:migrated-smooth-scroll-mount', {});
+        }
+      }
+    }
     // Variant ROOT INSET heal: a master root's canvas position lives in
     // variantConfig x/y, never in its inline style. A root-detection bug
     // (generator-styles findVariantRootId, fixed 2026-09-06) let `left`/`top`
@@ -358,6 +432,32 @@ export class InMemoryProjectFS implements ProjectFS {
       const rest = globalsAfter.slice(importsHead.length);
       this.files.set('app/globals.css', `${importsHead}${UNIVERSAL_SEED_RESET}\n\n${rest}`);
       trace.action('project-fs:restored-seed-reset', {});
+    }
+    // EMPTY PAGE BODY heal: a page whose `page.client.tsx` is empty has no
+    // canvas at all — the page reads as "gone" in the editor even though its
+    // server wrapper, route and metadata are intact (user report 2026-09-10,
+    // after the same project was repaired in the DB a day earlier). The
+    // writeFile truncation guard stops this being created from now on; this
+    // repairs the projects already holding one, since a user cannot fix a file
+    // the canvas can't render.
+    //
+    // Restores the canonical empty page body, so the page opens as a blank
+    // canvas the user can build on rather than a dead route.
+    for (const [path, src] of [...this.files]) {
+      if (!path.endsWith('page.client.tsx') || src.trim() !== '') continue;
+      this.files.set(path, EMPTY_HOME_PAGE_CLIENT);
+      trace.error('project-fs:healed-empty-page-body', `${path}: was 0 bytes, restored the empty page body`);
+      // The server wrapper picked up a `data-id` on its `<PageClient />`
+      // reference while the body was missing (the editor had nothing else to
+      // treat as the page's tree). It means nothing once the body is back, and
+      // it is not part of any wrapper this codebase generates — drop it so the
+      // pair matches PAGE_SERVER_WRAPPER again.
+      const serverPath = `${path.slice(0, -'.client.tsx'.length)}.tsx`;
+      const server = this.files.get(serverPath);
+      if (server && /<PageClient\s+data-id="[^"]*"\s*\/>/.test(server)) {
+        this.files.set(serverPath, server.replace(/<PageClient\s+data-id="[^"]*"\s*\/>/, '<PageClient />'));
+        trace.action('project-fs:healed-page-wrapper-dataid', { path: serverPath });
+      }
     }
     trace.action('project-fs:load-snapshot', { fileCount: files.size });
     this.notify();

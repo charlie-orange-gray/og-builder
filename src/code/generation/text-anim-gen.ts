@@ -81,8 +81,12 @@ export function buildSplitTextSpecSource(config: TextAnimConfig): string {
   // The runtime renders a disabled scope static — identical DOM, no motion.
   if (config.disabled !== undefined) parts.push(`disabled: ${config.disabled}`);
   if (config.trigger && config.trigger !== 'view') parts.push(`trigger: ${JSON.stringify(config.trigger)}`);
+  if (config.viewport !== undefined) parts.push(`viewport: ${JSON.stringify(config.viewport)}`);
+  if (config.replay !== undefined) parts.push(`replay: ${config.replay}`);
+  if (config.sectionId) parts.push(`sectionId: ${JSON.stringify(config.sectionId)}`);
   if (config.scrollStart !== undefined) parts.push(`scrollStart: ${config.scrollStart}`);
   if (config.scrollEnd !== undefined) parts.push(`scrollEnd: ${config.scrollEnd}`);
+  if (config.scrollWindow !== undefined) parts.push(`scrollWindow: ${config.scrollWindow}`);
   for (const k of VALUE_KEYS) {
     const v = (config as unknown as Record<string, unknown>)[k];
     if (v === undefined) continue;
