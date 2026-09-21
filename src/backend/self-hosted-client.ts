@@ -47,6 +47,12 @@ export interface StagingRelease {
   stagingUrl: string | null;
   createdAt: string;
 }
+export interface ProductionRelease extends Omit<StagingRelease, 'environment' | 'stagingUrl'> {
+  environment: 'production';
+  action: 'promote' | 'rollback';
+  sourceDeploymentId: string | null;
+  productionUrl: string | null;
+}
 export interface RegisteredAsset {
   assetId: string;
   projectId: string;
@@ -155,6 +161,14 @@ export class SelfHostedClient {
 
   deployStaging(deploymentId: string): Promise<StagingRelease> {
     return this.request<StagingRelease>(`/deployments/${deploymentId}/staging`, { method: 'POST', body: '{}' });
+  }
+
+  promoteProduction(stagingDeploymentId: string, idempotencyKey: string = crypto.randomUUID()): Promise<ProductionRelease> {
+    return this.request<ProductionRelease>(`/deployments/${stagingDeploymentId}/promote`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: '{}' });
+  }
+
+  rollbackProduction(productionDeploymentId: string, idempotencyKey: string = crypto.randomUUID()): Promise<ProductionRelease> {
+    return this.request<ProductionRelease>(`/deployments/${productionDeploymentId}/rollback`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: '{}' });
   }
 
   renameProject(id: string, name: string): Promise<ProjectSummary> {

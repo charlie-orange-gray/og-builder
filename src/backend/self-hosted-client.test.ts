@@ -48,4 +48,15 @@ describe('SelfHostedClient assets', () => {
     const release = await client.deployStaging('deployment-id');
     expect(requestUrl).toBe('/api/deployments/deployment-id/staging'); expect(requestMethod).toBe('POST'); expect(release.status).toBe('active'); expect(release.stagingUrl).toContain('127.0.0.1');
   });
+
+  it('promotes and rolls back only by server-selected deployment IDs', async () => {
+    const requests: string[] = [];
+    const client = new SelfHostedClient(async (input, init) => {
+      requests.push(`${String(input)}:${init?.method}:${String((init?.headers as Record<string, string>)?.['Idempotency-Key'])}`);
+      return new Response(JSON.stringify({ deploymentId: 'production-id', siteId: 'site-id', projectId: 'project-id', environment: 'production', action: 'promote', status: 'active', projectRevision: 7, frozenRevisionId: 'frozen-id', materializationHash: null, git: null, image: null, slot: 'blue', containerId: 'container', productionUrl: 'http://production.example.test', sourceDeploymentId: 'staging-id', createdAt: '2026-09-10T00:00:00.000Z' }), { status: 202, headers: { 'Content-Type': 'application/json' } });
+    });
+    await client.promoteProduction('staging-id', 'promote-key');
+    await client.rollbackProduction('production-id', 'rollback-key');
+    expect(requests).toEqual(['/api/deployments/staging-id/promote:POST:promote-key', '/api/deployments/production-id/rollback:POST:rollback-key']);
+  });
 });
