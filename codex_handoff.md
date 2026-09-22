@@ -83,16 +83,17 @@ Final proof project: `d71de69c-e859-4498-bb2d-1cf6131927c8`, revision 1 → 2 ac
 
 Phase 3/4 is implemented locally. Self-hosted Publish flushes mutations and the exact saved revision, runs the upstream preflight, calls the control-plane publish endpoint, and reports `Staging source published` with deployment ID, revision, repository, branch, and verified SHA. The control plane derives authorization from the session, creates/reuses a stable site and repository assignment, freezes and materializes the exact revision, serializes per-site publication, pushes the configured provider's `staging` branch, records ordered deployment events, and ends at `ready-for-build`. Migration `004_git_repositories.sql` stores provider, owner, provider repository ID, and stable branch assignment.
 
-The server-side GitHub provider is implemented in control-plane commits
-`e8e90f5` and `9be14cc` on `feat/github-site-publishing-2026-09-22`; PR #26 is
-open and mergeable at the follow-up head. It uses a GitHub App with short-lived
-installation tokens for repository data operations and a server-side App user
-token only for personal-repository creation, plus private repositories, owner
-allowlisting, deterministic tree/commit publication, exact SHA checks,
-idempotent retries, and fast-forward-only production branch promotion. The
-local provider remains unchanged and is still the development default. No App
-credentials are configured in this workspace, so the personal proof repository
-has not been created.
+The server-side GitHub provider is merged into control-plane `main` via PR #26
+at `b6ba4178defa69bca6c94aa42aecccfd85bb2d49`. PR #27 added the expiring user
+token Device Flow/refresh lifecycle and merged at
+`2e750bcfa8ca68e04f6393ff9ac8eb8e73efa0bd`; it uses short-lived installation
+tokens for repository data operations and a server-side App user token only
+for personal-repository creation. Token state is atomically replaced with
+restrictive permissions, and installation/user identity checks run before
+repository creation. The local provider remains unchanged and is still the
+development default. The App is registered under `chazzajoe-mac` with App ID
+`5032895` and Installation ID `163764761`; the Client ID and PEM path still
+need server-side configuration. No personal proof repository has been created.
 
 The validated Phase 3/4 commits are builder `6170aba` and control plane `886e5db`. They add the builder Git response contract and `ready-for-build` UI, migration `004_git_repositories.sql`, the server-side `GitProvider`/local bare-repository implementation, per-site assignment, SHA verification, concurrency serialization, and the Git publication runbooks. Both repositories are clean after these local commits.
 
@@ -122,7 +123,7 @@ The implementation commits remain `9f8b2ad` in the builder and `8007244` in the 
 2. Self-hosted project persistence backend — local proof complete; review pending
 3. Content-addressed design asset storage and frozen materialization — local proof complete; review pending
 4. Minimal publish API — local proof complete; review/publication pending
-5. Git staging deployment — local provider proof complete; GitHub provider implemented, PR #26 pending merge and App credentials
+5. Git staging deployment — local provider proof complete; GitHub provider and token refresh merged, pending server-side App credentials and proof repository
 6. Docker staging deployment — local provider/injectable proof complete; controlled Nginx seam and Debian runbook prepared; Debian Docker/Nginx proof pending
 7. Production promotion
 8. Deployment history and rollback
