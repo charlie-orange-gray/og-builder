@@ -228,10 +228,17 @@ The ordinary control-plane API must not expose an unrestricted Docker socket, sh
 
 Each website receives one repository, for example:
 
-- `charlie-orange-gray/chaz-photography`
-- `charlie-orange-gray/chaz-music`
+- `chazzajoe-mac/chaz-photography`
+- `chazzajoe-mac/chaz-music`
 - `charlie-orange-gray/client-acme`
 - `charlie-orange-gray/client-example`
+
+Platform repositories remain under `charlie-orange-gray`; generated personal
+sites use a server-assigned owner such as `chazzajoe-mac`. The browser never
+supplies an owner, repository URL, or credential. The control plane stores the
+provider, owner, provider repository ID, staging branch, and production branch
+as a stable site assignment. GitHub assignments are private by default and
+limited by a server-side owner allowlist.
 
 Suggested branches:
 
@@ -756,11 +763,8 @@ Implemented locally but daemon/deployment-gated:
 Not implemented:
 
 - production authentication and workspace administration
-- GitHub repository orchestration/credentials
+- GitHub App credentials and personal proof-repository activation
 - real Docker daemon image/container proof on the development host
-- staging/production promotion (implemented and Debian-proven with a temporary hostname)
-- production blue/green routing and promotion (implemented and proven)
-- rollback UI and operational rollback workflow (implemented and proven)
 - realtime collaboration
 
 The validated upstream integration and self-hosted production UI are merged into `origin/main` (`a9306529f00b04b9ac873200ffad75af1df4ea7c`).
