@@ -83,10 +83,12 @@ Final proof project: `d71de69c-e859-4498-bb2d-1cf6131927c8`, revision 1 → 2 ac
 
 Phase 3/4 is implemented locally. Self-hosted Publish flushes mutations and the exact saved revision, runs the upstream preflight, calls the control-plane publish endpoint, and reports `Staging source published` with deployment ID, revision, repository, branch, and verified SHA. The control plane derives authorization from the session, creates/reuses a stable site and repository assignment, freezes and materializes the exact revision, serializes per-site publication, pushes the configured provider's `staging` branch, records ordered deployment events, and ends at `ready-for-build`. Migration `004_git_repositories.sql` stores provider, owner, provider repository ID, and stable branch assignment.
 
-The server-side GitHub provider is implemented in control-plane commit `e8e90f5`
-on `feat/github-site-publishing-2026-09-22`; PR #26 is open and mergeable. It
-uses a GitHub App with short-lived installation tokens, private repositories,
-owner allowlisting, deterministic tree/commit publication, exact SHA checks,
+The server-side GitHub provider is implemented in control-plane commits
+`e8e90f5` and `9be14cc` on `feat/github-site-publishing-2026-09-22`; PR #26 is
+open and mergeable at the follow-up head. It uses a GitHub App with short-lived
+installation tokens for repository data operations and a server-side App user
+token only for personal-repository creation, plus private repositories, owner
+allowlisting, deterministic tree/commit publication, exact SHA checks,
 idempotent retries, and fast-forward-only production branch promotion. The
 local provider remains unchanged and is still the development default. No App
 credentials are configured in this workspace, so the personal proof repository
