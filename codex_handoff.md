@@ -233,6 +233,23 @@ Phase 1 validation on 2026-09-09:
 - Development sessions are local-proof only. The server checks identity, workspace role and allowed Origin, and rejects development bypass/sessions in production. Do not expose this service publicly before real authentication and operational hardening.
 - Asset logical paths are allowlisted under `public/uploads`; server object paths use hashes and never use browser filenames. Materialization output is temporary and has no Git, Docker, shell, or runtime-upload authority.
 
+## GitHub App Authentication State
+
+On 2026-09-22 the merged `og-control-plane/main` at `2e750bc` was deployed and
+the Debian control plane was configured for the authorized GitHub
+App installation (`5032895` / `163764761`) and owner `chazzajoe-mac`. The PEM is
+at `/etc/og-control-plane/secrets/github-app-private-key.pem` with ownership
+`root:og-platform`, mode `0640`; the secrets directory is `0750`. The user-token
+state is server-side at `/var/lib/og-control-plane/github-user-token.json`,
+owned by `og-control-plane:og-control-plane`, mode `0600`, and is refreshed by
+the merged `GitHubUserTokenStore` implementation. The parent configuration
+directory grants `og-deployer` only a traverse (`--x`) ACL so its existing
+`og-platform` group access can reach the PEM without exposing the environment
+file. GitHub installation verification passed for owner, contents-write
+permission, and authenticated user `chazzajoe-mac`; both OG services are active
+and `/healthz` and `/readyz` pass. No personal proof repository has been
+created; the next step is a server-side identity-gated proof operation.
+
 ## Last Updated
 
 2026-09-22
