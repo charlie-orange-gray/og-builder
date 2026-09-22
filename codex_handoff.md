@@ -32,13 +32,16 @@ In self-hosted development, same-origin `/api/*` requests are proxied by Vite to
 
 The Phase 1 branch selects persistence once through `backendCapabilities`: Cloud → `RevymeBackend`; exact `VITE_SELF_HOSTED_PERSISTENCE=true` → `SelfHostedBackend`; otherwise → `LocalBackend`. Publishing and persistence are independent. The new adapter stores full editable `ProjectData` through the separate `/Users/chaz/og-control-plane` service. PostgreSQL owns identity, permissions, revision metadata, and idempotency receipts; durable immutable snapshot files contain project contents/settings. Browser project localStorage is not the self-hosted source of truth.
 
-The control plane now has server-side Git and Docker staging provider seams. Local development creates/reuses a per-site bare repository, publishes the exact materialized tree to `staging`, verifies the commit SHA, builds an immutable full-SHA image when enabled, starts a blue/green candidate, checks `/healthz`, and switches the staging route only after health passes. A controlled Nginx provider now validates generated host routes, runs `nginx -t`, reloads atomically, and restores the previous route on failure. GitHub credentials and production promotion remain unimplemented. Runtime uploads remain outside disposable containers.
+The control plane now has server-side Git and Docker staging provider seams. Local development creates/reuses a per-site bare repository, publishes the exact materialized tree to `staging`, verifies the commit SHA, builds an immutable full-SHA image when enabled, starts a blue/green candidate, checks `/healthz`, and switches the staging route only after health passes. A controlled Nginx provider now validates generated host routes, runs `nginx -t`, reloads atomically, and restores the previous route on failure. The GitHub App provider is implemented and credential-gated; production promotion remains proven on the local/GitHub-compatible provider boundary. Runtime uploads remain outside disposable containers.
 
 The ignored `.env.local` still contains the original Publish flag and API URL; it was not silently switched to persistence. See [SELF_HOSTED_PERSISTENCE.md](./SELF_HOSTED_PERSISTENCE.md) for explicit proof commands with publishing disabled. Both repositories pin Node `22.23.2`.
 
 ## Current Branch
 
-`feature/self-hosted-project-persistence`, created from stable `origin/main` at `84181a3`.
+Builder documentation branch `docs/github-provider-handoff-2026-09-22`, based on
+the production-proof handoff commit `b7cef43`. The isolated upstream sync branch
+`chore/sync-upstream-2026-09-22` was validated without changes because
+`origin/main` already contains `upstream/main`.
 
 ## Completed Work
 
@@ -78,7 +81,18 @@ The local browser proof uses real PostgreSQL 18.4 and durable data in the servic
 
 Final proof project: `d71de69c-e859-4498-bb2d-1cf6131927c8`, revision 1 → 2 across independent browser contexts. The retained JSON report is `test-results/persistence-report.json`; the screenshot shows both frames reloaded with acknowledged Saved status.
 
-Phase 3/4 is implemented locally. Self-hosted Publish flushes mutations and the exact saved revision, runs the upstream preflight, calls the control-plane publish endpoint, and reports `Staging source published` with deployment ID, revision, repository, branch, and verified SHA. The control plane derives authorization from the session, creates/reuses a stable site and repository assignment, freezes and materializes the exact revision, serializes per-site publication, pushes the local provider's `staging` branch, records ordered deployment events, and ends at `ready-for-build`. GitHub is credential-gated; Docker and live deployment remain out of scope. Migration `004_git_repositories.sql` adds repository assignments and Git metadata.
+Phase 3/4 is implemented locally. Self-hosted Publish flushes mutations and the exact saved revision, runs the upstream preflight, calls the control-plane publish endpoint, and reports `Staging source published` with deployment ID, revision, repository, branch, and verified SHA. The control plane derives authorization from the session, creates/reuses a stable site and repository assignment, freezes and materializes the exact revision, serializes per-site publication, pushes the configured provider's `staging` branch, records ordered deployment events, and ends at `ready-for-build`. Migration `004_git_repositories.sql` stores provider, owner, provider repository ID, and stable branch assignment.
+
+The server-side GitHub provider is implemented in control-plane commits
+`e8e90f5` and `9be14cc` on `feat/github-site-publishing-2026-09-22`; PR #26 is
+open and mergeable at the follow-up head. It uses a GitHub App with short-lived
+installation tokens for repository data operations and a server-side App user
+token only for personal-repository creation, plus private repositories, owner
+allowlisting, deterministic tree/commit publication, exact SHA checks,
+idempotent retries, and fast-forward-only production branch promotion. The
+local provider remains unchanged and is still the development default. No App
+credentials are configured in this workspace, so the personal proof repository
+has not been created.
 
 The validated Phase 3/4 commits are builder `6170aba` and control plane `886e5db`. They add the builder Git response contract and `ready-for-build` UI, migration `004_git_repositories.sql`, the server-side `GitProvider`/local bare-repository implementation, per-site assignment, SHA verification, concurrency serialization, and the Git publication runbooks. Both repositories are clean after these local commits.
 
@@ -108,7 +122,7 @@ The implementation commits remain `9f8b2ad` in the builder and `8007244` in the 
 2. Self-hosted project persistence backend — local proof complete; review pending
 3. Content-addressed design asset storage and frozen materialization — local proof complete; review pending
 4. Minimal publish API — local proof complete; review/publication pending
-5. Git staging deployment — local provider proof complete; GitHub provider pending credentials
+5. Git staging deployment — local provider proof complete; GitHub provider implemented, PR #26 pending merge and App credentials
 6. Docker staging deployment — local provider/injectable proof complete; controlled Nginx seam and Debian runbook prepared; Debian Docker/Nginx proof pending
 7. Production promotion
 8. Deployment history and rollback
@@ -220,4 +234,4 @@ Phase 1 validation on 2026-09-09:
 
 ## Last Updated
 
-2026-09-21
+2026-09-22
