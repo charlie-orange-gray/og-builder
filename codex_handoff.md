@@ -123,7 +123,7 @@ Read-only SSH inventory succeeded via `chaz-debian` (`192.168.7.24`, Tailscale `
 
 The original Revyme PoC is positively identified: `/var/www/revyme-builder`, owner `revyme`, Git `main` at `a3ed7b5` tracking `revyme-web/builder`, with an uncommitted `package-lock.json` change. PM2 v7.0.4 runs `canvas-poc` on `*:3333`, `canvas-sandbox` on `127.0.0.1:15174`, and `canvas-preview` on `127.0.0.1:15175`; all three endpoints returned HTTP 200. No `revyme`, `3333`, `15174`, or `15175` references were found in readable Nginx site/config paths (only the default site is enabled). The `revyme` user and project have therefore been retained; stopping PM2, archiving the project, and any Nginx change require an approved sudo-capable session and must wait until the new platform is published and ready.
 
-The generated-site contract remains local in control-plane commit `09ccb0f` on `feat/site-build-contract-2026-09-16`; it has not been pushed. Consequently no Debian deployment, old-PoC retirement, or staging release proof has run. The next safe action is to authorize publication of that control-plane branch (and the builder documentation branch if desired), then repeat the host checks with sudo before making narrowly scoped service changes. Production promotion remains out of scope.
+The generated-site contract and production deployment path are now merged into `og-control-plane/main`. The exact deployed control-plane SHA is `f15946319f4b8f8c4022535d312a32b5e8b85730`; the builder production controls are merged at `a9306529f00b04b9ac873200ffad75af1df4ea7c`. The Debian proof used only the temporary hostname `nginx-helper-release-a.production.100.70.105.18.nip.io`, dedicated production ports `42000–42999`, and the existing OG service boundary. Production P1, P2 blue/green, rollback, and failed candidate C have completed; real customer production promotion remains out of scope.
 
 ## Deployment Architecture
 
@@ -204,6 +204,7 @@ Phase 1 validation on 2026-09-09:
 - Service: fresh `npm ci` (zero reported vulnerabilities), TypeScript, build, 21 tests against real PostgreSQL, and whitespace checks passed. Tests include concurrency, dedupe, receipt replay, storage failures/corruption, authorization, frozen revision idempotency/immutability, asset dedupe/byte retrieval, embedded data-URL migration, and two repeated materializations with matching manifests.
 - Browser: `npm run test:persistence` passed all three real-editor cases against the migrated service schema. Evidence and screenshots are under ignored `test-results/`; logs are `/private/tmp/og-phase2-browser.log`. Editor test/build logs are `/private/tmp/og-phase1-tests.log` and `/private/tmp/og-phase1-build.log`.
 - Existing warnings: media/canvas test stubs, SDK sourcemaps, dynamic imports, large build chunks, and Node's ESLint module-type notice. Browser runs also show the existing layout-no-children bootstrap trace; the deliberate missing-project case logs its expected 404. No unresolved validation failure remains.
+- Production API/control-plane validation: `npm ci`, typecheck, `npm test` (53 passed, 2 skipped), build, and `git diff --check` passed on each focused merge branch. Debian deployed `f159463`; P1 and P2 passed health checks, rollback passed, and candidate C failed health without changing the active production route. The runtime upload survived P1 → P2 → rollback; the P2 image remained retained.
 - The service pins its dependency graph and uses `.npmrc` `legacy-peer-deps=true` to work around npm 10's optional-peer resolver crash. This disables all peer resolution; the installed runtime graph is explicitly pinned and tested.
 
 ## Important Decisions
@@ -219,4 +220,4 @@ Phase 1 validation on 2026-09-09:
 
 ## Last Updated
 
-2026-09-16
+2026-09-21
