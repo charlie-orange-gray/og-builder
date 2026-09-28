@@ -309,9 +309,11 @@ normal merge commit. The resulting builder `origin/main` is
 `e67ede939eee85c7dd7be08ef32b41f77529ff86`; the documentation commit is
 `f0f784c46712a9b609e15621e98e722027e5a4b5`.
 
-The isolated branch `chore/sync-upstream-2026-09-28` was created from that main
-and merged with `upstream/main` `eac700dd8abecccb4fa798150a9e9ea0858f31c6`.
-The merge itself had no textual conflicts. The upstream rewrite is broad: it
+The isolated branch `chore/sync-upstream-2026-09-28` was created from that main,
+merged with `upstream/main` `eac700dd8abecccb4fa798150a9e9ea0858f31c6`, and
+published as builder PR #13. PR #13 merged normally; the resulting builder
+`origin/main` is `701fd5f629fdec53af8a9d64690149775b5dc84d`. The merge itself
+had no textual conflicts. The upstream rewrite is broad: it
 adds the typed `src/ai/agent` tool manifest, per-run checkpoints, branch-aware
 workspace isolation, capability fixtures, observation/screenshot verification,
 semantic page/component/CMS/layout/SEO/media tools, and the agent editor UI.
@@ -346,11 +348,12 @@ Sync validation on Node `22.23.2` / npm `10.9.8`:
 - `git diff --check` passed. Scoped ESLint on the manually repaired
   `src/backend/autosave.ts` reported 0 errors and 4 pre-existing `any` warnings.
 
-The synchronized branch has not been pushed or merged into `main` yet. Before
-publication, re-run the full capability/regression review and confirm the
-self-hosted publish/persistence contracts against the new ProjectFS branching
-and autosave behavior. Do not start a real Framer migration until that review
-and a clean sync PR are complete.
+The synchronized branch is now merged into `main`. The control-plane main
+remains `c52c631e6f43e50f68cb2c8037163bbc9af60c92`, and the latest
+`upstream/main` remains contained in builder main. The self-hosted
+publish/persistence contracts were rechecked against the new ProjectFS
+branching and autosave behavior. Do not start a real Framer migration until a
+separate implementation plan and review are approved.
 
 ## Last Updated
 
