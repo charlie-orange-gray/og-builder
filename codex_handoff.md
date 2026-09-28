@@ -235,7 +235,7 @@ Phase 1 validation on 2026-09-09:
 
 ## GitHub App Authentication State
 
-On 2026-09-22 the merged `og-control-plane/main` at `2e750bc` was deployed and
+On 2026-09-23 the merged `og-control-plane/main` at `c52c631e6f43e50f68cb2c8037163bbc9af60c92` was deployed and
 the Debian control plane was configured for the authorized GitHub
 App installation (`5032895` / `163764761`) and owner `chazzajoe-mac`. The PEM is
 at `/etc/og-control-plane/secrets/github-app-private-key.pem` with ownership
@@ -247,9 +247,61 @@ directory grants `og-deployer` only a traverse (`--x`) ACL so its existing
 `og-platform` group access can reach the PEM without exposing the environment
 file. GitHub installation verification passed for owner, contents-write
 permission, and authenticated user `chazzajoe-mac`; both OG services are active
-and `/healthz` and `/readyz` pass. No personal proof repository has been
-created; the next step is a server-side identity-gated proof operation.
+and `/healthz` and `/readyz` pass. The one approved proof repository is now
+`chazzajoe-mac/og-site-proof` (private, provider repository ID `1382438507`),
+and no other personal repository was created.
+
+## GitHub-backed staging and rollback proof — 2026-09-23
+
+Builder `origin/main` is `9912e2ceedc61ff1327b10a8c0ac97c54db0d8c1`; the
+deployed control-plane `main` is `c52c631e6f43e50f68cb2c8037163bbc9af60c92`.
+
+The proof repository was initialized once with bootstrap commit
+`ca757e2076213b69a2173253e5e8305a659fdd7d`; the `staging` ref was created at
+that commit. The stable database assignment is site
+`0f66113e-4108-4602-ae9f-f685aa0b685c` → internal repository assignment
+`d050227e-9914-414b-a68a-f62dd0e80342` → `chazzajoe-mac/og-site-proof`.
+
+Release A used project revision `2`, frozen revision
+`b95853fc-0b8d-4e6d-a2ea-66d106d807e5`, materialisation hash
+`sha256:997d979b3e780cbd5601bc9eb336b03b2eb7668bc3b38a1bbda8431dbd02c980`, Git tree
+`772ef0d490e51bc1139cb7bf8ccafef88dcbf368`, Git commit
+`70336d7bc3d07181a9337b55af7afb1ba56c1f33`, and image digest
+`og-site-proof@sha256:a0a609c46bda6a1b5436ed610d4ad1f722c9fb23bf19049be46b05bd93415849`.
+It reached staging blue, then production blue, and was retained for rollback.
+
+Release B used project revision `3`, frozen revision
+`ac90151b-32c8-4483-9517-fd3df6c64be3`, materialisation hash
+`sha256:4ae1d1d01dd0e4ff504a2b265c3f1c9f2e4996703a456e5ce7a9d1aa9e542f26`,
+Git commit `3f4f5d4dfec42f36fb44fcaab52b2a82d064f2e3`, Git tree
+`35115c11c158bf3a9bd854a826e57ad02fb59978`, and image digest
+`og-site-proof@sha256:f47fd194975c9bf73eced98f5a3db549490abb789f8ff6a283ea033a2f810b97`.
+It staged on green while A remained live, then promoted to production green.
+GitHub `main` and `staging` now both point to B; B has A as its parent, with no
+force push.
+
+The rollback is deployment `5f2b8b04-5c3f-4b65-b497-4f465fa65b94`, derived
+server-side from historical A deployment `0309e17b-07ee-4f2a-9916-9f232f2d32c8`.
+It reused A's exact image and Git SHA, became production blue, and left GitHub
+`main` unchanged at B. The active staging URL is
+`http://og-site-proof.100.70.105.18.nip.io` (green/B); the active production
+URL is `http://og-site-proof.production.100.70.105.18.nip.io` (blue/A).
+
+The runtime upload `github-proof.txt` was written through the active website
+container and read successfully from both B staging and rolled-back A
+production containers. The per-site bind mount is the only writable mount;
+containers run as UID/GID `10001:10001`, have no Docker socket, and retain the
+read-only image layer. `og-staging` remains `internal=true`; `og-ingress` is a
+separate managed non-internal network. Failed candidates were cleaned without
+changing the active route.
+
+During proof setup, the control-plane unit was corrected with a narrow
+no-Docker environment override so staging jobs queue to `og-deployer`, and the
+Nginx helper received only `/var/log/nginx` in its existing `ReadWritePaths`
+allowlist. The invalid stale OG staging fragment that blocked `nginx -t` was
+moved aside and removed after validation. No unrelated containers, networks,
+databases, firewall/VPN/systemd services, or production promotion were changed.
 
 ## Last Updated
 
-2026-09-22
+2026-09-23
