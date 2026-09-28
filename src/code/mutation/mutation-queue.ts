@@ -16,6 +16,7 @@
 // and flushes to codeAtom when idle.
 
 import { liftCodeOverrides, restoreCodeOverrides, pruneUnusedOverrideImports, setCodeOverridesInCode, type CodeOverrideRef } from '../generation/code-override-gen';
+import { SCROLL_TARGET_EXPR } from '@/shared/scroll-target';
 import { getAllCachedNodes, getNodeFromCache, canvasInteractingAtom, setPreferCacheSnapshot } from '@/code/stores/store';
 import { registerExternalWriteRefresh } from './external-write-registry';
 import { sanitizeDataName } from '@/shared/id-utils';
@@ -27,6 +28,7 @@ import { dragStateOps } from '@/canvas/drag/drag-state-store';
 import { getDefaultStore } from 'jotai';
 import { healMissingLocaleHook } from '@/code/generation/scoped-expr';
 import { trace } from '@/shared/debug-trace';
+import { isAgentWriteOpen, isBranchLocked } from '@/code/stores/agent-run-lock-store';
 import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
 import { isViewerMode } from '../stores/viewer-mode-store';
@@ -121,6 +123,7 @@ import {
   dedupeFormStateDeclarations,
   dormantizeFormBindingsInCanvas,
   formStateVar,
+  ensureFormStateHook,
   formStateSetter,
   type FormStateMapping,
 } from '../generation/form-state-gen';
@@ -785,6 +788,10 @@ const IMPORT_AFFECTING_TYPES = new Set([
   // Page variable bind/unbind insert/remove useState — syncImports needs to
   // pick up the React hook addition/removal.
   'bindStylePageVariable', 'unbindStylePageVariable', 'removePageVariable',
+  // A text page variable / a declared page variable sync a `useState` hook
+  // too — the SYNC flush wrote the hook without its import (the async path
+  // healed it a tick later; the agent's post-write oracle saw WOULD_CRASH).
+  'createTextPageVariable', 'removeTextPageVariable', 'addPageVariable', 'updatePageVariable', 'addCollectionSearchField', 'setSearchInputVariable', 'ensureTemplateVarParam',
   // Per-viewport style-variable binding emits a `useMediaQuery` gate (which uses
   // useState/useEffect) into the page body — syncImports must add those React hooks.
   'bindResponsiveStyleVariable', 'unbindResponsiveStyleVariable',
@@ -922,7 +929,23 @@ export function syncQueueCode(code: string): void {
  * Queue a mutation. The mutation is applied to the code string asynchronously.
  * The caller should have already updated the DOM for instant visual feedback.
  */
-export function queueMutation(mutation: Mutation): void {
+/**
+ * Branch scope for a queued write / drain.
+ *
+ * PARTIALLY HONOURED. The lock gate below is live: a write aimed at a locked
+ * branch is refused today. The DRAIN is not yet partitioned — one queue, one
+ * group — so `flushNow(scope)` still drains everything pending rather than
+ * only that (branchId, file) group. Concurrent runs on different branches
+ * therefore are not yet isolated; that lands with the agent port, together
+ * with the `{author, file, branchId}` entry routing it needs.
+ */
+export interface QueueScope {
+  author?: 'human' | 'agent';
+  file?: string;
+  branchId?: string;
+}
+
+export function queueMutation(mutation: Mutation, scope?: QueueScope): void {
   // View-only gate. Every write path in the editor (drag, resize, style
   // panel, keyboard shortcuts, AI agent tools, etc.) funnels through
   // here, so one early-return at the bottom of the stack disables ALL
@@ -930,6 +953,17 @@ export function queueMutation(mutation: Mutation): void {
   // re-enforces this via requireEditAccess — defense in depth.
   if (isViewerMode()) {
     trace.fn('queueMutation:blocked-viewer', { type: mutation.type });
+    return;
+  }
+  // BRANCH LOCK gate. An agent run owns its branch for the whole run; a write
+  // aimed at a locked branch from OUTSIDE an agent write window is refused
+  // (same shape and trace as the viewer gate). Writes inside the agent's own
+  // window always pass — the lock exists to keep other authors out, not the
+  // run itself. With no branches and no run, `isBranchLocked` is false and
+  // this is a no-op for every existing write path.
+  const targetBranch = scope?.branchId ?? projectFS.getActiveBranchId();
+  if (!isAgentWriteOpen() && isBranchLocked(targetBranch)) {
+    trace.action('mutation-queue:refused-branch-locked', { type: mutation.type, branch: targetBranch });
     return;
   }
   queue.push(mutation);
@@ -969,9 +1003,16 @@ export function queueMutation(mutation: Mutation): void {
 /**
  * Queue multiple mutations at once (e.g., multi-select drag).
  */
-export function queueMutations(mutations: Mutation[]): void {
+export function queueMutations(mutations: Mutation[], scope?: QueueScope): void {
   if (isViewerMode()) {
     trace.fn('queueMutations:blocked-viewer', { count: mutations.length });
+    return;
+  }
+  // The same entry-branch gate as queueMutation — a multi-drag on a branch
+  // an agent run holds must not slip past it (it did until 2026-09-22).
+  const targetBranch = scope?.branchId ?? projectFS.getActiveBranchId();
+  if (!isAgentWriteOpen() && isBranchLocked(targetBranch)) {
+    trace.action('mutation-queue:refused-branch-locked', { count: mutations.length, branch: targetBranch });
     return;
   }
   queue.push(...mutations);
@@ -1059,7 +1100,9 @@ export function refreshDeferredFlushWithExternalWrite(code: string): void {
 // (see external-write-registry.ts).
 registerExternalWriteRefresh(refreshDeferredFlushWithExternalWrite);
 
-export function flushNow(): void {
+/** Drain now. `scope` is accepted for call-site compatibility with the
+ *  branch-aware API; the drain is not partitioned yet (see QueueScope). */
+export function flushNow(scope?: QueueScope): void {
   // Cancel any pending timers
   if (flushTimer !== null) {
     cancelAnimationFrame(flushTimer);
@@ -1527,9 +1570,28 @@ export function validateGeneratedCode(code: string): string | null {
         return `Duplicate data-id \`${d.id}\` — the same node appears twice (first at line ${first ?? '?'}, again at line ${d.line ?? '?'}). Every edit resolves a node by its data-id, so two copies make the document ambiguous: the layers panel shows the node twice and later edits hit an arbitrary one. The move/reorder that produced this removed the original from one place and inserted a copy in another without deleting it.`;
       }
     }
+    // A TYPE is not a runtime reference. Babel's scope counts the annotation
+    // in `function C(props: MyComponentProps)` as an unbound identifier even
+    // though the file declares `interface MyComponentProps` — types are
+    // erased before anything runs, so an imported TypeScript code component
+    // was reported as "would crash" when it compiles and renders fine.
+    // Only a name used in a VALUE position can crash.
+    const valueRefs = new Set<string>();
+    traverse(ast, {
+      TSTypeAnnotation(p: any) { p.skip(); },
+      TSTypeReference(p: any) { p.skip(); },
+      TSTypeAliasDeclaration(p: any) { p.skip(); },
+      TSInterfaceDeclaration(p: any) { p.skip(); },
+      TSTypeParameterDeclaration(p: any) { p.skip(); },
+      TSTypeParameterInstantiation(p: any) { p.skip(); },
+      TSAsExpression(p: any) { p.get('typeAnnotation').skip?.(); },
+      Identifier(p: any) { valueRefs.add(p.node.name); },
+      JSXIdentifier(p: any) { valueRefs.add(p.node.name); },
+    });
     traverse(ast, {
       Program(p) {
-        dangling = Object.keys((p.scope as any).globals || {}).filter((n) => !KNOWN_GLOBALS.has(n));
+        dangling = Object.keys((p.scope as any).globals || {})
+          .filter((n) => !KNOWN_GLOBALS.has(n) && valueRefs.has(n));
       },
     });
     if (dangling.length) {
@@ -1566,7 +1628,9 @@ export function validateGeneratedCode(code: string): string | null {
   // blocked + reverted, like a syntax error. Cheap regex pass, gated on the
   // hook's presence.
   if (code.includes('useScroll(')) {
-    const targetRe = /useScroll\(\s*\{[^)]*?\b(?:target|container)\s*:\s*([A-Za-z_$][\w$]*)/g;
+    // The target may be variant-gated (`cond ? ref : undefined`) — group 1 is
+    // the REF either way, never the condition's first identifier.
+    const targetRe = new RegExp(String.raw`useScroll\(\s*\{[^)]*?\b(?:target|container)\s*:\s*` + SCROLL_TARGET_EXPR, 'g');
     let m: RegExpExecArray | null;
     const missing: string[] = [];
     while ((m = targetRe.exec(code)) !== null) {
@@ -2491,6 +2555,9 @@ function applyMutationCore(code: string, mutation: Mutation): string {
             const stateVar = formStateVar(fid);
             next = wireFormSubmitInCode(next, fid, formStateSetter(stateVar));
             next = convertSubmitButtonInCode(next, fid, stateVar);
+            // The handler references the setter whether or not a button was
+            // there to convert — declare the hook regardless.
+            next = ensureFormStateHook(next, fid);
           }
           if (formIds.length) {
             try {
@@ -3772,3 +3839,58 @@ function applyMutationCore(code: string, mutation: Mutation): string {
     return code;
   }
 }
+
+/**
+ * Point the editor at `path` and re-seed the mutation queue from that file's
+ * content on `branchId` (default: the active branch).
+ *
+ * `setActiveFilePath` alone leaves the queue holding the PREVIOUS file's code,
+ * so the next generator would splice into the wrong source. Reading through
+ * `readBranchFiles` (not `projectFS.readFile`) lets a caller seed from a
+ * branch it is not currently sitting on — which is what a workspace switch
+ * does, one map at a time.
+ */
+export function switchQueueFile(path: string, opts: { branchId?: string } = {}): void {
+  setActiveFilePath(path);
+  const branchId = opts.branchId ?? projectFS.getActiveBranchId();
+  const content = projectFS.readBranchFiles(branchId)?.get(path) ?? null;
+  if (content != null) {
+    syncQueueCode(content);
+    trace.action('mutation-queue:switch-queue-file', { path, branchId });
+  } else {
+    trace.action('mutation-queue:switch-queue-file-missing', { path, branchId });
+  }
+}
+
+/** The file path the queue's `currentCode` base tracks. Read-only accessor for
+ *  `restoreSnapshot` (Porte 5 / D-T3): after a snapshot restore the queue base
+ *  must be re-seeded from the restored content of THIS file — without a
+ *  getter the restore path cannot know which file the queue tracks. */
+export function getQueueActiveFilePath(): string {
+  return _activeFilePath;
+}
+
+/**
+ * Drop queued mutations aimed at `branchId`, returning how many were dropped.
+ *
+ * Our queue is NOT branch-partitioned (entries are plain mutations, not
+ * `{mutation, route}` records), so "the entries for branch X" is only
+ * answerable for the ACTIVE branch — everything queued targets whatever
+ * branch is active when it drains. Asking about any other branch therefore
+ * drops nothing and says so, rather than silently discarding another
+ * workspace's pending work. When the drain becomes partitioned this reads the
+ * route instead and the callers do not change.
+ */
+export function dropQueuedBranch(branchId: string): number {
+  if (branchId !== projectFS.getActiveBranchId()) {
+    trace.action('mutation-queue:drop-branch-noop', { branch: branchId, reason: 'not-active' });
+    return 0;
+  }
+  const dropped = queue.length;
+  if (dropped > 0) {
+    queue.length = 0;
+    trace.action('mutation-queue:drop-branch-entries', { branch: branchId, dropped });
+  }
+  return dropped;
+}
+
