@@ -10,30 +10,35 @@ deployment output, Docker layers, Git repositories, or runtime files.
 
 ## Current Revyme MCP surface
 
-The inventory below is based on builder main `99909fc` and the implementation in
-`src/ai/mcp/bridge-client.ts`, `src/ai/page-agent/*`, and
-`src/ai/cms-agent/*`.
+The inventory below is based on the synchronized agent implementation in
+`src/ai/agent/*` (upstream `eac700d`) plus the external MCP bridge in
+`src/ai/mcp/bridge-client.ts`. The native agent is the preferred extension
+point; the bridge exposes the same live editor state to an external MCP client.
 
 | Area | Supported operations | Boundary and gaps |
 | --- | --- | --- |
-| Project creation | Project identity is supplied by the editor/backend; the bridge can create pages, templates, and CMS scaffolds | No explicit MCP `create_project` operation. Project provisioning remains a control-plane/backend concern. |
-| Pages | `getContext`, `listFiles`, `readFile`, `create_page`, `create_pages`, `create_template`; page-agent tree and node mutations | Page creation is supported; initial project bootstrap is not an MCP operation. |
-| Components | Context/list/read, validated file submission, node mutations, variants and connections, marketplace share/insert, icon-set creation | `edit_file` is an escape hatch and must remain last resort. |
-| Styles/design tokens | `get_design_tokens`, `managePresets` list/set/remove/set_typography, `add_preset_token`, `update_preset_token`, `update_node_styles` | `globals.css` is protected; token operations use the editor's preset mutations. |
-| Text/content | `update_node_text`, structured node edits, `read_file`/`submit_files`, translations, CMS item values | Rich bespoke code may require manual review. |
-| Assets | `uploadImage`/`revyme_upload_asset`, authenticated backend asset upload, `createIconSet` | Uploads require a non-local project and the editor's quota/auth boundary. |
-| CMS | Collection/schema/item CRUD, field types, per-item translations, CMS index/detail page scaffolds | Use CMS ops, not raw collection JSON. Localized content stays in `_i18n` on one row. |
-| Metadata/SEO | Read/write of supported project files through the oracle where allowed | No first-class SEO/meta MCP tool is currently exposed. Unsupported metadata is a manual-review item, never an unvalidated overwrite. |
-| Responsive layouts | Viewport context, design tokens and responsive typography tiers; style/node mutation tools; `@canvas` viewport metadata is protected | No Framer auto-layout importer. Recreate each target viewport and preserve builder-owned viewport metadata. |
-| Interactions | `add_appear`/`remove_appear`, `add_hover`/`remove_hover`, `add_loop`/`remove_loop`, variants and connections | Effects outside the supported motion/variant model require manual review. |
-| Save | Bridge mutations use the normal mutation queue and/or `submitFiles`, then force autosave and await `flushSaveNow` | Save is an editor/backend operation, not a direct database write. |
-| Publish | `publishListing` publishes marketplace listings only; the site Publish seam is editor/control-plane driven | No site deployment publish MCP operation. The migration agent must stop at a saved project and hand off to the existing deployment workflow. |
+| Project creation | Project identity/provisioning remains editor/backend-owned; native tools can create branches, pages, templates, components, CMS scaffolds, and project skills | No MCP `create_project`; provisioning remains a control-plane/backend concern. |
+| Pages and nested routes | `list_pages`, `create_page`, `duplicate_page`, `rename_page`, `delete_page`, `create_template`, `assign_template`, `create_collection_pages` | Route groups preserve URL paths; route collisions and redirects still need planning/review. |
+| Components and variants | `list_components`, `get_component`, `create_component`, `extract_component`, instances/props, `create_variant`, `set_variant`, visibility, connections, slots | Code components and unsupported Framer component contracts need review; `apply_file_edit` is the guarded last resort. |
+| Styles/design tokens | `get_design_tokens`, `set_styles`, `set_layout`, `set_size_units`, `set_pseudo_style`, `create_token`, `set_token`, `set_dark_token`, typography presets | Writes route through the agent workspace/mutation queue; protected builder metadata remains guarded. |
+| Text/content | `get_node`, `set_text`, `set_rich_text`, `set_text_on_breakpoint`, `set_attr`, `set_link`, `translate_texts`, `translate_attribute` | Bespoke code/content expressions remain oracle- and review-gated. |
+| Assets and media | `find_assets`, `upload_image`, `create_icon_set`, icons, `set_background_video`, image attributes | Authenticated asset upload is supported; video hosting/licensing and unsupported media formats remain review items. |
+| CMS | `cms_get_collection`, collection/field/item CRUD, references, `cms_set_item_translation`, list binding/configuration, pagination, row links, collection pages | Use CMS tools rather than raw JSON; localized content stays on one logical row. |
+| Metadata/SEO | `get_seo`, `set_page_metadata`, `set_site_metadata` cover title, description, Open Graph, Twitter/X, canonical, robots, favicon, social image and requested custom head/body code | Structured data, arbitrary scripts, and policy-sensitive custom code still require review. |
+| Responsive layouts | `list_viewports`, `add_viewport`, `set_viewport_width`, `remove_viewport`, viewport-scoped styles, per-breakpoint reorder/text/visibility, screenshots | Recreate source breakpoints in Revyme's viewport dialect; preserve builder-owned `@canvas` metadata. |
+| Interactions and motion | `set_page_variable`, `set_page_interaction`, variants/connections, motion tools, page transitions, smooth scroll, background video | Framer-specific gestures, code overrides, timers, and external integrations require custom work or review. |
+| Save and isolation | `agent.manifest`, `agent.run_start`, `agent.tool_call`, `agent.run_end`; turn checkpoints, branch isolation, oracle validation, autosave flush and Changes card | External bridge calls are attributed to the same agent run/undo boundary; no direct database writes. |
+| Publish | `publishListing` remains marketplace-only; site staging/production publish remains editor/control-plane driven | Migration stops at a saved, verified project and hands off to the existing deployment workflow. |
 
-The bridge is intentionally a development bridge. It exposes context, reads,
-asset upload, presets, translations, CMS, icon sets, marketplace helpers and
-validated file submission. `submitFiles` is guarded by the same oracle and
-stale-write checks as the in-editor freeform loop. Page-agent tools are thin
-wrappers around the same validated mutation queue used by the human editor.
+The new native agent has a typed Zod manifest (`ALL_TOOLS`), a remote provider
+turn stream, a per-run checkpoint, branch/workspace isolation, bounded leases,
+structured tool results, screenshot/observation epochs, capability fixtures,
+and a visual Changes card. The external bridge exposes that manifest and run
+lifecycle through `agent.manifest`, `agent.run_start`, `agent.tool_call`, and
+`agent.run_end`, while retaining the legacy `revyme_*` context/file/CMS tools.
+All writes still pass through the editor mutation queue, oracle, stale-write
+guards, and autosave boundary. This makes the native agent the preferred
+migration extension point rather than a second custom mutation system.
 
 ## Principles and guardrails
 

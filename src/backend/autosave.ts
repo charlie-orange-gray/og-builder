@@ -8,7 +8,7 @@ import { getProjectId } from './project-id';
 import { saveStatusAtom, versionedSaveStateAtom } from './save-store';
 import { backendCapabilities } from './capabilities';
 import { VersionedAutosave } from './versioned-autosave';
-import type { ProjectData } from './types';
+import { PROJECT_FORMAT, type ProjectData } from './types';
 import { projectFS } from '../code/project/project-fs';
 import { trace } from '@/shared/debug-trace';
 
