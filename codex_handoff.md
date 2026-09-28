@@ -302,6 +302,56 @@ allowlist. The invalid stale OG staging fragment that blocked `nginx -t` was
 moved aside and removed after validation. No unrelated containers, networks,
 databases, firewall/VPN/systemd services, or production promotion were changed.
 
+## Upstream AI-agent synchronization — 2026-09-28
+
+The migration architecture was published in builder PR #12 and merged with a
+normal merge commit. The resulting builder `origin/main` is
+`e67ede939eee85c7dd7be08ef32b41f77529ff86`; the documentation commit is
+`f0f784c46712a9b609e15621e98e722027e5a4b5`.
+
+The isolated branch `chore/sync-upstream-2026-09-28` was created from that main
+and merged with `upstream/main` `eac700dd8abecccb4fa798150a9e9ea0858f31c6`.
+The merge itself had no textual conflicts. The upstream rewrite is broad: it
+adds the typed `src/ai/agent` tool manifest, per-run checkpoints, branch-aware
+workspace isolation, capability fixtures, observation/screenshot verification,
+semantic page/component/CMS/layout/SEO/media tools, and the agent editor UI.
+The external MCP bridge now delegates run lifecycle and native tool manifests
+through `src/ai/agent/bridge-tools.ts` while retaining the legacy `revyme_*`
+context/file/CMS bridge.
+
+The sync branch preserves the Orange & Gray persistence backend, versioned
+autosave, `PUBLISH_ENABLED`, self-hosted staging/production controls, GitHub
+publishing contract, Vite API seam, architecture/handoff documents, and the
+existing Cloud/standalone selection. One compatibility repair was required:
+`src/backend/autosave.ts` imports `PROJECT_FORMAT` while using the fork's
+versioned persistence path. The current working tree also contains the updated
+`MIGRATION_AGENT_ARCHITECTURE.md`,
+`FRAMER_REVYME_CAPABILITY_MATRIX.md`, and
+`MIGRATION_MANIFEST_SCHEMA.md`; these remain documentation/readiness artifacts,
+not a migration implementation.
+
+Sync validation on Node `22.23.2` / npm `10.9.8`:
+
+- `npm ci` passed (npm reported existing audit findings: 48 vulnerabilities).
+- `npx tsc --noEmit` passed.
+- `npm run test:run -- --maxWorkers=4` passed: 816 files, 12,362 passed,
+  34 skipped, 5 todo.
+- `npm run build:all` passed for the main, sandbox, and preview builds. Existing
+  warnings include large chunks, direct `eval` in the code-component runtime,
+  ineffective dynamic imports, and the existing Node module-type notice.
+- `npm run test:persistence` passed with elevated local IPC permission: 3
+  browser tests passed. The non-elevated attempt failed before startup because
+  the sandbox denied the Playwright/tsx IPC socket; no product failure was
+  observed.
+- `git diff --check` passed. Scoped ESLint on the manually repaired
+  `src/backend/autosave.ts` reported 0 errors and 4 pre-existing `any` warnings.
+
+The synchronized branch has not been pushed or merged into `main` yet. Before
+publication, re-run the full capability/regression review and confirm the
+self-hosted publish/persistence contracts against the new ProjectFS branching
+and autosave behavior. Do not start a real Framer migration until that review
+and a clean sync PR are complete.
+
 ## Last Updated
 
-2026-09-23
+2026-09-28

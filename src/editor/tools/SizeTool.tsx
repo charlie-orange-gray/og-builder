@@ -356,7 +356,7 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
   // shown (i.e. the dimension is overridden on this replica/variant).
   const isVectorSet = !!node && isVectorSetComponentFile(node.componentFile);
   // The selected variant's NATURAL size, for the locked-aspect Fit below. A
-  // vector's aspect is fixed — Framer greys out the lock icon for exactly this
+  // vector's aspect is fixed — the reference greys out the lock icon for exactly this
   // reason — so Fit on one dimension means "the size that keeps this variant's
   // aspect", derived from the OTHER dimension. The generic instance-hug path
   // produces the variant's INTRINSIC size instead, which is why a 26px-wide
@@ -487,7 +487,13 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
       // dropped:[298]). The tile-drag path always had this order.
       applyViewportWidthChange(activeFilePath, vpId, prevWidth, rounded);
     }
-    setViewportsConfig(prev => prev.map(v => v.id === vpId ? { ...v, width: rounded } : v));
+    // Sizing a tile by hand DEFINES it: drop any `designWidth` the import
+    // left behind. That field only records the width the source designed a
+    // band at (a phone band reaching 809px drawn on a 390px canvas) — once
+    // the user picks a width, the tile they asked for is the tile they get,
+    // and the band and the render width are one number again. Keeping it
+    // made the field change while the tile stayed the size it was.
+    setViewportsConfig(prev => prev.map(v => v.id === vpId ? { ...v, width: rounded, designWidth: undefined } : v));
     forceCanvasRender();
     trace.action('size:viewport-breakpoint-change', { vpId, prevWidth, newWidth: rounded });
   }, [vpId, activeFilePath, setViewportsConfig, setViewportWidths]);
@@ -1533,7 +1539,7 @@ if (heightIsAuto) {
 
             {/* A VECTOR SET's ratio is not a user choice — the artwork has one
                 aspect and both dimensions derive from it, so the toggle is shown
-                locked and disabled (reference parity: Framer greys this icon out
+                locked and disabled (reference parity: the reference greys this icon out
                 for a vector). Everything else keeps the normal toggle. */}
             <button
               type="button"

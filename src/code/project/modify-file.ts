@@ -5,7 +5,8 @@
 //   But this file CAN import both since nothing imports this file at module load time.
 
 import { getDefaultStore } from 'jotai';
-import { projectFS } from './project-fs';
+import { projectFS, isSharedAcrossBranches } from './project-fs';
+import { isCanvasBusy } from '@/code/stores/agent-run-lock-store';
 import { activeFilePathAtom } from './active-file-store';
 import { syncQueueCode, flushNow, syncImports, getCurrentCode, refreshDeferredFlushWithExternalWrite } from '../mutation/mutation-queue';
 import { parseJSX } from '../parsing/ast-utils';
@@ -61,6 +62,17 @@ export function modifyProjectFile(
     skipParseGate?: boolean;
   },
 ): string | null {
+  // CANVAS-BUSY BACKSTOP: no direct write lands on a branch an agent run
+  // holds outside the run's own write window — the same gate queueMutation
+  // has, so every write path (panels, heal-on-switch, file ops, code editor
+  // sync, the MCP bridge) funnels through one refusal. Editor state
+  // (`_meta/`: comments, cameras, chats) is not the website and stays
+  // writable. Returns null per the existing failure contract. FIRST, so
+  // even the pre-write flush below cannot disturb the run.
+  if (isCanvasBusy() && !isSharedAcrossBranches(filePath)) {
+    trace.action('modify-file:refused-canvas-busy', { filePath });
+    return null;
+  }
   // The mutation queue's `currentCode` represents the ACTIVE PAGE's
   // source — it's the in-memory base that pending JSX mutations
   // apply against, and `flushNow()` writes the result to the queue's
@@ -195,3 +207,22 @@ export function modifyProjectFile(
   trace.fn('modifyProjectFile', { filePath, changed: finalResult !== code, isQueueOwned, isJsxFile });
   return finalResult;
 }
+
+/** Oracle dialect codes treated as BLOCKERS for a `modifyProjectFile`
+ *  transform: a file carrying one of these is refused rather than written.
+ *
+ *  Exported so a caller can pre-flight a transform and explain a refusal
+ *  (the branch-apply pipeline does this to report which file bounced and
+ *  why). It is never a bypass — `modifyProjectFile` always re-verifies
+ *  before writing; this only lets callers predict the answer. */
+export function isBlockingModifyViolation(code: string): boolean {
+  if (code === 'SYNTAX_ERROR') return true;
+  if (code === 'MISSING_DATA_ID') return true;
+  if (code === 'DISPLAY_TOGGLE_VISIBILITY') return true;
+  if (code === 'TEXT_EXPRESSION') return true;
+  if (code === 'UNRESOLVABLE_TERNARY') return true;
+  if (code === 'WOULD_CRASH') return true;
+  if (code.startsWith('FORBIDDEN_')) return true;
+  return false;
+}
+
