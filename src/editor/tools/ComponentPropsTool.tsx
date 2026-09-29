@@ -13,6 +13,7 @@ import { codeAtom, stableCodeAtom, nodesAtom, selectedNodeAtom, selectedIdsAtom,
 import { enterComponentFile } from '@/canvas/component-navigation';
 import { projectFS, projectVersionAtom, stableProjectVersionAtom } from '@/code/project/project-fs';
 import { activeFilePathAtom, componentBreadcrumbAtom } from '@/code/project/active-file-store';
+import { isIconSetFilePath } from '@/code/project/file-path-kind';
 import { getAnchorsForPage } from './LinkTool/LinkUrlControl';
 import { isComponentFilePath } from '@/code/project/file-path-kind';
 import { isReplicaViewportAtom, interactingViewportWidthAtom, isComponentVariantViewportAtom, activeComponentVariantAtom } from '@/code/stores/viewport-store';
@@ -133,7 +134,14 @@ export { setInstanceProp, removeInstanceProp } from './ComponentPropsTool/instan
  * Component props tool — renders when a component instance is selected.
  * Shows each prop with its current value (or default), editable.
  */
-export default function ComponentPropsTool() {
+/**
+ * `embedded` renders the PROP ROWS ONLY, without the component header and its
+ * Edit button. An icon set's colour variables belong in the Icon Set section
+ * beside the icon picker — the way Framer shows them — not in a second,
+ * competing Component block with its own name and Edit button below it.
+ * IconSetTool renders this tool embedded inside its own section.
+ */
+export default function ComponentPropsTool({ embedded = false }: { embedded?: boolean } = {}) {
   const nodes = useAtomValue(nodesAtom);
   const jotaiStore = useStore();
   const selectedId = useAtomValue(selectedNodeAtom);
@@ -259,6 +267,17 @@ export default function ComponentPropsTool() {
       const hashMatch = componentFile.match(/@([a-f0-9]+)\./);
       const hash = hashMatch?.[1] ?? componentFile;
       return parseComponentInfoFromSource(componentFile, cdnCode, hash);
+    }
+    // An ICON SET lives under `icons/`, which the registry never scans, so an
+    // icon instance had no props panel at all — its colour variable existed in
+    // the file and was unreachable from the page. Parse it directly, the same
+    // fallback a template uses, and drop `name`: that is the icon PICKER,
+    // which IconSetTool already renders above this.
+    if (isIconSetFilePath(componentFile)) {
+      const code = projectFS.readFile(componentFile);
+      if (!code) return null;
+      const info = parseComponentInfoFromSource(componentFile, code, String(code.length));
+      return info ? { ...info, props: info.props.filter((p) => p.name !== 'name') } : null;
     }
     const registry = buildComponentRegistry(projectFS);
     for (const info of registry.values()) {
@@ -2122,7 +2141,7 @@ export default function ComponentPropsTool() {
           backgroundColor: 'color-mix(in srgb, var(--accent-secondary, #a855f7) 8%, transparent)',
         } : undefined}
       >
-        {componentHeader}
+        {!embedded && componentHeader}
         {/* Same px-2 + pl-3 as ToolSection so code component control labels line up
             with Styles / Layout / Position labels (ControlLabel's chevron
             offset only makes sense at this column). */}
@@ -2317,7 +2336,7 @@ export default function ComponentPropsTool() {
 
   return (
     <>
-      {componentHeader}
+      {!embedded && componentHeader}
 
       {hasRegularProps && (
         // mt-2 separates the prop list from the Variant selector above so

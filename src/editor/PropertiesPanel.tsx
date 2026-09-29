@@ -2,7 +2,7 @@
 // All tools sit inside <ControlProvider> which handles style read/write routing.
 
 import React from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { selectedNodeAtom, selectedIdsAtom } from '../code/stores/store';
 import { useNodesComputed } from '../code/stores/node-family';
 import { activeFilePathAtom, isComponentFilePath, isIconSetFilePath, isPageClientFile, isPageServerFile, isDesignComponentFile, isVariantFile, isTemplateFilePath } from '../code/project/active-file-store';
@@ -733,8 +733,11 @@ function PropertiesPanelInner({ isMultiSelect = false }: { isMultiSelect?: boole
             to a multi-variant component instance inside a <form>. */}
         {isComponentInstance && isInsideForm && <FormStateTool />}
 
-        {/* 7. Component Props */}
-        <ComponentPropsTool />
+        {/* 7. Component Props — an ICON SET's props render inside the Icon
+            Set section below instead, beside the icon picker they belong
+            with; rendering them here too gave the set a second header and a
+            second Edit button. */}
+        {!isContainerSetInstance && <ComponentPropsTool />}
 
         {/* 7a. Icon Set (only for icon-set instances — IconSetTool returns
             null when the selected node isn't pointing at an icons/*.tsx file). */}

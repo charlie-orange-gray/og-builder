@@ -103,8 +103,7 @@ import {
   composeAllScrollAppearConflicts,
   decomposeAllScrollConflicts,
 } from '../generation/generator-motion';
-import { setScrollVariantInCode, dormantizeScrollVariant, rehydrateScrollVariant, removeScrollVariantFromVarRefs } from '../generation/scroll-variant-gen';
-import { removeTemplateVarFromCode } from '../generation/template-route-gen';
+import { setScrollVariantInCode, dormantizeScrollVariant, rehydrateScrollVariant } from '../generation/scroll-variant-gen';
 import { setInstanceFxInCode, dormantizeInstanceFx, rehydrateInstanceFx, stripDeadFxStyleRefs } from '../generation/instance-fx-gen';
 import { setScrollFxInCode, removeScrollSpeedScopeBranch, dormantizeScrollFx, rehydrateScrollFx, writeCanvasNodeScrollFx, updateVariantEntryTransition, setElementTransitionVar, setVariantTransitionPropVar, setMotionConfigBaseVar, readTransitionVarRef } from '../generation/generator-motion';
 import { setGlideInCode, hasGlide, getGlide } from '../generation/glide-gen';
@@ -148,7 +147,7 @@ import {
   updateSelectCaretRuleInCode,
   removePseudoStyleInCode,
 } from '../generation/generator-styles';
-import { bindTextNodeToPropInCode, createVariableInCode, createConditionalVariableInCode, removeVariableInCode, createTextVariableInCode, removeTextVariableInCode, bindTextNodeAsPageVarInCode, bindTextVariableForVariantInCode, createLinkAttrVariableInCode, removeLinkAttrVariableInCode, setBorderOverlayVariableForVariant, setInlineVariableForVariant, removeVariantStyleVariableInCode, setComponentPropDefaultInCode, createTypedVariableInCode, addBarePropToFunctionInCode, deleteComponentVariableInCode, renameComponentVariableInCode } from '../features/variable-ops';
+import { bindTextNodeToPropInCode, createVariableInCode, createConditionalVariableInCode, removeVariableInCode, createTextVariableInCode, removeTextVariableInCode, bindTextNodeAsPageVarInCode, bindTextVariableForVariantInCode, createLinkAttrVariableInCode, removeLinkAttrVariableInCode, setBorderOverlayVariableForVariant, setInlineVariableForVariant, removeVariantStyleVariableInCode, setComponentPropDefaultInCode, createTypedVariableInCode, addBarePropToFunctionInCode, renameComponentVariableInCode } from '../features/variable-ops';
 import { addPageVariableInCode, removePageVariableInCode, updatePageVariableInCode } from '../features/page-variables';
 import { applyDeleteVariablePipeline } from '../features/delete-variable-pipeline';
 import { setPropDescriptionInCode, setPropTypeInCode, setPropOptionsInCode, setPropLabelInCode, setPropNumberMetaInCode, setPropVariantOfInCode, getPropType, getPropDescription, getPropOptions, getPropLabel, getPropVariantOf } from '../components/prop-meta';
@@ -1698,6 +1697,13 @@ const KNOWN_GLOBALS = new Set<string>([
   'Notification', 'caches', 'indexedDB', 'TextEncoder', 'TextDecoder', 'AbortSignal',
   'PointerEvent', 'TouchEvent', 'WheelEvent', 'DragEvent', 'FocusEvent', 'InputEvent',
   'AnimationEvent', 'TransitionEvent', 'DataTransfer', 'ClipboardEvent', 'CSSStyleSheet',
+  // Web Animations. `Animation` is both a runtime feature check
+  // (`typeof Animation !== "undefined"`, which is how a component asks whether
+  // it can hardware-accelerate) and a TS type (`useRef<Animation>`) — the same
+  // two positions the DOM classes above are used in. Without it an imported
+  // marquee could not be published at all: "References undefined identifier:
+  // Animation".
+  'Animation', 'KeyframeEffect', 'AnimationTimeline', 'DocumentTimeline', 'AnimationPlaybackEvent',
   // React / runtime
   'React', 'Fragment', 'process', 'module', 'exports', 'require',
 ]);
@@ -3893,4 +3899,3 @@ export function dropQueuedBranch(branchId: string): number {
   }
   return dropped;
 }
-

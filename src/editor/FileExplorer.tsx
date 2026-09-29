@@ -11,14 +11,17 @@ import {
   componentBreadcrumbAtom, filePathToAbPagePath,
 } from '../code/project/active-file-store';
 import { createTemplate, validateTemplateName } from '../code/project/template-ops';
-import { createCmsIndexPageFile, createCmsDetailPageFile, findCmsPageFile } from '../code/project/cms-page-ops';
+import { createCmsIndexPageFile, createCmsDetailPageFile, findCmsPageFile, prettyCollectionName } from '../code/project/cms-page-ops';
+import { rootMountedCollection, isRootSlugPage } from '../code/project/cms-root-mount';
+import { parseCmsPageMeta } from '../code/project/cms-page-meta';
 import { collectionSchemasAtom } from '../code/stores/cms-store';
+import { listPageFolders, createPageFolder, deletePageFolder } from '../code/project/page-folders';
 import { projectFS, projectVersionAtom, stableProjectVersionAtom } from '../code/project/project-fs';
 import { selectedIdsAtom, updatingFromCanvasAtom } from '../code/stores/store';
 import { flushNow, syncQueueCode } from '../code/mutation/mutation-queue';
 import { sealPendingHistory, pushHistoryFileOp } from '../code/mutation/history';
 import { fitAllOnNextRender } from '@/canvas/transform';
-import { PageHomeIcon, PageDocumentIcon, NotFoundIcon } from '../shared/icons';
+import { PageHomeIcon, PageDocumentIcon, PageFolderIcon, NotFoundIcon } from '../shared/icons';
 import DropdownMenu, { type DropdownMenuEntry } from '@/design-system/DropdownMenu';
 import SectionLabel from '@/design-system/SectionLabel';
 import SearchBar from '@/design-system/SearchBar';
@@ -102,7 +105,7 @@ export interface PageTreeEntry {
   filePath: string;
   displayPath: string;
   label: string;
-  type: 'page' | 'group' | 'layout' | 'variant';
+  type: 'page' | 'group' | 'folder' | 'layout' | 'variant';
   group: string | null;
   depth: number;
   isHome: boolean;
@@ -160,7 +163,12 @@ export function buildPageTree(version: number): PageTreeEntry[] {
   // up at a time until it finds an existing page-file or runs out of
   // segments. Visual label of a nested entry shows ONLY the last segment
   // (`/team` instead of `/about/team`) so the indentation does the work.
-  function nestPagesByPath(pageList: string[], homePath: string, baseDepth: number): PageTreeEntry[] {
+  function nestPagesByPath(
+    pageList: string[],
+    homePath: string,
+    baseDepth: number,
+    declaredFolders: string[] = [],
+  ): PageTreeEntry[] {
     const entryMap = new Map<string, PageTreeEntry>();
     for (const fp of pageList) {
       const isHome = fp === homePath;
@@ -180,6 +188,54 @@ export function buildPageTree(version: number): PageTreeEntry[] {
       });
     }
 
+    // ─── Virtual FOLDER rows ────────────────────────────────────────────
+    // A route can have children without being a page itself: Framer's
+    // `/fonctionnalites` is a FOLDER holding `/fonctionnalites/capture`
+    // and friends, and `/fonctionnalites` itself 404s. Without a row for
+    // it those children have no ancestor page-file and all land at the
+    // top level as long flat names (`/fonctionnalites/capture-…`).
+    //
+    // So synthesise a folder entry for every intermediate directory that
+    // holds pages but has no `page.client.tsx` of its own. It carries no
+    // file, so it is never draggable, deletable or navigable — it only
+    // groups, exactly like the folder rows Framer draws.
+    const dirOf = (fp: string) => fp.replace(/\/page\.client\.tsx$/, '');
+    // Everything shallower than this is the group/app root, not a folder:
+    // `app/…` normally, `app/(group)/…` inside a route group. It is per
+    // FILE, not per list — the flat tree mixes grouped and ungrouped
+    // pages, and a shared depth turned `(marketing)` itself into a
+    // folder row.
+    const rootDepth = (segs: string[]) => (segs[1]?.startsWith('(') ? 2 : 1);
+    const addFolder = (dir: string, group: string | null) => {
+      const asPage = `${dir}/page.client.tsx`;
+      if (entryMap.has(asPage) || entryMap.has(dir)) return;
+      entryMap.set(dir, {
+        id: `folder:${dir}`,
+        filePath: dir,
+        displayPath: dir,
+        label: `/${dir.split('/').pop() ?? ''}`,
+        type: 'folder',
+        group,
+        depth: baseDepth,
+        isHome: false,
+        children: [],
+      });
+    };
+    for (const fp of pageList) {
+      const segs = dirOf(fp).split('/');
+      for (let i = rootDepth(segs) + 1; i < segs.length; i++) {
+        addFolder(segs.slice(0, i).join('/'), getRouteGroup(fp));
+      }
+    }
+    // Folders the user made with "New Folder" that hold no page yet —
+    // nothing in the file list implies them, so they come from `_meta`.
+    for (const dir of declaredFolders) {
+      const segs = dir.split('/');
+      for (let i = rootDepth(segs) + 1; i <= segs.length; i++) {
+        addFolder(segs.slice(0, i).join('/'), null);
+      }
+    }
+
     /** Find the deepest ancestor page-file present in `entryMap`.
      *  The home page (`app/page.tsx` or `app/(group)/page.tsx`) is
      *  intentionally NOT considered a parent — it's a sibling of every
@@ -194,6 +250,8 @@ export function buildPageTree(version: number): PageTreeEntry[] {
         if (candidate === fp) continue;
         if (candidate === homePath) continue; // Home is a sibling, not a parent
         if (entryMap.has(candidate)) return candidate;
+        // …or a virtual folder standing in for a directory with no page.
+        if (dir !== fp && entryMap.has(dir)) return dir;
       }
       return null;
     };
@@ -208,7 +266,7 @@ export function buildPageTree(version: number): PageTreeEntry[] {
         // indentation conveys hierarchy without the path being
         // duplicated on every line. Dynamic segments like `[slug]`
         // pass through as-is.
-        const lastSeg = fp.replace(/\/page\.client\.tsx$/, '').split('/').pop() ?? '';
+        const lastSeg = dirOf(fp).split('/').pop() ?? '';
         entry.label = `/${lastSeg}`;
       } else {
         topLevel.push(entry);
@@ -302,7 +360,7 @@ export function buildPageTree(version: number): PageTreeEntry[] {
 
   // 2) All other pages — bare AND templated — flat at root level.
   const flatPages = [...(groupedPages.get(null) ?? []), ...templatedPages];
-  const flat = nestPagesByPath(flatPages, homePath, 0);
+  const flat = nestPagesByPath(flatPages, homePath, 0, listPageFolders());
   tree.push(...flat);
 
   // Sort: home first, then everything alphabetical. Plain groups stay in
@@ -372,7 +430,7 @@ function injectAbVariants(tree: PageTreeEntry[]): void {
 
   function walk(entries: PageTreeEntry[]) {
     for (const entry of entries) {
-      if (entry.type === 'group') {
+      if (entry.type === 'group' || entry.type === 'folder') {
         walk(entry.children);
         continue;
       }
@@ -537,6 +595,11 @@ export default function FileExplorer() {
   const [bulkPagesDelete, setBulkPagesDelete] = useState<{
     filePaths: string[];
     displayNames: string[];
+    /** Set when the delete started from a FOLDER row: the folder goes
+     *  away with its pages, so the copy names the folder and the
+     *  confirm forgets it afterwards. */
+    folderDir?: string;
+    folderLabel?: string;
   } | null>(null);
   // Pending "Make as Control" confirmation. Promotes a variant's tree
   // to the baseline page and ends the test — the reference's natural way to
@@ -815,11 +878,54 @@ export default function FileExplorer() {
     trace.action('FileExplorer.addNotFoundPage', { filePath });
   }, [setActiveFile, setSelectedIds, setVersion]);
 
-  const addCmsPage = useCallback((slug: string, mode: 'index' | 'detail') => {
+  // A folder holds pages without being one. It has no file of its own, so
+  // creating it only records the name (see page-folders.ts) — the row it
+  // draws is the same row a folder full of pages derives from its paths.
+  const addFolder = useCallback((parentDir = 'app') => {
+    const dir = createPageFolder('Folder', parentDir);
+    setVersion(v => v + 1); bumpTreeNow();
+    setCollapsed(prev => { const next = new Set(prev); next.delete(`folder:${dir}`); return next; });
+    setShowAddMenu(false);
+    trace.action('FileExplorer.addFolder', { dir });
+  }, [setVersion]);
+
+  // Deleting a folder takes its pages with it — the folder IS their
+  // shared directory, so leaving them behind would scatter them back to
+  // the top level under their full paths. Empty folders skip the modal:
+  // there is nothing to lose.
+  const removeFolder = useCallback((dir: string) => {
+    const pages = projectFS.listFiles('app/')
+      .filter(f => f.startsWith(`${dir}/`) && f.endsWith('page.client.tsx'));
+    if (pages.length === 0) {
+      deletePageFolder(dir);
+      setVersion(v => v + 1); bumpTreeNow();
+      trace.action('FileExplorer.removeFolder', { dir, pages: 0 });
+      return;
+    }
+    setBulkPagesDelete({
+      filePaths: pages,
+      displayNames: pages.map(f => getFileDisplayName(f)),
+      folderDir: dir,
+      folderLabel: `/${dir.split('/').pop() ?? ''}`,
+    });
+  }, [setVersion]);
+
+  const addCmsPage = useCallback((slug: string, mode: 'index' | 'detail' | 'detail-root') => {
     flushNow();
     const filePath = mode === 'index'
       ? createCmsIndexPageFile(slug)
-      : createCmsDetailPageFile(slug);
+      : createCmsDetailPageFile(slug, { atRoot: mode === 'detail-root' });
+    // Only one collection can own the site root: two would leave
+    // `/amara-okeke` with nothing in the URL to say which collection to
+    // resolve it against. Name the one in the way — "already taken" with no
+    // culprit is the kind of error people re-trigger three times.
+    if (!filePath) {
+      const owner = rootMountedCollection();
+      alert(`The root URL is already used by the "${prettyCollectionName(owner ?? '')}" collection.`
+        + ' Only one collection can own it — give this one a path of its own.');
+      setShowAddMenu(false);
+      return;
+    }
     setVersion(v => v + 1); bumpTreeNow();
     setSelectedIds([]);
     setActiveFile(filePath);
@@ -1132,7 +1238,23 @@ export default function Page() {
       }
       if (projectFS.exists(newPath)) {
         trace.action('FileExplorer.dragBail', { reason: 'conflict', from: oldPath, to: newPath });
+        alert(`A page already lives at that path (${newPath.replace(/^app\//, '/').replace(/\/page\.client\.tsx$/, '')}).`);
         return;
+      }
+      // Dragging a detail page to the root gives its collection the site's
+      // own `[slug]`, and only one collection can hold it: `/amara-okeke`
+      // with two owners has nothing in the URL saying which to resolve it
+      // against. The drop used to bail in silence here, which reads as the
+      // drag simply not working.
+      if (isRootSlugPage(newPath)) {
+        const meta = parseCmsPageMeta(projectFS.readFile(oldPath) ?? '');
+        const owner = rootMountedCollection();
+        if (owner && owner !== meta?.collection) {
+          trace.action('FileExplorer.dragBail', { reason: 'root-slug-taken', owner, from: oldPath });
+          alert(`The root URL is already used by the "${prettyCollectionName(owner)}" collection.`
+            + ' Only one collection can own it.');
+          return;
+        }
       }
 
       trace.action('FileExplorer.drop', {
@@ -1211,6 +1333,7 @@ export default function Page() {
             items={(() => {
               const items: DropdownMenuEntry[] = [
                 { id: 'new-page', label: 'New Page', icon: <PageDocumentIcon size={14} />, onClick: () => addPage() },
+                { id: 'new-folder', label: 'New Folder', icon: <PageFolderIcon size={14} />, onClick: () => addFolder() },
               ];
               // 404 page — only one allowed per project. Hide the
               // entry once `app/not-found.tsx` exists so the user can't
@@ -1251,6 +1374,9 @@ export default function Page() {
                     const indexExists = !!findCmsPageFile(slug, 'index');
                     const detailExists = !!findCmsPageFile(slug, 'detail');
                     const bothExist = indexExists && detailExists;
+                    // Whoever holds `app/[slug]`, so the root entry can grey
+                    // out instead of failing after the click.
+                    const rootOwner = rootMountedCollection();
                     return {
                       id: `cms-collection-${slug}`,
                       label: schema.name ?? slug,
@@ -1273,6 +1399,14 @@ export default function Page() {
                           icon: <PageDocumentIcon size={14} />,
                           disabled: detailExists,
                           onClick: () => addCmsPage(slug, 'detail'),
+                        },
+                        {
+                          id: `cms-${slug}-detail-root`,
+                          label: 'Detail Page (at root)',
+                          icon: <PageDocumentIcon size={14} />,
+                          // Free only while no other collection owns `/`.
+                          disabled: detailExists || (!!rootOwner && rootOwner !== slug),
+                          onClick: () => addCmsPage(slug, 'detail-root'),
                         },
                       ],
                     };
@@ -1315,6 +1449,8 @@ export default function Page() {
             onDuplicate={duplicatePage}
             onStartDrag={startPageDrag}
             onAddPageToGroup={(groupDir) => { addPage(`app/(${groupDir})`); }}
+            onAddPageToFolder={(dir) => { addPage(dir); }}
+            onDeleteFolder={removeFolder}
             onCreateAbTest={async (filePath) => {
               // "New A/B test…" / "Add variant" are both inline — no modal.
               // Naming follows the reference: 'a'=Control, 'b'=Variant, 'c'=Variant 1,
@@ -1520,6 +1656,15 @@ export default function Page() {
               // the corresponding page.tsx wrapper automatically.
               if (entry.type === 'page') {
                 const oldPath = entry.filePath;
+                // A `[slug]` segment is a ROUTE, not a name: the sluggifier
+                // below strips the brackets, so renaming a detail page would
+                // quietly turn `/[slug]` into `/slug` and every item URL
+                // would 404. The collection names that page.
+                if (/\[[^/\]]+\]/.test(oldPath)) {
+                  trace.action('FileExplorer.renamePage-bail', { reason: 'dynamic-segment', oldPath });
+                  alert('A collection detail page is named by its collection — its [slug] is the route itself.');
+                  return;
+                }
                 const m = oldPath.match(/^(app(?:\/\([^)]+\))?)\/([^/]+)\/page\.client\.tsx$/);
                 if (!m) return;  // home page (app/page.client.tsx) doesn't have a slug to rename
                 const prefix = m[1];
@@ -1697,7 +1842,9 @@ export default function Page() {
       <ConfirmDeleteModal
         title={
           bulkPagesDelete
-            ? `Delete ${bulkPagesDelete.filePaths.length} pages?`
+            ? (bulkPagesDelete.folderDir
+                ? `Delete ${bulkPagesDelete.folderLabel}?`
+                : `Delete ${bulkPagesDelete.filePaths.length} pages?`)
             : ''
         }
         message={
@@ -1706,7 +1853,10 @@ export default function Page() {
                 const names = bulkPagesDelete.displayNames;
                 const preview = names.slice(0, 4).join(', ');
                 const extra = names.length > 4 ? ` + ${names.length - 4} more` : '';
-                return `${preview}${extra}. This cannot be undone.`;
+                const lead = bulkPagesDelete.folderDir
+                  ? `The folder and its ${names.length} page${names.length === 1 ? '' : 's'}: `
+                  : '';
+                return `${lead}${preview}${extra}. This cannot be undone.`;
               })()
             : ''
         }
@@ -1715,10 +1865,14 @@ export default function Page() {
         onConfirm={() => {
           if (!bulkPagesDelete) return;
           const paths = bulkPagesDelete.filePaths;
+          const folderDir = bulkPagesDelete.folderDir;
           setBulkPagesDelete(null);
           setMultiSelectedPages(new Set());
           for (const p of paths) performPageDelete(p);
-          trace.action('FileExplorer.bulkDelete:confirm', { count: paths.length });
+          // Drop the metadata entry too, or an empty row survives its
+          // own delete (declared folders outlive their pages by design).
+          if (folderDir) { deletePageFolder(folderDir); setVersion(v => v + 1); bumpTreeNow(); }
+          trace.action('FileExplorer.bulkDelete:confirm', { count: paths.length, folderDir });
         }}
       />
 
@@ -1853,6 +2007,9 @@ interface TreeRowProps {
    *  variant rows + the Home page itself. */
   onStartDrag: (e: React.MouseEvent, entry: PageTreeEntry) => void;
   onAddPageToGroup?: (groupDir: string) => void;
+  /** Folder rows: create a page inside, or forget an empty folder. */
+  onAddPageToFolder?: (dir: string) => void;
+  onDeleteFolder?: (dir: string) => void;
   /** A/B test create — triggered from the page row's ellipsis menu.
    *  When undefined (e.g. cloud disabled), the menu item doesn't render. */
   onCreateAbTest?: (filePath: string) => void;
@@ -1897,7 +2054,7 @@ interface TreeRowProps {
 
 const TreeRow = React.memo(function TreeRow({
   entry, activeFile, dragIndicator, draggedId, collapsed,
-  onSwitch, onToggleCollapse, onDelete, onDuplicate, onStartDrag, onAddPageToGroup, onCreateAbTest, onDeleteVariant, onMakeAsControl, onOpenPageSettings, renamingEntryId, onStartRename, onCommitRename, multiSelectedPages, onToggleMultiSelect, onBulkDelete,
+  onSwitch, onToggleCollapse, onDelete, onDuplicate, onStartDrag, onAddPageToGroup, onAddPageToFolder, onDeleteFolder, onCreateAbTest, onDeleteVariant, onMakeAsControl, onOpenPageSettings, renamingEntryId, onStartRename, onCommitRename, multiSelectedPages, onToggleMultiSelect, onBulkDelete,
 }: TreeRowProps) {
   // Viewer mode: no per-row ⋯ menu. Every entry in it (Duplicate, Edit,
   // Rename, Settings, New A/B test, Delete) is a write action, so the
@@ -1977,6 +2134,7 @@ const TreeRow = React.memo(function TreeRow({
         </span>
       );
     }
+    if (entry.type === 'folder') return <PageFolderIcon size={12} style={{ color: 'currentColor' }} />;
     if (entry.type === 'layout') return <LayoutIcon />;
     if (entry.isHome) return <PageHomeIcon size={12} style={{ color: 'currentColor' }} />;
     return <PageDocumentIcon size={12} style={{ color: 'currentColor' }} />;
@@ -1997,7 +2155,7 @@ const TreeRow = React.memo(function TreeRow({
       onToggleMultiSelect!(entry.filePath);
       return;
     }
-    if (entry.type === 'group') {
+    if (entry.type === 'group' || entry.type === 'folder') {
       onToggleCollapse(entry.id);
     } else {
       // Page click always navigates to the file. Page-with-children
@@ -2026,7 +2184,7 @@ const TreeRow = React.memo(function TreeRow({
     e.stopPropagation();
     onToggleCollapse(entry.id);
   };
-  const hasNestedChildren = (entry.type === 'page' || entry.type === 'group') && entry.children.length > 0;
+  const hasNestedChildren = (entry.type === 'page' || entry.type === 'group' || entry.type === 'folder') && entry.children.length > 0;
   // Pages that have ANY A/B variant children keep the page icon AND
   // get an expand chevron to the left (via SidebarRow's prefix slot).
   // The "any" (not "every") relaxation matters when a page has BOTH
@@ -2088,7 +2246,7 @@ const TreeRow = React.memo(function TreeRow({
           // icon directly under the parent's icon column, not "one slot
           // further right" like the user expected. The placeholder is
           // 14 px to match `chevronPrefix`'s width above.
-          entry.type === 'group'
+          entry.type === 'group' || entry.type === 'folder'
             ? <span className="shrink-0 opacity-60" style={{ width: 10 }}>
                 <ChevronIcon open={!isCollapsed} />
               </span>
@@ -2098,7 +2256,7 @@ const TreeRow = React.memo(function TreeRow({
         }
         icon={renderIcon()}
         label={entry.label}
-        isActive={isActive && entry.type !== 'group'}
+        isActive={isActive && entry.type !== 'group' && entry.type !== 'folder'}
         iconColor="inherit"
         // When this row is the one being renamed, swap the static label
         // for the SidebarRow inline input — same UX as the Layers panel.
@@ -2146,6 +2304,16 @@ const TreeRow = React.memo(function TreeRow({
             } as DropdownMenuEntry,
           ] : []),
           ...(canDelete ? [{ id: 'delete', label: 'Delete', onClick: () => onDelete(entry.filePath) } as DropdownMenuEntry] : []),
+        ] : entry.type === 'folder' ? [
+          // A folder is metadata, not a file: the only things it can do
+          // are gain a page and (while empty) go away.
+          ...(onAddPageToFolder ? [
+            { id: 'new-page', label: 'New Page', onClick: () => onAddPageToFolder(entry.filePath) } as DropdownMenuEntry,
+          ] : []),
+          ...(onDeleteFolder ? [
+            // Deletes the folder AND every page inside it (confirmed).
+            { id: 'delete', label: 'Delete', onClick: () => onDeleteFolder(entry.filePath) } as DropdownMenuEntry,
+          ] : []),
         ] : entry.type === 'variant' && (onStartRename || onDeleteVariant || onMakeAsControl) ? [
           // Variant row menu — Control (variantId === 'a') is the
           // baseline page itself, no Rename / Make-as-Control for it.
@@ -2163,7 +2331,17 @@ const TreeRow = React.memo(function TreeRow({
             { id: 'delete', label: 'Delete', onClick: () => onDeleteVariant(entry) } as DropdownMenuEntry,
           ] : []),
         ] : undefined}
-        right={entry.type === 'group' && onAddPageToGroup ? (
+        right={entry.type === 'folder' && onAddPageToFolder ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onAddPageToFolder!(entry.filePath); }}
+            title="Add page to folder"
+            className="shrink-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 p-0.5 cut-corners transition-opacity border-none bg-transparent cursor-pointer"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+        ) : entry.type === 'group' && onAddPageToGroup ? (
           <button
             onClick={(e) => { e.stopPropagation(); onAddPageToGroup!(entry.group!); }}
             title="Add page to group"
@@ -2226,7 +2404,7 @@ const TreeRow = React.memo(function TreeRow({
           When the page has BOTH variants and sub-routes we drop a thin
           hairline divider at the variant/non-variant boundary so the
           two groups read as distinct — matches the reference's pattern. */}
-      {(entry.type === 'group' || (entry.type === 'page' && entry.children.length > 0))
+      {(entry.type === 'group' || entry.type === 'folder' || (entry.type === 'page' && entry.children.length > 0))
         && !isCollapsed
         && entry.children.map((child, i, arr) => {
           const isFirstNonVariant = child.type !== 'variant'
@@ -2255,6 +2433,8 @@ const TreeRow = React.memo(function TreeRow({
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
                 onStartDrag={onStartDrag}
+                onAddPageToFolder={onAddPageToFolder}
+                onDeleteFolder={onDeleteFolder}
                 onCreateAbTest={onCreateAbTest}
                 onDeleteVariant={onDeleteVariant}
                 onMakeAsControl={onMakeAsControl}
