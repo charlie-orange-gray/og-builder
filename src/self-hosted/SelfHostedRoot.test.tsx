@@ -6,11 +6,11 @@ import { ControlPlaneError, selfHostedClient } from '@/backend/self-hosted-clien
 vi.mock('@/ProjectLoader', () => ({ default: () => <div>Loaded editor boundary</div> }));
 vi.mock('@/backend/self-hosted-client', async importOriginal => ({
   ...await importOriginal<typeof import('@/backend/self-hosted-client')>(),
-  selfHostedClient: { getSession: vi.fn(), startDevelopmentSession: vi.fn(), startGitHubLogin: vi.fn(), pollGitHubLogin: vi.fn(), logout: vi.fn(), listProjects: vi.fn(), createProject: vi.fn() },
+  selfHostedClient: { getSession: vi.fn(), startDevelopmentSession: vi.fn(), startGitHubLogin: vi.fn(), pollGitHubLogin: vi.fn(), logout: vi.fn(), listProjects: vi.fn(), createProject: vi.fn(), createWorkspace: vi.fn(), selectWorkspace: vi.fn() },
 }));
 
 const id = '00000000-0000-4000-8000-000000000001';
-const session = { user: { id: 'user', name: 'Developer', email: 'dev@example.test' }, workspace: { id: 'workspace', name: 'Agency' } };
+const session = { user: { id: 'user', name: 'Developer', email: 'dev@example.test' }, workspace: { id: 'workspace', name: 'Agency', role: 'owner' as const }, workspaces: [{ id: 'workspace', name: 'Agency', role: 'owner' as const }] };
 
 beforeEach(() => {
   window.history.replaceState({}, '', '/');
@@ -68,7 +68,7 @@ describe('self-hosted project entry', () => {
     window.history.replaceState({}, '', '/dashboard');
     render(<SelfHostedRoot />);
     expect((await screen.findByRole('link', { name: 'Open Photography' })).getAttribute('href')).toBe(`/builder/${id}`);
-    expect(screen.getByText('Agency')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Agency' })).toBeTruthy();
     expect(screen.getByText(/Updated/)).toBeTruthy();
     expect(selfHostedClient.listProjects).toHaveBeenCalledWith('workspace');
   });
@@ -78,9 +78,31 @@ describe('self-hosted project entry', () => {
     render(<SelfHostedRoot />);
     await screen.findByRole('textbox', { name: 'Project name' });
     fireEvent.change(screen.getByRole('textbox', { name: 'Project name' }), { target: { value: 'Music site' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }));
     await waitFor(() => expect(selfHostedClient.createProject).toHaveBeenCalledWith('Music site', 'workspace'));
     expect((await screen.findByRole('alert')).textContent).toContain('Project limit reached');
     expect((screen.getByRole('textbox', { name: 'Project name' }) as HTMLInputElement).value).toBe('Music site');
+  });
+
+  it('switches between server-provided workspaces', async () => {
+    const multiWorkspaceSession = { ...session, workspaces: [...session.workspaces, { id: 'client', name: 'Client', role: 'editor' as const }] };
+    vi.mocked(selfHostedClient.getSession).mockResolvedValue(multiWorkspaceSession);
+    vi.mocked(selfHostedClient.selectWorkspace).mockResolvedValue({ ...multiWorkspaceSession, workspace: { id: 'client', name: 'Client', role: 'editor' } });
+    render(<SelfHostedRoot />);
+    await screen.findByRole('link', { name: 'Open Photography' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Current workspace' }), { target: { value: 'client' } });
+    await waitFor(() => expect(selfHostedClient.selectWorkspace).toHaveBeenCalledWith('client'));
+    expect(await screen.findByRole('heading', { name: 'Client' })).toBeTruthy();
+  });
+
+  it('offers first-workspace provisioning without inventing a default workspace', async () => {
+    const empty = { ...session, workspace: null, workspaces: [] };
+    vi.mocked(selfHostedClient.getSession).mockResolvedValue(empty);
+    vi.mocked(selfHostedClient.createWorkspace).mockResolvedValue(session);
+    render(<SelfHostedRoot />);
+    expect(await screen.findByRole('heading', { name: 'Create your first workspace' })).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Workspace name' }), { target: { value: 'Personal' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
+    await waitFor(() => expect(selfHostedClient.createWorkspace).toHaveBeenCalledWith('Personal'));
   });
 });

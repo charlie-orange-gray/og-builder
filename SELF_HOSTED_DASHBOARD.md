@@ -9,15 +9,18 @@ is resolved at the backend boundary with the same precedence as persistence:
 
 The self-hosted shell owns `/dashboard` and opens projects at
 `/builder/<project-id>`. Project names, revisions, timestamps, creation, and
-loading come from the control plane (`GET /api/projects`, `POST /api/projects`,
-and `GET /api/projects/:id`). Browser localStorage is not an authority for the
-project list. The root path remains accepted as a compatibility entry point
-for existing development bookmarks; new navigation uses `/dashboard`.
+loading come from the control plane (`GET /api/session`, `GET /api/workspaces`,
+`POST /api/workspaces`, `POST /api/session/workspace`, `GET /api/projects`,
+`POST /api/projects`, and `GET /api/projects/:id`). Browser localStorage is not
+an authority for the project list. The root path remains accepted as a
+compatibility entry point for existing development bookmarks; new navigation
+uses `/dashboard`.
 
-The current deployment deliberately exposes one development workspace from the
-authenticated control-plane session. It does not pretend to offer workspace
-switching, membership management, invitations, or role administration. Those
-surfaces should be added only with server-enforced identity and authorization:
+Workspace choices come from server-side memberships. A user with no
+memberships is offered an explicit first-workspace creation flow rather than
+being attached to a bootstrap workspace. Invitations and role administration
+remain future work. All workspace surfaces use server-enforced identity and
+authorization:
 
 1. establish an authenticated browser session and resolve the current user;
 2. load workspaces through memberships, with server-side tenant scoping;
