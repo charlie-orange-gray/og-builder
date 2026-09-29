@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import ProjectLoader from '@/ProjectLoader';
 import { ControlPlaneError, selfHostedClient, type ControlPlaneSession, type ProjectSummary } from '@/backend/self-hosted-client';
+import { getSelfHostedProjectId, isSelfHostedDashboardPath, SELF_HOSTED_DASHBOARD_PATH, selfHostedProjectPath } from './routes';
 
 const buttonClass = 'rounded border border-[var(--border-light)] bg-[var(--bg-surface)] px-3 py-2 text-sm disabled:opacity-50';
 
@@ -41,8 +42,8 @@ export default function SelfHostedRoot() {
     );
   }
 
-  const projectRoute = /^\/builder\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(window.location.pathname);
-  if (projectRoute) return <ProjectLoader />;
+  const projectId = getSelfHostedProjectId(window.location.pathname);
+  if (projectId) return <ProjectLoader />;
   return <ProjectList session={session} />;
 }
 
@@ -81,10 +82,21 @@ function ProjectList({ session }: { session: ControlPlaneSession }) {
     }
   };
 
+  const dashboardPath = SELF_HOSTED_DASHBOARD_PATH;
+  // `/` remains a compatible entry point for existing local development and
+  // old bookmarks; `/dashboard` is the explicit self-hosted route.
+  const isCanonicalRoute = isSelfHostedDashboardPath(window.location.pathname);
+
   return (
     <EntryShell>
-      <h1 className="text-2xl">Orange &amp; Gray projects</h1>
-      <p className="my-3 text-sm text-[var(--text-secondary)]">{session.workspace.name} · {session.user.name}</p>
+      <div className="flex items-baseline justify-between gap-4">
+        <h1 className="text-2xl">Orange &amp; Gray projects</h1>
+        {!isCanonicalRoute && <a className="text-sm underline" href={dashboardPath}>Open dashboard</a>}
+      </div>
+      <p className="my-3 text-sm text-[var(--text-secondary)]">
+        Workspace: <strong>{session.workspace.name}</strong> · {session.user.name}
+      </p>
+      <p className="mb-5 text-sm text-[var(--text-secondary)]">This self-hosted installation currently uses one development workspace.</p>
       <form onSubmit={create} className="my-6 flex flex-wrap items-end gap-3">
         <label className="flex flex-1 flex-col gap-2">Project name
           <input className="rounded border border-[var(--border-light)] bg-[var(--bg-surface)] px-3 py-2" value={name} onChange={event => setName(event.target.value)} required maxLength={200} />
@@ -95,11 +107,17 @@ function ProjectList({ session }: { session: ControlPlaneSession }) {
       {loading ? <p role="status">Loading projects…</p> : projects.length === 0 ? <p>No projects yet.</p> : (
         <ul className="space-y-3" aria-label="Server projects">
           {projects.map(project => <li key={project.projectId} className="rounded border border-[var(--border-light)] p-4">
-            <a href={`/builder/${project.projectId}`} aria-label={`Open ${project.name}`} className="underline">{project.name}</a>
+            <a href={selfHostedProjectPath(project.projectId)} aria-label={`Open ${project.name}`} className="underline">{project.name}</a>
             <span className="ml-3 text-sm text-[var(--text-secondary)]">Revision {project.revision}</span>
+            {project.updatedAt && <time className="ml-3 text-sm text-[var(--text-secondary)]" dateTime={project.updatedAt}>Updated {formatDate(project.updatedAt)}</time>}
           </li>)}
         </ul>
       )}
     </EntryShell>
   );
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }

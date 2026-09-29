@@ -10,6 +10,7 @@ export interface ProjectSummary {
   workspaceId: string;
   name: string;
   revision: number;
+  createdAt?: string;
   updatedAt: string;
 }
 

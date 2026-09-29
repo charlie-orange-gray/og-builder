@@ -267,10 +267,10 @@ function executeCommand(commandId: string): void {
       break;
     }
     case 'go-dashboard':
-      // Hard nav — `/dashboard` belongs to revyme-cloud, which React
-      // Router (basename="/builder") cannot reach. leaveBuilderTo flushes
-      // the mutation queue AND awaits the save, so the exit neither races
-      // the autosave nor trips the unload guard.
+      // Hard nav — `/dashboard` is owned by the Cloud dispatcher or the
+      // self-hosted editor shell, not the builder's basename route.
+      // leaveBuilderTo flushes the mutation queue AND awaits the save, so the
+      // exit neither races the autosave nor trips the unload guard.
       void leaveBuilderTo('/dashboard', 'command-palette');
       break;
     case 'create-remix-link':
