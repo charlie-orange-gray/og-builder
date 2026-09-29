@@ -53,6 +53,15 @@ describe('self-hosted project entry', () => {
     expect(selfHostedClient.listProjects).not.toHaveBeenCalled();
   });
 
+  it('serves the explicit dashboard route from the same server-backed project list', async () => {
+    window.history.replaceState({}, '', '/dashboard');
+    render(<SelfHostedRoot />);
+    expect((await screen.findByRole('link', { name: 'Open Photography' })).getAttribute('href')).toBe(`/builder/${id}`);
+    expect(screen.getByText('Agency')).toBeTruthy();
+    expect(screen.getByText(/Updated/)).toBeTruthy();
+    expect(selfHostedClient.listProjects).toHaveBeenCalledWith('workspace');
+  });
+
   it('reports failed creation and retains the entered project name', async () => {
     vi.mocked(selfHostedClient.createProject).mockRejectedValue(new Error('Project limit reached'));
     render(<SelfHostedRoot />);

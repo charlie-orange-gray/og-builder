@@ -131,9 +131,9 @@ export function LogoButton() {
         label: 'Go to Dashboard',
         onClick: () => {
           trace.action('left-header:logo-dashboard');
-          // Hard nav: `/dashboard` is owned by revyme-cloud (different
-          // app), reached via the dispatcher. React Router with
-          // basename="/builder" can't route there.
+          // Hard nav: `/dashboard` is owned by the Cloud dispatcher in Cloud
+          // mode, or by the self-hosted editor shell in self-hosted mode.
+          // React Router with basename="/builder" cannot own either exit.
           //
           // leaveBuilderTo, not a bare assignment: it flushes the mutation
           // queue AND awaits the backend save. Doing only the first left the
@@ -149,8 +149,9 @@ export function LogoButton() {
           trace.action('left-header:logo-account');
           // Route to the workspace-scoped account settings in the cloud
           // dashboard: `/dashboard?ws=<workspaceId>&view=settings:account`.
-          // `/dashboard` is owned by revyme-cloud, reached via the
-          // dispatcher (same hard-nav as "Go to Dashboard" above).
+          // Cloud reaches `/dashboard` through its dispatcher. In
+          // self-hosted mode the shell currently treats this as the single
+          // workspace entry point; future account settings need a server API.
           //
           // workspaceId is fetched per-click. Local mode (or any fetch
           // error) → null → the `ws` param is omitted and the cloud app

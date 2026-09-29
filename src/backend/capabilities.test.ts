@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolvePersistenceProvider } from './capabilities';
+import { resolveDashboardProvider, resolvePersistenceProvider } from './capabilities';
 
 afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
 
@@ -17,5 +17,14 @@ describe('persistence capabilities', () => {
     vi.stubEnv('VITE_SELF_HOSTED_PUBLISH', 'true');
     vi.resetModules();
     expect((await import('./capabilities')).backendCapabilities.persistence).toBe('local');
+  });
+
+  it.each([
+    [false, 'local', 'local'],
+    [false, 'self-hosted', 'self-hosted'],
+    [true, 'self-hosted', 'cloud'],
+    [true, 'cloud', 'cloud'],
+  ] as const)('cloud=%s persistence=%s selects dashboard %s', (cloud, persistence, expected) => {
+    expect(resolveDashboardProvider(cloud, persistence)).toBe(expected);
   });
 });

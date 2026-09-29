@@ -34,7 +34,12 @@ The Phase 1 branch selects persistence once through `backendCapabilities`: Cloud
 
 The control plane now has server-side Git and Docker staging provider seams. Local development creates/reuses a per-site bare repository, publishes the exact materialized tree to `staging`, verifies the commit SHA, builds an immutable full-SHA image when enabled, starts a blue/green candidate, checks `/healthz`, and switches the staging route only after health passes. A controlled Nginx provider now validates generated host routes, runs `nginx -t`, reloads atomically, and restores the previous route on failure. The GitHub App provider is implemented and credential-gated; production promotion remains proven on the local/GitHub-compatible provider boundary. Runtime uploads remain outside disposable containers.
 
-The ignored `.env.local` still contains the original Publish flag and API URL; it was not silently switched to persistence. See [SELF_HOSTED_PERSISTENCE.md](./SELF_HOSTED_PERSISTENCE.md) for explicit proof commands with publishing disabled. Both repositories pin Node `22.23.2`.
+The ignored `.env.local` used for local self-hosted development contains the
+explicit persistence and Publish flags plus the local API URL. Production
+builder builds must source the same non-secret Vite flags from a server-side
+deployment configuration outside the checkout. See
+[SELF_HOSTED_PERSISTENCE.md](./SELF_HOSTED_PERSISTENCE.md) for explicit proof
+commands. Both repositories pin Node `22.23.2`.
 
 ## Current Branch
 
@@ -355,6 +360,29 @@ publish/persistence contracts were rechecked against the new ProjectFS
 branching and autosave behavior. Do not start a real Framer migration until a
 separate implementation plan and review are approved.
 
+## Self-hosted dashboard — 2026-09-29
+
+- Self-hosted dashboard: **IMPLEMENTED** (`/dashboard`), with server-backed
+  project list, create, open, workspace context, revision, and update time.
+- Self-hosted server project list/create/open: **IMPLEMENTED** through the
+  existing `SelfHostedClient` and control-plane project APIs. Browser
+  localStorage is not authoritative in this mode.
+- Editor → dashboard and dashboard → exact `/builder/<project-id>` navigation:
+  **IMPLEMENTED**. Existing Cloud and standalone/local routing remains
+  unchanged.
+- Real authentication: **NOT IMPLEMENTED**. The current development session
+  is a local proof mechanism and must not be presented as secure multi-user
+  authentication.
+- Workspace invitations: **NOT IMPLEMENTED**.
+- Multi-user permission enforcement: **NOT IMPLEMENTED** as a product
+  workflow; server-side project role checks remain the authority for existing
+  persistence APIs.
+- The ignored `.env.local` enables `VITE_SELF_HOSTED_PERSISTENCE=true` for
+  local development and is not committed. Debian production builds must
+  provide `VITE_SELF_HOSTED_PERSISTENCE=true` and
+  `VITE_PUBLISH_ENABLED=true` through explicit non-secret build configuration
+  outside Git.
+
 ## Last Updated
 
-2026-09-28
+2026-09-29

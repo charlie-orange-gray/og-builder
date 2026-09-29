@@ -19,6 +19,6 @@ subscribeBuilderTheme();
 // from one path become invisible to readers on the other.
 createRoot(document.getElementById('root')!).render(
   <Provider store={getDefaultStore()}>
-    {backendCapabilities.projectManagement ? <SelfHostedRoot /> : <ProjectLoader />}
+    {backendCapabilities.selfHostedDashboard ? <SelfHostedRoot /> : <ProjectLoader />}
   </Provider>
 );
