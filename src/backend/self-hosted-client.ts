@@ -2,8 +2,11 @@ import { isKnownProjectFormat, type ProjectData, type RevymeUser } from './types
 
 export interface ControlPlaneSession {
   user: RevymeUser;
-  workspace: { id: string; name: string };
+  workspace: WorkspaceSummary | null;
+  workspaces: WorkspaceSummary[];
 }
+
+export interface WorkspaceSummary { id: string; name: string; role: 'owner' | 'editor' | 'viewer' }
 
 export interface DeviceLoginStart {
   flowId: string;
@@ -141,6 +144,20 @@ export class SelfHostedClient {
 
   logout(): Promise<void> {
     return this.request('/auth/logout', { method: 'POST', body: '{}' });
+  }
+
+  async listWorkspaces(): Promise<WorkspaceSummary[]> {
+    const result = await this.request<{ workspaces: WorkspaceSummary[] }>('/workspaces');
+    return result.workspaces;
+  }
+
+  async createWorkspace(name: string): Promise<ControlPlaneSession> {
+    const result = await this.request<{ session: ControlPlaneSession }>('/workspaces', { method: 'POST', body: JSON.stringify({ name }) });
+    return result.session;
+  }
+
+  selectWorkspace(workspaceId: string): Promise<ControlPlaneSession> {
+    return this.request('/session/workspace', { method: 'POST', body: JSON.stringify({ workspaceId }) });
   }
 
   async listProjects(workspaceId: string): Promise<ProjectSummary[]> {
