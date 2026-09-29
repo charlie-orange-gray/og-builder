@@ -486,6 +486,29 @@ separate implementation plan and review are approved.
 
 2026-09-29
 
+## Workspace dashboard and HTTPS follow-up — 2026-09-29
+
+- Local feature branches `feature/self-hosted-workspace-dashboard` now contain
+  control-plane commit `150a4d2` and builder commit `6d8518d` (both unpushed).
+- Production GitHub login now resolves users by immutable provider subject and
+  derives workspace access from `workspace_memberships`. New users are not
+  silently attached to a configured bootstrap workspace; they can create their
+  first workspace explicitly. Workspace selection updates the authenticated
+  database session after server-side membership verification.
+- The self-hosted dashboard now provides a Revyme-styled workspace selector,
+  workspace-scoped project list/create/open flow, and first-workspace setup.
+- Control-plane validation passed: typecheck, build, and 65 tests (2 skipped).
+  Builder typecheck, build:all, and the nine focused dashboard tests passed.
+  The full builder suite remains environment-sensitive: 818 files pass and 13
+  existing autosave/MCP harness tests fail when run with the local
+  self-hosted environment enabled.
+- DNS diagnosis remains authoritative `NXDOMAIN` for
+  `revyme.chazmedia.co.uk` at both Cloudflare nameservers, despite the record
+  being visible in the Cloudflare UI. The TLS/Nginx path is therefore stopped;
+  no certificate, Nginx, service, or Debian deployment changes were made.
+- Do not push, merge, deploy, or enable HTTPS until the authoritative DNS
+  answer exists and the feature branches are reviewed.
+
 ## Open-source hostname and identity audit — 2026-09-29
 
 - No literal `revyme.chazmedia.co.uk` or `chazmedia.co.uk` references exist in
