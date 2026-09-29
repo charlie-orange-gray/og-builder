@@ -58,7 +58,7 @@ export default function SelfHostedRoot() {
   if (!session) {
     return (
       <EntryShell>
-        <h1 className="mb-4 text-2xl">Orange &amp; Gray projects</h1>
+        <h1 className="mb-4 text-2xl">Revyme projects</h1>
         {error && <p role="alert" className="mb-4">{error}</p>}
         {loginError && <p role="alert" className="mb-4">{loginError}</p>}
         {login ? <>
@@ -127,14 +127,14 @@ function ProjectList({ session, onLogout }: { session: ControlPlaneSession; onLo
   return (
     <EntryShell>
       <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-2xl">Orange &amp; Gray projects</h1>
+        <h1 className="text-2xl">Revyme projects</h1>
         {!isCanonicalRoute && <a className="text-sm underline" href={dashboardPath}>Open dashboard</a>}
       </div>
       <p className="my-3 text-sm text-[var(--text-secondary)] flex items-center gap-3">
         <span>Workspace: <strong>{session.workspace.name}</strong> · {session.user.name}</span>
         <button className="text-xs underline" onClick={() => void logout()}>Sign out</button>
       </p>
-      <p className="mb-5 text-sm text-[var(--text-secondary)]">This self-hosted installation currently uses one development workspace.</p>
+      <p className="mb-5 text-sm text-[var(--text-secondary)]">This self-hosted installation uses its configured workspace.</p>
       <form onSubmit={create} className="my-6 flex flex-wrap items-end gap-3">
         <label className="flex flex-1 flex-col gap-2">Project name
           <input className="rounded border border-[var(--border-light)] bg-[var(--bg-surface)] px-3 py-2" value={name} onChange={event => setName(event.target.value)} required maxLength={200} />
