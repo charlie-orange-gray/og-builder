@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractVariantBorderAfterRuleBody, parseBorderAfterCSS } from '@/editor/ui/border-utils';
-import { updateBorderOverlayStyle, removeBorderOverlayStyle, borderOverlaySelector } from '@/code/generation/generator-styles';
+import { removeBorderOverlayStyle, borderOverlaySelector } from '@/code/generation/generator-styles';
 
 // An imported master's border is a LITERAL ::after rule, per variant. The X
 // has to remove THAT rule — `varBorderMode` ("is a component file") sent the

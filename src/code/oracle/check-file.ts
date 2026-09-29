@@ -201,9 +201,6 @@ export function checkFile(
   // for direct/standalone checks → those new-node rules stay silent.
   const existingDataIds = opts.existingDataIds;
   const v: OracleViolation[] = [];
-  // Computed once per file, not per style object: the walk is over the whole AST.
-  let fileBooleanProps: Set<string> | undefined;
-
   // ── tier 1 — SYNTAX ────────────────────────────────────────────────────────
   let ast: t.File;
   try {
@@ -218,7 +215,7 @@ export function checkFile(
       message: `The file does not parse: ${e.message ?? 'unknown parse error'}. Return the complete corrected file.`,
     }];
   }
-  fileBooleanProps = booleanPropNames(ast);
+  const fileBooleanProps = booleanPropNames(ast);
 
   // ── tier 2 — DIALECT ───────────────────────────────────────────────────────
 

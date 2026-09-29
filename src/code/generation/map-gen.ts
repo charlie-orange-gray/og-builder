@@ -4,12 +4,11 @@
 // CMS-nav links, and the enclosing-map lookups shared with the detach path.
 
 import { trace } from '@/shared/debug-trace';
-import { findJSXDataIdIndex, findJSXDataIdIndexFrom } from './generator-utils';
+import { findJSXDataIdIndex } from './generator-utils';
 import { escapeRegExp } from '@/shared/regex-utils';
 import { findTagClose, findMatchingCloseTagIndex } from './generator-utils';
 import { findMatchingParen } from '../parsing/parse-utils';
 import { COLLECTION_MAP_CALL_RE, extractCollectionSlugSpan, itemVarFromCallbackParam } from './cms-gen';
-import { parseJSXToNodes } from '../parsing/parser';
 import { isRootMounted } from '@/code/project/cms-root-mount';
 
 /**

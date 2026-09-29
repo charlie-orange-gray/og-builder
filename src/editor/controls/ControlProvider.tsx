@@ -34,14 +34,14 @@ import { useAtomValue } from 'jotai';
 // only re-renders when a node/result it actually uses changes. Callbacks read
 // fresh via `getNodesSnapshot()`.
 import { selectedNodeAtom, selectedIdsAtom, isComponentInstanceInCache, getNodesSnapshot } from '@/code/stores/store';
-import { useNode, useLiveNode, useNodesComputed } from '@/code/stores/node-family';
+import { useLiveNode, useNodesComputed } from '@/code/stores/node-family';
 import { isReplicaViewportAtom, interactingViewportWidthAtom, interactingViewportIdAtom, isComponentVariantViewportAtom, activeComponentVariantAtom } from '@/code/stores/viewport-store';
 import { resolveParentVariantStyle } from './parent-variant-style';
 import { containerOverridesAtom, getOverrideBreakpoints, hasOverrideAtWidth, getOverridesAtWidth, clearShorthandSupersededLonghands, overrideAliasKeys } from '@/code/stores/container-query-store';
 import { isDefaultLocaleAtom, localeOverridesAtom } from '@/code/stores/locale-store';
 import { queueMutation, flushNow } from '@/code/mutation/mutation-queue';
 import { removeComponentPropProjectWide } from '@/code/features/remove-component-prop';
-import { updateNodeStyles, getContentRoot, getViewportPrefix, forceCanvasRender, parseRectCacheKey, vpIdFromPrefix } from '@/canvas/node-ops';
+import { updateNodeStyles, getContentRoot, getViewportPrefix, parseRectCacheKey, vpIdFromPrefix } from '@/canvas/node-ops';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
 import { detectValueSource, BORDER_LONGHANDS, type ValueSource } from '@/code/features/variable-ops';
 import { isComponentFileAtom } from '@/code/stores/store';

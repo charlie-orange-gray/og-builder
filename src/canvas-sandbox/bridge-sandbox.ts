@@ -40,13 +40,11 @@ import { initShapeEditHost } from './shape-edit-host';
 import {
   contentRoot,
   setContentRoot,
-  currentSandboxTransform,
   setCurrentSandboxTransform,
   emit, setCurrentRenderSeq } from './sandbox/sandbox-state';
 import {
   forceRemeasureAllRects,
   startSettleObserver,
-  emitSubtreeRefresh,
   scheduleRemeasureAllRects,
 } from './sandbox/rect-emit';
 import { emitAllMeasures, invalidateComputedCache } from './sandbox/measure';

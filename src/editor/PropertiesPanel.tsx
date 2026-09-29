@@ -2,7 +2,7 @@
 // All tools sit inside <ControlProvider> which handles style read/write routing.
 
 import React from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { selectedNodeAtom, selectedIdsAtom } from '../code/stores/store';
 import { useNodesComputed } from '../code/stores/node-family';
 import { activeFilePathAtom, isComponentFilePath, isIconSetFilePath, isPageClientFile, isPageServerFile, isDesignComponentFile, isVariantFile, isTemplateFilePath } from '../code/project/active-file-store';

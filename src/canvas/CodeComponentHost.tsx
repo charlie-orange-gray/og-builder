@@ -7,7 +7,7 @@ import { nodesAtom, codeAtom } from '@/code/stores/store';
 import { coerceScalar } from '@/code/values/value-eval';
 import { projectFS } from '@/code/project/project-fs';
 import { compileCodeComponent, clearCodeComponentCache } from './code-component-runtime';
-import { createRoot, type Root } from 'react-dom/client';
+import type { Root } from 'react-dom/client';
 import React from 'react';
 import { trace } from '@/shared/debug-trace';
 import { getContentRoot } from '@/canvas/node-ops';
