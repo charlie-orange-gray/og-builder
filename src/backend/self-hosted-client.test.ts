@@ -2,6 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { SelfHostedClient } from './self-hosted-client';
 
 describe('SelfHostedClient assets', () => {
+  it('starts and polls production login without accepting credentials in JSON', async () => {
+    const requests: string[] = [];
+    const client = new SelfHostedClient(async (input, init) => {
+      requests.push(`${String(input)}:${init?.method}`);
+      if (String(input).endsWith('/auth/github/device')) return new Response(JSON.stringify({ flowId: 'flow-id', verificationUri: 'https://github.com/login/device', userCode: 'ABCD-EFGH', expiresIn: 600, interval: 5 }), { status: 201 });
+      return new Response(JSON.stringify({ status: 'authenticated', session: { user: { id: 'u', name: 'Chaz', email: 'chaz@example.test' }, workspace: { id: 'w', name: 'Agency' } } }), { status: 200 });
+    });
+    const start = await client.startGitHubLogin();
+    expect(start.userCode).toBe('ABCD-EFGH');
+    expect(JSON.stringify(start)).not.toContain('token');
+    expect(await client.pollGitHubLogin(start.flowId)).toMatchObject({ status: 'authenticated' });
+    expect(requests).toEqual(['/api/auth/github/device:POST', '/api/auth/github/device/flow-id:POST']);
+  });
+
+  it('handles the empty response from logout', async () => {
+    let method = '';
+    const client = new SelfHostedClient(async (_input, init) => { method = init?.method ?? ''; return new Response(null, { status: 204 }); });
+    await expect(client.logout()).resolves.toBeUndefined();
+    expect(method).toBe('POST');
+  });
+
   it('registers browser files as project-scoped immutable asset URLs', async () => {
     let requestBody: Record<string, unknown> | undefined;
     const client = new SelfHostedClient(async (_input, init) => {

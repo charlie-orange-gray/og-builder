@@ -5,6 +5,18 @@ export interface ControlPlaneSession {
   workspace: { id: string; name: string };
 }
 
+export interface DeviceLoginStart {
+  flowId: string;
+  verificationUri: string;
+  userCode: string;
+  expiresIn: number;
+  interval: number;
+}
+
+export type DeviceLoginPoll =
+  | { status: 'pending'; retryAfter: number }
+  | { status: 'authenticated'; session: ControlPlaneSession };
+
 export interface ProjectSummary {
   projectId: string;
   workspaceId: string;
@@ -99,7 +111,7 @@ export class SelfHostedClient {
     });
     // Proxies may return an HTML/plain-text rejection. Its HTTP status still
     // distinguishes a definite rejected write from an uncertain acknowledgement.
-    const body = response.ok ? await response.json() : await response.json().catch(() => null);
+    const body = response.status === 204 ? undefined : response.ok ? await response.json() : await response.json().catch(() => null);
     if (!response.ok) {
       const error = body?.error;
       const message = typeof error?.message === 'string' ? error.message : `Request failed (${response.status}).`;
@@ -117,6 +129,18 @@ export class SelfHostedClient {
 
   startDevelopmentSession(): Promise<ControlPlaneSession> {
     return this.request('/dev/session', { method: 'POST', body: '{}' });
+  }
+
+  startGitHubLogin(): Promise<DeviceLoginStart> {
+    return this.request('/auth/github/device', { method: 'POST', body: '{}' });
+  }
+
+  pollGitHubLogin(flowId: string): Promise<DeviceLoginPoll> {
+    return this.request(`/auth/github/device/${encodeURIComponent(flowId)}`, { method: 'POST', body: '{}' });
+  }
+
+  logout(): Promise<void> {
+    return this.request('/auth/logout', { method: 'POST', body: '{}' });
   }
 
   async listProjects(workspaceId: string): Promise<ProjectSummary[]> {
