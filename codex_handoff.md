@@ -383,6 +383,54 @@ separate implementation plan and review are approved.
   `VITE_PUBLISH_ENABLED=true` through explicit non-secret build configuration
   outside Git.
 
+## Temporary Debian persistence proof — 2026-09-29
+
+- Exposure audit: the builder vhost listens on all local addresses, but the
+  host has only RFC1918 LAN (`192.168.7.24`) and Tailscale (`100.70.105.18`)
+  addresses; no public/global address or public route was present. LAN and
+  Tailscale host-header checks returned 200. The default vhost also answers
+  unrelated Host headers on the trusted LAN, so this is not a public-auth
+  boundary.
+- A timestamped root-only backup was created at
+  `/srv/og-platform/archive/dev-auth-proof-20260929-140715/control-plane.env.bak`
+  (`root:og-control-plane`, mode `0600`). For the proof only,
+  `/etc/og-control-plane/control-plane.env` used `NODE_ENV=development` and
+  `OG_DEV_AUTH=true`; only `og-control-plane` was restarted. The exact backup
+  was restored afterward, the config mode returned to `0640`, and the service
+  is now `NODE_ENV=production`, `OG_DEV_AUTH=false`.
+- Disposable server project created through the dashboard/editor:
+  `SELF-HOSTED-PERSISTENCE-PROOF-20260929`, id
+  `6000ee39-cfa5-4643-9fe6-c1d0b7d168cc`. The editor created a Text layer,
+  autosaved `Server-backed persistence proof`, and a hard refresh loaded that
+  saved layer from the server-backed project. Server metadata recorded current
+  revision `4`, workspace `00000000-0000-4000-8000-000000000002`, content hash
+  `sha256:c852ceed7fc137ac93e400f267b31b1abd2748a81277a305245435e2c1598aaf`,
+  object hash `sha256:9a1b526f00354efadfbcc85fb0cc3e71a2d0f9f8f2b5e92726407859fcffb429`,
+  and snapshot storage under
+  `/srv/og-platform/projects/6000ee39-cfa5-4643-9fe6-c1d0b7d168cc/`.
+  Snapshot contents were not displayed. No project-delete API exists, so this
+  disposable project remains and is marked for later cleanup.
+- Post-restore regression: `/healthz` 200, `/readyz` 200, `/api/session` 401,
+  `/api/dev/session` 404. Builder and dashboard returned 200; proof staging
+  and production health routes returned 200. `og-control-plane`, `og-deployer`,
+  `og-nginx-helper`, and Nginx remained active. `og-staging` remained
+  `internal=true`; `og-ingress` remained dedicated and non-internal. The
+  control-plane service still has no Docker group; `og-deployer` remains the
+  Docker authority. GitHub private-key metadata remained `root:og-platform`
+  mode `0640`; contents were never displayed.
+- The embedded browser cannot provide `crypto.randomUUID` over the plain HTTP
+  nip.io origin, so the browser proof used the same Debian vhost/backend via a
+  temporary localhost SSH/Host-header tunnel and the existing local sandbox
+  bundle. Those loopback processes were stopped after the proof; no Debian
+  builder, Nginx, deployer, database, network, or unrelated service was
+  changed.
+- This proof demonstrates server-side persistence only. It does not establish
+  real authentication, invitations, or production multi-user security.
+- Repository note: local `main`/`origin/main` is `cade6e649731fffa00aab8063243e4bb71644ee1`,
+  while current `upstream/main` is `cc20148194fccb7d6a7fe99d82d7d2e961de3fee`.
+  The latest upstream commit is not yet contained in builder main; no upstream
+  synchronization was performed during this proof.
+
 ## Last Updated
 
 2026-09-29
