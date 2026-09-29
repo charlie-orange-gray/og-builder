@@ -4,7 +4,7 @@ The editor now has an explicit `backendCapabilities.dashboard` capability. It
 is resolved at the backend boundary with the same precedence as persistence:
 
 - Revyme Cloud keeps the Cloud dashboard contract.
-- self-hosted persistence selects the Orange & Gray dashboard shell.
+- self-hosted persistence selects the Revyme self-hosted dashboard shell.
 - standalone/local mode keeps the existing single-project editor behavior.
 
 The self-hosted shell owns `/dashboard` and opens projects at

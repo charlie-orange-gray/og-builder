@@ -7,7 +7,7 @@ describe('SelfHostedClient assets', () => {
     const client = new SelfHostedClient(async (input, init) => {
       requests.push(`${String(input)}:${init?.method}`);
       if (String(input).endsWith('/auth/github/device')) return new Response(JSON.stringify({ flowId: 'flow-id', verificationUri: 'https://github.com/login/device', userCode: 'ABCD-EFGH', expiresIn: 600, interval: 5 }), { status: 201 });
-      return new Response(JSON.stringify({ status: 'authenticated', session: { user: { id: 'u', name: 'Chaz', email: 'chaz@example.test' }, workspace: { id: 'w', name: 'Agency' } } }), { status: 200 });
+      return new Response(JSON.stringify({ status: 'authenticated', session: { user: { id: 'u', name: 'Maintainer', email: 'maintainer@example.test' }, workspace: { id: 'w', name: 'Agency' } } }), { status: 200 });
     });
     const start = await client.startGitHubLogin();
     expect(start.userCode).toBe('ABCD-EFGH');

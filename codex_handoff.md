@@ -485,3 +485,20 @@ separate implementation plan and review are approved.
 ## Last Updated
 
 2026-09-29
+
+## Open-source hostname and identity audit — 2026-09-29
+
+- No literal `revyme.chazmedia.co.uk` or `chazmedia.co.uk` references exist in
+  the builder/control-plane source or active Debian Nginx configuration. The
+  editor origin, Nginx `server_name`, TLS paths, API origin allowlist, and
+  site base domains remain installation configuration.
+- Removed product-level Orange & Gray/CHAZ coupling from the self-hosted UI,
+  development identity labels, Git commit author defaults, and GitHub owner /
+  authentication fallbacks. GitHub installations now require explicit
+  `OG_GIT_OWNER`, `GITHUB_ALLOWED_OWNERS`, and `OG_AUTH_GITHUB_LOGIN` values.
+- Proof runbooks and architecture/handoff notes retain clearly labelled
+  Orange & Gray/CHAZ examples as deployment history; they are not runtime
+  defaults. Internal Docker labels and systemd unit names remain stable
+  deployment namespaces so existing Debian resources are not disturbed.
+- Genericity changes are local and not deployed; the live Debian hostname and
+  server-side identity configuration were left unchanged.

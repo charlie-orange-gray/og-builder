@@ -4,10 +4,10 @@ This proof uses `SelfHostedBackend` with a separate `og-control-plane` service, 
 
 ## Start the proof
 
-Use Node 22.23.2. The sibling service must exist at `/Users/chaz/og-control-plane` and have its dependencies installed:
+Use Node 22.23.2. The sibling service must exist at `<path-to>/og-control-plane` and have its dependencies installed:
 
 ```sh
-cd /Users/chaz/og-control-plane
+cd <path-to>/og-control-plane
 npm ci
 npm run dev:local
 ```
@@ -17,7 +17,7 @@ The local development launcher starts an isolated PostgreSQL process, applies mi
 In another terminal:
 
 ```sh
-cd /Users/chaz/builder
+cd <path-to>/og-builder
 npm ci
 VITE_REVYME_CLOUD=false VITE_SELF_HOSTED_PERSISTENCE=true VITE_SELF_HOSTED_PUBLISH=false VITE_API_URL=http://127.0.0.1:8090 npx vite --port 4334 --strictPort
 ```
@@ -25,7 +25,7 @@ VITE_REVYME_CLOUD=false VITE_SELF_HOSTED_PERSISTENCE=true VITE_SELF_HOSTED_PUBLI
 Start the canvas sandbox in another terminal if it is not already running:
 
 ```sh
-cd /Users/chaz/builder
+cd <path-to>/og-builder
 npx vite --config vite.sandbox.config.ts
 ```
 
@@ -34,7 +34,7 @@ Open `http://localhost:4334`, start the development session, and create a projec
 ## Automated proof
 
 ```sh
-cd /Users/chaz/builder
+cd <path-to>/og-builder
 npm run test:persistence
 ```
 
@@ -54,4 +54,4 @@ Newly uploaded design files are registered in the control plane's content-addres
 
 ## Development authentication boundary
 
-The seeded session is for local development only. The API checks session identity, workspace membership, write permissions, and allowed request origin on the server. Production refuses the development authentication bypass. Real user authentication and Debian deployment need their own implementation and validation before this service is exposed publicly.
+The seeded session is for local development only. The API checks session identity, workspace membership, write permissions, and allowed request origin on the server. Production refuses the development authentication bypass. Production installations must configure an explicit authentication provider and workspace policy; the browser never receives provider credentials.
