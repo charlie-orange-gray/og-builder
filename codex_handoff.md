@@ -437,8 +437,8 @@ separate implementation plan and review are approved.
   current `origin/main` (`cdaaaee9acc8a0ad5f4ce0dee3880521d4a27531`) and
   merged with `upstream/main` at `cc20148194fccb7d6a7fe99d82d7d2e961de3fee`.
   The merge had no conflicts. The branch currently ends at merge commit
-  `285edac` plus the focused lint cleanup `7e187bb`; it has not been merged
-  into `main` yet.
+  `285edac` plus the focused lint cleanup `7e187bb`; it was merged into
+  `main` by builder PR #17 as merge commit `9109586c2969f959157219a18747194542ced2c1`.
 - No self-hosted persistence, dashboard, publish-capability, Cloud, or
   standalone files were changed by the upstream merge. The lint cleanup only
   removed dead imports and changed one never-reassigned local binding in
@@ -453,8 +453,34 @@ separate implementation plan and review are approved.
   self-hosted `.env.local` causes 13 autosave guard failures because those
   standalone unit tests do not boot a server project; no product source was
   changed to mask that environment distinction.
-- Recommended next action: review and normally merge a sync PR from this
-  branch, then start the production-auth design from the updated `main`.
+- Recommended next action after the merged sync is to review the focused
+  production-auth branches below before any deployment.
+
+## Production authentication design — 2026-09-29
+
+- The narrow production path is GitHub App Device Flow, kept entirely on the
+  control plane. The server verifies the configured GitHub login, maps the
+  immutable provider subject to the existing `users` table and configured
+  workspace, then discards the GitHub tokens. The browser receives only the
+  HTTP-only `og_session` cookie.
+- Control-plane implementation branch:
+  `feat/production-github-device-auth-2026-09-29`. It adds migration 008 for
+  provider/subject identity columns, server-polled login, user-session
+  creation/revocation, production config, API documentation, and focused
+  tests. Builder implementation is on the same-named branch and adds the
+  GitHub login/poll UI, logout, client methods, and focused tests. Neither
+  branch has been published yet.
+- Required non-secret production configuration is
+  `OG_AUTH_GITHUB_LOGIN` and `OG_AUTH_WORKSPACE_ID`, alongside the existing
+  server-side `GITHUB_CLIENT_ID`. `OG_DEV_AUTH` remains false in production;
+  Docker, GitHub private keys, deployer, and Nginx credentials remain
+  server-side.
+- Validation so far: builder TypeScript passed; focused builder auth tests
+  passed (13); full builder tests passed in standalone test mode (823 files,
+  12,424 passed, 34 skipped, 5 todo); builder `build:all` passed. Control
+  plane typecheck, build, and tests passed (8 files, 61 passed, 2 skipped).
+- Do not deploy or create `chazzajoe-mac/chaz-photography` until both auth PRs
+  are reviewed/merged and production configuration is explicitly verified.
 
 ## Last Updated
 

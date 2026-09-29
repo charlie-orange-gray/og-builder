@@ -6,7 +6,7 @@ import { ControlPlaneError, selfHostedClient } from '@/backend/self-hosted-clien
 vi.mock('@/ProjectLoader', () => ({ default: () => <div>Loaded editor boundary</div> }));
 vi.mock('@/backend/self-hosted-client', async importOriginal => ({
   ...await importOriginal<typeof import('@/backend/self-hosted-client')>(),
-  selfHostedClient: { getSession: vi.fn(), startDevelopmentSession: vi.fn(), listProjects: vi.fn(), createProject: vi.fn() },
+  selfHostedClient: { getSession: vi.fn(), startDevelopmentSession: vi.fn(), startGitHubLogin: vi.fn(), pollGitHubLogin: vi.fn(), logout: vi.fn(), listProjects: vi.fn(), createProject: vi.fn() },
 }));
 
 const id = '00000000-0000-4000-8000-000000000001';
@@ -36,6 +36,17 @@ describe('self-hosted project entry', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start development session' }));
     await screen.findByRole('link', { name: 'Open Photography' });
     expect(selfHostedClient.startDevelopmentSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers the production GitHub Device Flow and enters the dashboard after approval', async () => {
+    vi.mocked(selfHostedClient.getSession).mockRejectedValue(new ControlPlaneError('Unauthenticated', 401, 'UNAUTHENTICATED'));
+    vi.mocked(selfHostedClient.startGitHubLogin).mockResolvedValue({ flowId: 'flow-id', verificationUri: 'https://github.test/login/device', userCode: 'ABCD-EFGH', expiresIn: 600, interval: 1 });
+    vi.mocked(selfHostedClient.pollGitHubLogin).mockResolvedValue({ status: 'authenticated', session });
+    render(<SelfHostedRoot />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with GitHub' }));
+    expect((await screen.findByRole('link', { name: 'Open GitHub verification' })).getAttribute('href')).toBe('https://github.test/login/device');
+    expect(await screen.findByRole('link', { name: 'Open Photography' })).toBeTruthy();
+    expect(selfHostedClient.pollGitHubLogin).toHaveBeenCalledWith('flow-id');
   });
 
   it('does not mount the editor or create a fallback project when session lookup fails', async () => {
