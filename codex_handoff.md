@@ -559,3 +559,27 @@ separate implementation plan and review are approved.
   backup, control-plane update/migration/restart, health/readiness verification,
   then atomic builder dist update. HTTPS remains blocked until authoritative
   DNS returns the configured editor hostname.
+
+## Debian workspace dashboard deployment — 2026-09-29
+
+- Deployed control-plane main `7c9966e9fe80d34d3ba0abb6bd689640cdb55860` and
+  builder main `310f13e7fc813802fc787cc2d4bef0fec4eea47e` from immutable local
+  bundles. Server-only environment files were preserved; temporary bundles were
+  removed after checkout.
+- Control-plane `npm ci`, typecheck, test, and build passed on Debian. The
+  migration runner applied migration 009; schema migration count is 9 and
+  there are currently 0 sessions with a null workspace. A timestamped backup
+  was created under `/srv/og-platform/backups/workspace-dashboard-20260929T180443Z/`.
+- Only `og-control-plane` was restarted. `og-deployer`, `og-nginx-helper`, and
+  Nginx remained active. `/healthz` and `/readyz` return 200; unauthenticated
+  workspace/session routes correctly return 401.
+- Builder dependencies and `build:all` passed. The static `dist` was replaced
+  with a retained rollback directory `dist-previous-20260929T180806Z`.
+  Builder root and `/dashboard` return 200.
+- Existing proof staging and production routes both return 200. `og-staging`
+  remains `internal=true`; `og-ingress` remains the dedicated non-internal
+  ingress network. `og-control-plane` has no Docker group; `og-deployer`
+  retains Docker authority and the `og-nginx` helper boundary.
+- The observed Docker container set remained unchanged, including unrelated
+  services. DNS, TLS, Nginx configuration, production promotion, and the
+  `chaz-photography` site were not changed.
