@@ -525,3 +525,37 @@ separate implementation plan and review are approved.
   deployment namespaces so existing Debian resources are not disturbed.
 - Genericity changes are local and not deployed; the live Debian hostname and
   server-side identity configuration were left unchanged.
+
+## Workspace dashboard Phase 0 completion — 2026-09-29
+
+- Control-plane PR #33 merged with normal merge commit
+  `7c9966e9fe80d34d3ba0abb6bd689640cdb55860`; builder PR #20 merged with
+  normal merge commit `2326c96ab7d59e55f1641d65b43bbed1822bbed0`.
+- Current `origin/main`: control plane `7c9966e9fe80d34d3ba0abb6bd689640cdb55860`,
+  builder `2326c96ab7d59e55f1641d65b43bbed1822bbed0`. Current
+  `upstream/main` is `cc20148194fccb7d6a7fe99d82d7d2e961de3fee` and is an
+  ancestor of builder main.
+- Control-plane validation after the authorization edge test: typecheck,
+  build, and 66 tests passed (2 skipped); `git diff --check` passed. Builder
+  typecheck, nine focused dashboard tests, build:all, scoped ESLint, and
+  `git diff --check` passed.
+- Full builder tests were run identically on origin/main and the feature
+  branch with the repository's current environment. Both produced the same
+  13 failures (12 autosave/MCP server-project guard failures plus one
+  autosave timer assertion), with identical test names and first error
+  messages; this is an environment-sensitive baseline, not a dashboard
+  regression.
+- Migration 009 only makes `sessions.workspace_id` nullable. It changes no
+  existing project, snapshot, index, default, or data rows. Existing sessions
+  retain their workspace; sessions without one use explicit first-workspace
+  provisioning. Rollback requires a forward migration/backup restore after
+  resolving null sessions, not a blind `SET NOT NULL`.
+- Authentication identity and Git publishing remain separate: GitHub provider
+  subject identifies the user, memberships authorize workspaces, and the
+  server-side `OG_GIT_OWNER`/`GITHUB_ALLOWED_OWNERS` configuration controls
+  repository publishing. No Debian deployment, migration, TLS, Nginx, DNS, or
+  proof-site state was changed.
+- Recommended next action is the separately prepared Debian sequence: database
+  backup, control-plane update/migration/restart, health/readiness verification,
+  then atomic builder dist update. HTTPS remains blocked until authoritative
+  DNS returns the configured editor hostname.
