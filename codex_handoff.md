@@ -431,6 +431,31 @@ separate implementation plan and review are approved.
   The latest upstream commit is not yet contained in builder main; no upstream
   synchronization was performed during this proof.
 
+## Latest upstream sync attempt — 2026-09-29
+
+- A focused branch, `chore/sync-upstream-2026-09-29`, was created from the
+  current `origin/main` (`cdaaaee9acc8a0ad5f4ce0dee3880521d4a27531`) and
+  merged with `upstream/main` at `cc20148194fccb7d6a7fe99d82d7d2e961de3fee`.
+  The merge had no conflicts. The branch currently ends at merge commit
+  `285edac` plus the focused lint cleanup `7e187bb`; it has not been merged
+  into `main` yet.
+- No self-hosted persistence, dashboard, publish-capability, Cloud, or
+  standalone files were changed by the upstream merge. The lint cleanup only
+  removed dead imports and changed one never-reassigned local binding in
+  upstream-touched files.
+- Validation: `npm ci` passed; `npx tsc --noEmit` passed; `npm run build:all`
+  passed; `git diff --check` passed; scoped ESLint for all upstream-touched
+  TypeScript/TSX/JS files passed with zero errors. The full repository lint
+  still reports the existing baseline errors outside this sync surface.
+- `VITE_SELF_HOSTED_PERSISTENCE=false VITE_SELF_HOSTED_PUBLISH=false
+  npm run test:run` passed: 823 files, 12,421 passed, 34 skipped, 5 todo.
+  Running the same suite without the override under the intentional local
+  self-hosted `.env.local` causes 13 autosave guard failures because those
+  standalone unit tests do not boot a server project; no product source was
+  changed to mask that environment distinction.
+- Recommended next action: review and normally merge a sync PR from this
+  branch, then start the production-auth design from the updated `main`.
+
 ## Last Updated
 
 2026-09-29
