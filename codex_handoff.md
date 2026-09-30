@@ -583,3 +583,30 @@ separate implementation plan and review are approved.
 - The observed Docker container set remained unchanged, including unrelated
   services. DNS, TLS, Nginx configuration, production promotion, and the
   `chaz-photography` site were not changed.
+
+## Production workspace and DNS audit — 2026-09-30
+
+- Read-only production inventory found three users: the seeded development
+  identity, the historical OG GitHub proof identity, and the authenticated
+  GitHub user `chazzajoe-mac` (provider subject metadata was inspected but no
+  tokens or session hashes were exposed). Two workspaces exist: the seeded
+  `Orange & Gray Development` workspace and the separate `OG GitHub Proof`
+  workspace.
+- The authenticated GitHub user currently has an owner membership in the
+  legacy `Orange & Gray Development` workspace. The workspace remains because
+  it is the seeded bootstrap workspace and contains the historical staging
+  projects plus `SELF-HOSTED-PERSISTENCE-PROOF-20260929` at revision 4. The
+  `og-site-proof` project remains in `OG GitHub Proof` at revision 3. No
+  workspace, membership, project, or session data was changed.
+- Authoritative UDP and TCP queries to both Cloudflare nameservers now return
+  `revyme.chazmedia.co.uk A 2.98.68.156` (TTL 300 observed). Cloudflare DoH,
+  Google DoH, and `dig +trace` agree. The active SOA serial observed was
+  `2416188345`; no DS record was observed. The earlier NXDOMAIN condition is
+  resolved.
+- The HTTPS gate is not yet met: external TCP checks to the public address
+  timed out, LAN port 80 is reachable on `192.168.7.24`, port 443 is closed,
+  and Nginx currently listens on port 80 only. No certificate exists and no
+  ACME/Cloudflare credential was found. Required external action is to verify
+  WAN TCP forwarding/firewall for `80 -> 192.168.7.24:80` and `443 ->
+  192.168.7.24:443`, without exposing control-plane port 8090. TLS, Nginx,
+  authentication, and real-login proof remain deferred until that gate passes.
