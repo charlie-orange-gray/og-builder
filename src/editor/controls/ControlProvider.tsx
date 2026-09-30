@@ -34,8 +34,8 @@ import { useAtomValue } from 'jotai';
 // only re-renders when a node/result it actually uses changes. Callbacks read
 // fresh via `getNodesSnapshot()`.
 import { selectedNodeAtom, selectedIdsAtom, isComponentInstanceInCache, getNodesSnapshot } from '@/code/stores/store';
-import { useLiveNode, useNodesComputed } from '@/code/stores/node-family';
-import { isReplicaViewportAtom, interactingViewportWidthAtom, interactingViewportIdAtom, isComponentVariantViewportAtom, activeComponentVariantAtom } from '@/code/stores/viewport-store';
+import { useNode, useLiveNode, useNodesComputed } from '@/code/stores/node-family';
+import { isReplicaViewportAtom, interactingViewportWidthAtom, interactingViewportRenderWidthAtom, interactingViewportIdAtom, isComponentVariantViewportAtom, activeComponentVariantAtom } from '@/code/stores/viewport-store';
 import { resolveParentVariantStyle } from './parent-variant-style';
 import { containerOverridesAtom, getOverrideBreakpoints, hasOverrideAtWidth, getOverridesAtWidth, clearShorthandSupersededLonghands, overrideAliasKeys } from '@/code/stores/container-query-store';
 import { isDefaultLocaleAtom, localeOverridesAtom } from '@/code/stores/locale-store';
@@ -174,6 +174,9 @@ export function ControlProvider({ children }: { children: ReactNode }) {
   const vpId = useAtomValue(interactingViewportIdAtom);
   const isReplica = useAtomValue(isReplicaViewportAtom);
   const vpWidth = useAtomValue(interactingViewportWidthAtom);
+  // Per-breakpoint VALUE ranges are judged at the width the tile is DRAWN at (a start-model
+  // breakpoint's start); `vpWidth` stays the KEY its overrides are stored under.
+  const drawnWidth = useAtomValue(interactingViewportRenderWidthAtom);
   const overrides = useAtomValue(containerOverridesAtom);
   // Component master variants: parallel to `isReplica`/`overrides` for
   // pages but sourced from `motionVariants[variantName]` instead of
@@ -349,7 +352,7 @@ export function ControlProvider({ children }: { children: ReactNode }) {
     }
 
     return result;
-  }, [baseStyles, isDefaultLocale, selectedId, localeOverrides, isReplica, vpWidth, overrides, isComponentVariantViewport, activeComponentVariant, isComponentFile, node]);
+  }, [baseStyles, isDefaultLocale, selectedId, localeOverrides, isReplica, vpWidth, drawnWidth, overrides, isComponentVariantViewport, activeComponentVariant, isComponentFile, node]);
 
   // Derive parent layout type for grid/flex child controls. EFFECTIVE for the
   // INTERACTING viewport: a replica @media can flip the parent's
@@ -403,6 +406,7 @@ export function ControlProvider({ children }: { children: ReactNode }) {
     'lineHeight', 'textAlign', 'textTransform', 'textDecoration', 'whiteSpace',
     'writingMode', 'textDecorationLine', 'textDecorationColor', 'textDecorationStyle',
     'textDecorationThickness', 'textUnderlineOffset', 'WebkitTextStroke',
+    'WebkitTextStrokeWidth', 'WebkitTextStrokeColor',
     'WebkitTextFillColor', 'WebkitBackgroundClip', 'backgroundClip',
   ]);
   const fitInnerIdRef = useRef(fitInnerNode?.id ?? null);
@@ -583,14 +587,14 @@ export function ControlProvider({ children }: { children: ReactNode }) {
       if (property === 'textContent' && node?.responsiveTextValues) {
         for (const b of Object.keys(node.responsiveTextValues).map(Number)) {
           const min = node.responsiveTextBands?.[b] ?? 0;
-          if (vpWidth <= b && vpWidth >= min) return true;
+          if (drawnWidth <= b && drawnWidth >= min) return true;
         }
       }
       const rsv = node?.responsiveStyleVariables?.[property];
       if (rsv) {
         for (const b of Object.keys(rsv).map(Number)) {
           const min = node?.responsiveStyleBands?.[property]?.[b] ?? 0;
-          if (vpWidth <= b && vpWidth >= min) return true;
+          if (drawnWidth <= b && drawnWidth >= min) return true;
         }
       }
     }
@@ -600,7 +604,7 @@ export function ControlProvider({ children }: { children: ReactNode }) {
     // override on mobile — see hasOverrideAtWidth's docstring for why.
     if (!isReplica || !vpWidth) return false;
     return hasOverrideAtWidth(overrides, selectedId, property, vpWidth);
-  }, [selectedId, overrides, isReplica, vpWidth, isComponentVariantViewport, activeComponentVariant, node]);
+  }, [selectedId, overrides, isReplica, vpWidth, drawnWidth, isComponentVariantViewport, activeComponentVariant, node]);
 
   const getOverrides = useCallback((property: string) => {
     if (!selectedId) return [];
@@ -619,7 +623,7 @@ export function ControlProvider({ children }: { children: ReactNode }) {
       if (isReplica && vpWidth && node?.responsiveTextValues) {
         for (const b of Object.keys(node.responsiveTextValues).map(Number).sort((a, c) => a - c)) {
           const min = node.responsiveTextBands?.[b] ?? 0;
-          if (vpWidth <= b && vpWidth >= min) {
+          if (drawnWidth <= b && drawnWidth >= min) {
             const branchVar = node.responsiveTextVariables?.[b];
             return branchVar
               ? { source: 'prop' as ValueSource, ref: branchVar }
@@ -700,7 +704,7 @@ export function ControlProvider({ children }: { children: ReactNode }) {
       for (const b of Object.keys(byW).map(Number).sort((a, c) => a - c)) {
         // BAND, not cascade: the override's pill shows on its own viewport only.
         const min = node?.responsiveStyleBands?.[property]?.[b] ?? 0;
-        if (vpWidth <= b && vpWidth >= min) return byW[b];
+        if (drawnWidth <= b && drawnWidth >= min) return byW[b];
       }
       return undefined;
     })();
@@ -710,10 +714,15 @@ export function ControlProvider({ children }: { children: ReactNode }) {
     const variableRef = responsiveVarRef ?? condVarRef
       ?? ((overriddenInVariant || overriddenInViewport) ? undefined : node?.styleVariables?.[property]);
     return detectValueSource(val, variableRef);
-  }, [styles, node, isComponentVariantViewport, activeComponentVariant, isReplica, vpWidth, hasOverride]);
+  }, [styles, node, isComponentVariantViewport, activeComponentVariant, isReplica, vpWidth, drawnWidth, hasOverride]);
 
-  const createVariable = useCallback((property: string, propName: string, defaultValue?: string, clearLonghands?: string[]) => {
+  const createVariable = useCallback((requestedProperty: string, propName: string, defaultValue?: string, clearLonghands?: string[]) => {
     if (!selectedId) return;
+    // `textContentFormatted` = the Content row's "Create formatted text variable": the TEXT routing below,
+    // but the component create binds an HTML prop (bold/italic/links survive) — on the primary, or on one
+    // variant only. Page variables stay plain text.
+    const formattedText = requestedProperty === 'textContentFormatted';
+    const property = formattedText ? 'textContent' : requestedProperty;
 
     // ─── TRANSITION variable (framer-motion transition, NOT a CSS style) ────────────────────────────────
     // A transition variable binds the framer-motion transition to a variable IDENTIFIER — per-variant native:
@@ -917,8 +926,8 @@ export function ControlProvider({ children }: { children: ReactNode }) {
       // variants keep their literal text. Otherwise it'd bind `{content}` on the shared child = every
       // variant. Works for both "Create Variable" (prop added) and "Set Variable" (existing prop).
       if (isComponentFile && isComponentVariantViewport && activeComponentVariant && activeComponentVariant !== 'default') {
-        trace.action('control:bind-text-variable-for-variant', { nodeId: selectedId, propName, variant: activeComponentVariant });
-        queueMutation({ type: 'bindTextVariableForVariant', nodeId: selectedId, variantName: activeComponentVariant, propName, propDefault: text });
+        trace.action('control:bind-text-variable-for-variant', { nodeId: selectedId, propName, variant: activeComponentVariant, formatted: formattedText });
+        queueMutation({ type: 'bindTextVariableForVariant', nodeId: selectedId, variantName: activeComponentVariant, propName, propDefault: text, ...(formattedText ? { formatted: true } : {}) });
         return;
       }
       if (!isComponentFile) {
@@ -929,8 +938,8 @@ export function ControlProvider({ children }: { children: ReactNode }) {
         queueMutation({ type: 'createTextPageVariable', nodeId: selectedId, propName, defaultValue: text });
         return;
       }
-      trace.action('control:create-text-variable', { nodeId: selectedId, propName, defaultValue: text });
-      queueMutation({ type: 'createTextVariable', nodeId: selectedId, propName, defaultValue: text });
+      trace.action('control:create-text-variable', { nodeId: selectedId, propName, defaultValue: text, formatted: formattedText });
+      queueMutation({ type: 'createTextVariable', nodeId: selectedId, propName, defaultValue: text, ...(formattedText ? { formatted: true } : {}) });
       return;
     }
     const value = defaultValue ?? styles[property] ?? '';
@@ -962,7 +971,7 @@ export function ControlProvider({ children }: { children: ReactNode }) {
         queueMutation({ type: 'setComponentPropNumberMeta', propName, meta: { min: reg.min ?? null, max: reg.max ?? null, step: reg.step ?? null, control: 'slider' } });
       }
     }
-  }, [selectedId, styles, node, isComponentFile, pageVariables, isComponentVariantViewport, activeComponentVariant, isReplica, vpWidth]);
+  }, [selectedId, styles, node, isComponentFile, pageVariables, isComponentVariantViewport, activeComponentVariant, isReplica, vpWidth, drawnWidth]);
 
   const removeVariable = useCallback((property: string, propName: string, defaultValue: string, deleteProp = false) => {
     if (!selectedId) return;
@@ -1124,7 +1133,7 @@ export function ControlProvider({ children }: { children: ReactNode }) {
     // normal single-node unbind below, prop kept) when not a component master or other nodes still use it.
     if (removeComponentPropProjectWide(selectedId, property, propName, defaultValue)) return;
     queueMutation({ type: 'removeVariable', nodeId: selectedId, styleProperty: property, propName, defaultValue, deleteProp });
-  }, [selectedId, isComponentFile, isComponentVariantViewport, activeComponentVariant, styles, pageVariables, node, isReplica, vpWidth, updateStyle]);
+  }, [selectedId, isComponentFile, isComponentVariantViewport, activeComponentVariant, styles, pageVariables, node, isReplica, vpWidth, drawnWidth, updateStyle]);
 
   // CMS-collection-template context. Two sources surface this:
   //

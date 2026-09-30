@@ -7,7 +7,7 @@ import { atom } from 'jotai';
 import type { ViewportConfig } from '@/shared/types';
 import { activeFilePathAtom, activeCodeAtom, isComponentFilePath, isIconSetFilePath } from '../project/active-file-store';
 import { projectVersionAtom, projectFS } from '../project/project-fs';
-import { parseCanvasConfig, updateCanvasConfigInCode } from '../project/canvas-config';
+import { parseCanvasConfig, updateCanvasConfigInCode, defaultViewports } from '../project/canvas-config';
 import { parseVariantConfig } from '../variants/variant-config';
 import { VIEWPORT_GAP, DEFAULT_VIEWPORT_WIDTH } from '@/shared/constants';
 import { trace } from '@/shared/debug-trace';
@@ -18,17 +18,16 @@ function computeDefaultPositions(configs: Omit<ViewportConfig, 'x' | 'y'>[]): Vi
   let currentX = 0;
   return configs.map(c => {
     const vp = { ...c, x: currentX, y: 0 };
-    currentX += c.width + VIEWPORT_GAP;
+    // Tiles are drawn at their start (designWidth) — space them by that, not the range's end.
+    currentX += (c.designWidth && c.designWidth > 0 ? c.designWidth : c.width) + VIEWPORT_GAP;
     return vp;
   });
 }
 
-/** Default viewport configs — used as initial value. */
-export const DEFAULT_VIEWPORTS: ViewportConfig[] = computeDefaultPositions([
-  { id: 'desktop', label: 'Desktop', width: DEFAULT_VIEWPORT_WIDTH, isPrimary: true, order: 0 },
-  { id: 'tablet', label: 'Tablet', width: 768, isPrimary: false, order: 1 },
-  { id: 'mobile', label: 'Mobile', width: 375, isPrimary: false, order: 2 },
-]);
+/** Default viewport configs — used as initial value and for a page without an @canvas block.
+ *  The new-page ladder (DEFAULT_BREAKPOINT_STARTS, START model): Desktop 1200+, Tablet 810–1199,
+ *  Mobile below 810. */
+export const DEFAULT_VIEWPORTS: ViewportConfig[] = computeDefaultPositions(defaultViewports());
 
 
 // ─── Dynamic viewport config (from @canvas block) ──────────────────────────

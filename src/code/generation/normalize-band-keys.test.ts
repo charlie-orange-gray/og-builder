@@ -95,6 +95,81 @@ describe('normalizeResponsiveBandKeys', () => {
     expect(normalizeResponsiveBandKeys(healed)).toBe(healed);
   });
 
+  it('a floored band and an unfloored band with the SAME max-width each keep their own floor', () => {
+    // Keyed by max-width alone, the unfloored block's floor (0) applied to the floored one too:
+    // its tablet-only rules (incl. a banded :lang rule) were flattened into the mobile band.
+    const bands = `
+    @media (max-width: 564px) and (min-width: 429.02px) {
+      [data-id="hero-1"] { color: green !important; }
+      :lang(fr) [data-id="hero-1"] { letter-spacing: 2px !important; }
+    }
+    @media (max-width: 564px) {
+      [data-id="frame-a"] { padding: 4px !important; }
+    }
+  `;
+    const out = normalizeResponsiveBandKeys(page(bands), { force: true });
+    const mobileBand = out.slice(out.indexOf('@media (max-width: 429px)'));
+    expect(mobileBand).toContain('padding: 4px');            // the cascading band reaches mobile
+    expect(mobileBand).not.toContain('color: green');       // the floored band does not
+    expect(mobileBand).not.toContain(':lang(fr)');
+    const tabletBand = out.slice(out.indexOf('@media (max-width: 564px)'), out.indexOf('@media (max-width: 429px)'));
+    expect(tabletBand).toContain('color: green');
+    expect(tabletBand).toContain('padding: 4px');
+    expect(tabletBand).toContain(':lang(fr) [data-id="hero-1"]');
+  });
+
+  it('flattens in SOURCE order — a later wider band beats an earlier narrower one, as it paints', () => {
+    const bands = `
+    @media (max-width: 429px) {
+      [data-id="hero-1"] { color: red !important; }
+    }
+    @media (max-width: 564px) {
+      [data-id="hero-1"] { color: green !important; }
+    }
+  `;
+    const out = normalizeResponsiveBandKeys(page(bands), { force: true });
+    const mobileBand = out.slice(out.indexOf('@media (max-width: 429px)'));
+    expect(mobileBand).toContain('color: green');           // both match at 429; the later one wins
+  });
+
+  it('START MODEL: a band off the ladder is judged at the width each tile is DRAWN at', () => {
+    // Desktop 1440+, Tablet 768–1439 (key 1439), Mobile < 768 (key 767). A typography preset writes
+    // its tiers as bands at 1199 (md, cascading) and 599 (sm): the 768 tablet tile shows md, the
+    // 375 mobile tile shows sm. Judged at the END widths (1439 / 767), mobile matched only md and
+    // tablet matched nothing — the stray pairing then handed tablet the sm tier.
+    const code = `'use client';
+
+/** @canvas {
+  "viewports": [
+    { "id": "desktop", "label": "Desktop", "width": 1440, "isPrimary": true, "order": 0 },
+    { "id": "tablet", "label": "Tablet", "width": 1439, "designWidth": 768, "isPrimary": false, "order": 1 },
+    { "id": "mobile", "label": "Mobile", "width": 767, "designWidth": 375, "isPrimary": false, "order": 2 }
+  ],
+  "positions": {}
+} */
+
+export default function Page() {
+  return <div data-id="root">
+    <p data-id="t">Hello</p>
+    <style>{\`
+    @media (max-width: 1199px) {
+      [data-id="t"] { font-size: var(--typo-h-size-md) !important; }
+    }
+    @media (max-width: 599px) {
+      [data-id="t"] { font-size: var(--typo-h-size-sm) !important; }
+    }
+  \`}</style>
+  </div>;
+}
+`;
+    const out = normalizeResponsiveBandKeys(code);
+    const tablet = out.slice(out.indexOf('@media (max-width: 1439px)'), out.indexOf('@media (max-width: 767px)'));
+    const mobile = out.slice(out.indexOf('@media (max-width: 767px)'));
+    expect(tablet).toContain('var(--typo-h-size-md)');
+    expect(mobile).toContain('var(--typo-h-size-sm)');
+    expect(mobile).not.toContain('var(--typo-h-size-md)');
+  });
+
   it('no-ops without an @canvas config or without band rules', () => {
     const noConfig = `export default function P() { return <div data-id="root"><style>{\`@media (max-width: 500px) { [data-id="x"] { color: red !important; } }\`}</style></div>; }`;
     expect(normalizeResponsiveBandKeys(noConfig)).toBe(noConfig);

@@ -9,6 +9,7 @@
 // was reachable by the agent, which could bind a list and then only say "the
 // 6 newest posts" in prose.
 
+import { viewportKeyWidth, viewportForArg } from './viewport-arg';
 import { z } from 'zod';
 import { getDefaultStore } from 'jotai';
 import type { AgentTool, AgentToolResult, ToolContext } from '@/ai/agent';
@@ -93,7 +94,7 @@ export const setListConfigTool: AgentTool = {
     sort: z.array(z.object({ field: z.string(), direction: z.enum(['asc', 'desc']) })).optional(),
     limit: z.number().optional().describe('max items, 0 = no limit'),
     offset: z.number().optional().describe('skip the first N'),
-    viewport: z.number().optional().describe('breakpoint width in px (e.g. 375) to scope the FILTER / SORT to that breakpoint only — the base stays; limit / offset are not per breakpoint'),
+    viewport: z.number().optional().describe('breakpoint width in px (e.g. 390) to scope the FILTER / SORT to that breakpoint only — the base stays; limit / offset are not per breakpoint'),
   },
   category: 'semantic',
   async execute(args, ctx) {
@@ -125,7 +126,7 @@ export const setListConfigTool: AgentTool = {
  *  sort) through `setListResponsiveConfig`, which upgrades the list to the
  *  config-as-data shape the Renderer resolves per viewport. */
 function setListConfigOnBreakpoint(args: Record<string, unknown>, ctx: ToolContext, list: { containerId: string; slug: string }): AgentToolResult {
-  const width = Number(args.viewport);
+  const width = viewportKeyWidth(args.viewport) ?? Number(args.viewport);
   const widths = getSortedBreakpointWidths();
   if (!widths.includes(width)) return fail(`No breakpoint of ${width}px. Breakpoints: ${widths.join(', ')}.`);
   const primary = Math.max(...widths);
