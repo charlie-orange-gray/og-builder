@@ -1,12 +1,9 @@
-import { isKnownProjectFormat, type ProjectData, type RevymeUser } from './types';
+import { isKnownProjectFormat, type ProjectData } from './types';
+import type { DomainSession, DomainWorkspace, WebsiteSummary } from './domain';
 
-export interface ControlPlaneSession {
-  user: RevymeUser;
-  workspace: WorkspaceSummary | null;
-  workspaces: WorkspaceSummary[];
-}
+export type ControlPlaneSession = DomainSession;
 
-export interface WorkspaceSummary { id: string; name: string; role: 'owner' | 'editor' | 'viewer' }
+export type WorkspaceSummary = DomainWorkspace;
 
 export interface DeviceLoginStart {
   flowId: string;
@@ -20,13 +17,13 @@ export type DeviceLoginPoll =
   | { status: 'pending'; retryAfter: number }
   | { status: 'authenticated'; session: ControlPlaneSession };
 
-export interface ProjectSummary {
+export interface ProjectSummary extends Omit<WebsiteSummary, 'effectiveRole' | 'id' | 'revision'> {
+  /** Wire-compatible alias retained for existing project-management callers. */
   projectId: string;
-  workspaceId: string;
-  name: string;
+  id?: string;
   revision: number;
-  createdAt?: string;
-  updatedAt: string;
+  role?: 'owner' | 'editor' | 'viewer';
+  effectiveRole?: WebsiteSummary['effectiveRole'];
 }
 
 export interface ServerProject extends ProjectSummary {
