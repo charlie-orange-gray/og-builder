@@ -22,8 +22,17 @@ export interface ProjectSummary extends Omit<WebsiteSummary, 'effectiveRole' | '
   projectId: string;
   id?: string;
   revision: number;
+  folderId?: string | null;
+  archivedAt?: string | null;
   role?: 'owner' | 'editor' | 'viewer';
   effectiveRole?: WebsiteSummary['effectiveRole'];
+}
+
+export interface FolderSummary {
+  id: string;
+  workspaceId: string;
+  name: string;
+  createdAt: string;
 }
 
 export interface ServerProject extends ProjectSummary {
@@ -157,9 +166,41 @@ export class SelfHostedClient {
     return this.request('/session/workspace', { method: 'POST', body: JSON.stringify({ workspaceId }) });
   }
 
-  async listProjects(workspaceId: string): Promise<ProjectSummary[]> {
-    const result = await this.request<{ projects: ProjectSummary[] }>(`/projects?workspaceId=${encodeURIComponent(workspaceId)}`);
+  async listProjects(workspaceId: string, options: { archived?: boolean; folderId?: string | null } = {}): Promise<ProjectSummary[]> {
+    const query = new URLSearchParams({ workspaceId });
+    if (options.archived) query.set('archived', 'true');
+    if (options.folderId !== undefined) query.set('folderId', options.folderId ?? 'none');
+    const result = await this.request<{ projects: ProjectSummary[] }>(`/projects?${query.toString()}`);
     return result.projects;
+  }
+
+  async listFolders(workspaceId: string): Promise<FolderSummary[]> {
+    const result = await this.request<{ folders: FolderSummary[] }>(`/workspaces/${encodeURIComponent(workspaceId)}/folders`);
+    return result.folders;
+  }
+
+  createFolder(workspaceId: string, name: string): Promise<FolderSummary> {
+    return this.request(`/workspaces/${encodeURIComponent(workspaceId)}/folders`, { method: 'POST', body: JSON.stringify({ name }) });
+  }
+
+  renameFolder(id: string, name: string): Promise<FolderSummary> {
+    return this.request(`/folders/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+  }
+
+  async deleteFolder(id: string): Promise<void> {
+    await this.request(`/folders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  duplicateProject(id: string, name?: string): Promise<ProjectSummary> {
+    return this.request(projectPath(id) + '/duplicate', { method: 'POST', body: JSON.stringify(name ? { name } : {}) });
+  }
+
+  archiveProject(id: string, archived: boolean): Promise<{ projectId: string; archivedAt: string | null }> {
+    return this.request(projectPath(id) + '/archive', { method: 'POST', body: JSON.stringify({ archived }) });
+  }
+
+  moveProject(id: string, folderId: string | null): Promise<{ projectId: string; folderId: string | null }> {
+    return this.request(projectPath(id) + '/folder', { method: 'POST', body: JSON.stringify({ folderId }) });
   }
 
   createProject(name: string, workspaceId?: string): Promise<ProjectSummary> {

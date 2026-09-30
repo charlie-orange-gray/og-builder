@@ -637,3 +637,26 @@ separate implementation plan and review are approved.
   WAN TCP forwarding/firewall for `80 -> 192.168.7.24:80` and `443 ->
   192.168.7.24:443`, without exposing control-plane port 8090. TLS, Nginx,
   authentication, and real-login proof remain deferred until that gate passes.
+
+## Self-hosted dashboard parity addendum — 2026-09-30
+
+- Phase A is implemented in review-only PRs: control-plane PR #34 at commit
+  `1d39490` and builder PR #25 at commit `78b25b5`. Neither has been merged or
+  deployed.
+- The control plane adds migration 010 for workspace-scoped folders and
+  nullable `projects.folder_id`/`archived_at`, plus authenticated list/create/
+  rename/delete folder routes, project move, archive/restore, and duplicate.
+  Duplicate creates a new revision-zero immutable snapshot, copies assets, and
+  records an audit event. Folder deletion rejects non-empty folders.
+- The builder client and dashboard now use those server contracts for folder
+  filtering, archived views, and a website overflow menu with open, copy link,
+  duplicate, rename, archive/restore, and move actions. Existing dashboard PR
+  #24 was left untouched; these commits are separate review branches.
+- Phase A validation: control-plane typecheck/build passed; 9 test files,
+  68 tests passed, 2 Docker tests skipped; builder focused tests 17 passed,
+  typecheck/build:all/scoped ESLint/diff-check passed. Full builder tests still
+  reproduce four unrelated autosave/local-backend/mutation-queue failures.
+- Remaining addendum slices are intentionally not implemented yet: persisted
+  profile/account deletion, email/GitHub auth expansion, TOTP, sessions,
+  API/MCP tokens, members/scopes/invites, workspace identity, and fonts. No
+  Debian, database, DNS, or deployment state was changed.
