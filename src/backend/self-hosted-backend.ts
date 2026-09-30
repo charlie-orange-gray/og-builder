@@ -108,7 +108,7 @@ export class SelfHostedBackend implements ProjectBackend {
   }
 
   async getWebsiteName(id: string): Promise<string> { return (await this.read(id)).name; }
-  async getWebsiteRole(id: string): Promise<'owner' | 'editor' | 'viewer'> { return (await this.read(id)).role; }
+  async getWebsiteRole(id: string): Promise<'owner' | 'admin' | 'editor' | 'viewer'> { return (await this.read(id)).role; }
   async getWebsiteWorkspaceId(id: string): Promise<string> { return (await this.read(id)).workspaceId; }
   async getWebsiteClosedSource(id: string): Promise<boolean> { await this.read(id); return false; }
   async getCredits(_workspaceId: string): Promise<number | null> { return null; }
