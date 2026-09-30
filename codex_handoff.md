@@ -660,3 +660,23 @@ separate implementation plan and review are approved.
   profile/account deletion, email/GitHub auth expansion, TOTP, sessions,
   API/MCP tokens, members/scopes/invites, workspace identity, and fonts. No
   Debian, database, DNS, or deployment state was changed.
+
+## Revyme role-permissions alignment — 2026-09-30
+
+- Role alignment is isolated in control-plane commit `087d0da` and builder
+  commit `19afca7` on separate review branches; neither is merged or deployed.
+- Roles are now Owner, Admin, Editor, and Viewer. Owner is never accepted by
+  normal invite links and remains protected from ordinary role changes.
+- Project scopes are server-enforced: an empty scope set means all websites;
+  populated rows restrict list/load/save/duplicate/rename/archive/move/assets,
+  staging, and deployment-status access to the selected projects.
+- Admin can manage workspace identity, members, roles, scopes, and invite links
+  but cannot transfer ownership. Editor retains scoped editing and staging
+  publishing. Viewer is read-only. Production promotion and rollback now
+  require Owner or Admin, preserving the established deployment boundary.
+- Added role/member/scope/invite-link UI labels matching Revyme: “Admin —
+  Manage workspace”, “Editor — Create and publish projects”, and “Viewer —
+  View only”; Owner rows are visibly protected.
+- Validation: control plane typecheck, 69 tests (2 skipped), build, and diff
+  check passed. Builder typecheck, 18 focused tests, build:all, scoped ESLint,
+  and diff check passed. No deployment or database migration execution occurred.
