@@ -2,6 +2,32 @@ import { describe, expect, it } from 'vitest';
 import { SelfHostedClient } from './self-hosted-client';
 
 describe('SelfHostedClient assets', () => {
+  it('uses workspace-scoped folder and website lifecycle endpoints', async () => {
+    const requests: Array<{ url: string; method: string; body?: unknown }> = [];
+    const client = new SelfHostedClient(async (input, init) => {
+      requests.push({ url: String(input), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const url = String(input);
+      if (url.endsWith('/folders') && (init?.method ?? 'GET') === 'GET') return new Response(JSON.stringify({ folders: [] }), { status: 200 });
+      if (init?.method === 'DELETE') return new Response(null, { status: 204 });
+      if (url.includes('/duplicate')) return new Response(JSON.stringify({ projectId: '22222222-2222-4222-8222-222222222222', name: 'Copy', workspaceId: 'workspace', revision: 0, folderId: null, archivedAt: null, updatedAt: 'now' }), { status: 201 });
+      return new Response(JSON.stringify({ id: 'folder-id', workspaceId: 'workspace', name: 'Sites', createdAt: 'now', projectId: 'project-id', folderId: null, archivedAt: null }), { status: 200 });
+    });
+    await client.listFolders('workspace');
+    await client.createFolder('workspace', 'Sites');
+    await client.renameFolder('folder-id', 'Client sites');
+    await client.deleteFolder('folder-id');
+    await client.duplicateProject('11111111-1111-4111-8111-111111111111', 'Copy');
+    await client.archiveProject('11111111-1111-4111-8111-111111111111', true);
+    await client.moveProject('11111111-1111-4111-8111-111111111111', null);
+    expect(requests.map(request => `${request.method} ${request.url}`)).toEqual([
+      'GET /api/workspaces/workspace/folders', 'POST /api/workspaces/workspace/folders', 'PATCH /api/folders/folder-id',
+      'DELETE /api/folders/folder-id', 'POST /api/projects/11111111-1111-4111-8111-111111111111/duplicate',
+      'POST /api/projects/11111111-1111-4111-8111-111111111111/archive', 'POST /api/projects/11111111-1111-4111-8111-111111111111/folder',
+    ]);
+    expect(requests[1].body).toEqual({ name: 'Sites' });
+    expect(requests[6].body).toEqual({ folderId: null });
+  });
+
   it('starts and polls production login without accepting credentials in JSON', async () => {
     const requests: string[] = [];
     const client = new SelfHostedClient(async (input, init) => {
