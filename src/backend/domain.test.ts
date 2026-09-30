@@ -18,7 +18,7 @@ describe('shared management-domain normalization', () => {
   });
 
   it('keeps unknown roles safe and accepts project wire aliases', () => {
-    expect(normalizeDomainRole('administrator')).toBe('owner');
+    expect(normalizeDomainRole('administrator')).toBe('viewer');
     expect(normalizeWebsiteSummary({ projectId: 'p1', name: 'Site', workspaceId: 'w1', updatedAt: 'now', role: 'viewer' })).toMatchObject({ id: 'p1', effectiveRole: 'viewer' });
   });
 });

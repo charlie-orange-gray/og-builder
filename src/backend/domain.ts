@@ -53,7 +53,7 @@ export function normalizeDomainUser(value: Omit<Partial<DomainUser>, 'name' | 'e
 }
 
 export function normalizeDomainRole(role: string | null | undefined): DomainRole {
-  return role === 'admin' || role === 'editor' || role === 'viewer' ? role : 'owner';
+  return role === 'owner' || role === 'admin' || role === 'editor' || role === 'viewer' ? role : 'viewer';
 }
 
 export function normalizeDomainWorkspace(workspace: (Partial<DomainWorkspace> & { id: string; name: string; role?: string }) | null | undefined): DomainWorkspace | null {
