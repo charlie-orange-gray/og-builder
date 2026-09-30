@@ -6,7 +6,7 @@ import { ControlPlaneError, selfHostedClient } from '@/backend/self-hosted-clien
 vi.mock('@/ProjectLoader', () => ({ default: () => <div>Loaded editor boundary</div> }));
 vi.mock('@/backend/self-hosted-client', async importOriginal => ({
   ...await importOriginal<typeof import('@/backend/self-hosted-client')>(),
-  selfHostedClient: { getSession: vi.fn(), startDevelopmentSession: vi.fn(), startGitHubLogin: vi.fn(), pollGitHubLogin: vi.fn(), logout: vi.fn(), listProjects: vi.fn(), createProject: vi.fn(), createWorkspace: vi.fn(), selectWorkspace: vi.fn() },
+  selfHostedClient: { getSession: vi.fn(), startDevelopmentSession: vi.fn(), startGitHubLogin: vi.fn(), pollGitHubLogin: vi.fn(), logout: vi.fn(), listProjects: vi.fn(), listMembers: vi.fn(), updateMember: vi.fn(), createProject: vi.fn(), createWorkspace: vi.fn(), selectWorkspace: vi.fn() },
 }));
 
 const id = '00000000-0000-4000-8000-000000000001';
@@ -122,5 +122,25 @@ describe('self-hosted project entry', () => {
     expect(await screen.findByRole('heading', { name: 'Account' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Security' }));
     expect(await screen.findByRole('heading', { name: 'Security' })).toBeTruthy();
+  });
+
+  it('shows Revyme role and scope labels while protecting Owner', async () => {
+    vi.mocked(selfHostedClient.listMembers).mockResolvedValue([
+      { userId: 'owner', name: 'Owner', email: 'owner@example.test', role: 'owner', scope: 'all', projectIds: [] },
+      { userId: 'admin', name: 'Admin', email: 'admin@example.test', role: 'admin', scope: 'specific', projectIds: [id] },
+    ]);
+    vi.mocked(selfHostedClient.listProjects).mockResolvedValue([{ projectId: id, name: 'Photography', workspaceId: 'workspace', revision: 3, updatedAt: '2026-09-09T00:00:00Z' }]);
+    render(<SelfHostedRoot />);
+    await screen.findByRole('link', { name: 'Open Photography' });
+    fireEvent.click(screen.getByRole('button', { name: /Agency/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Members' }));
+    expect(await screen.findByText('Owner')).toBeTruthy();
+    expect(screen.getAllByRole('option', { name: 'Admin — Manage workspace' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('option', { name: 'Editor — Create and publish projects' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('option', { name: 'Viewer — View only' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('combobox', { name: 'Role for Owner' }).hasAttribute('disabled')).toBe(true);
+    expect(selfHostedClient.listMembers).toHaveBeenCalledWith('workspace');
   });
 });

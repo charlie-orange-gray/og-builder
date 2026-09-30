@@ -77,7 +77,7 @@ export interface RevymeUser {
   isAdmin?: boolean;
 }
 
-type WebsiteRole = 'owner' | 'editor' | 'viewer';
+type WebsiteRole = 'owner' | 'admin' | 'editor' | 'viewer';
 
 export interface ProjectBackend {
   /** Get the currently authenticated user. Returns null if not authenticated. */

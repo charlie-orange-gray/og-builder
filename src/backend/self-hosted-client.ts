@@ -24,7 +24,7 @@ export interface ProjectSummary extends Omit<WebsiteSummary, 'effectiveRole' | '
   revision: number;
   folderId?: string | null;
   archivedAt?: string | null;
-  role?: 'owner' | 'editor' | 'viewer';
+  role?: 'owner' | 'admin' | 'editor' | 'viewer';
   effectiveRole?: WebsiteSummary['effectiveRole'];
 }
 
@@ -35,10 +35,19 @@ export interface FolderSummary {
   createdAt: string;
 }
 
+export interface WorkspaceMemberSummary {
+  userId: string;
+  name: string;
+  email: string;
+  role: 'owner' | 'admin' | 'editor' | 'viewer';
+  scope: 'all' | 'specific';
+  projectIds: string[];
+}
+
 export interface ServerProject extends ProjectSummary {
   snapshot: ProjectData;
   contentHash: string;
-  role: 'owner' | 'editor' | 'viewer';
+  role: 'owner' | 'admin' | 'editor' | 'viewer';
 }
 
 export interface SaveRequest {
@@ -179,6 +188,19 @@ export class SelfHostedClient {
     return result.folders;
   }
 
+  async listMembers(workspaceId: string): Promise<WorkspaceMemberSummary[]> {
+    const result = await this.request<{ members: WorkspaceMemberSummary[] }>(`/workspaces/${encodeURIComponent(workspaceId)}/members`);
+    return result.members;
+  }
+
+  updateMember(workspaceId: string, memberId: string, role: Exclude<WorkspaceMemberSummary['role'], 'owner'>, projectIds: string[] | null): Promise<WorkspaceMemberSummary> {
+    return this.request(`/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberId)}`, { method: 'PATCH', body: JSON.stringify({ role, projectIds }) });
+  }
+
+  createInviteLink(workspaceId: string, role: Exclude<WorkspaceMemberSummary['role'], 'owner'>, projectIds: string[] | null, expiresAt: string): Promise<{ id: string; workspaceId: string; role: Exclude<WorkspaceMemberSummary['role'], 'owner'>; expiresAt: string; token: string }> {
+    return this.request(`/workspaces/${encodeURIComponent(workspaceId)}/invite-links`, { method: 'POST', body: JSON.stringify({ role, projectIds, expiresAt }) });
+  }
+
   createFolder(workspaceId: string, name: string): Promise<FolderSummary> {
     return this.request(`/workspaces/${encodeURIComponent(workspaceId)}/folders`, { method: 'POST', body: JSON.stringify({ name }) });
   }
@@ -213,7 +235,7 @@ export class SelfHostedClient {
       !project.snapshot || !isKnownProjectFormat(project.snapshot.format) ||
       !project.snapshot.files || typeof project.snapshot.files !== 'object' || Array.isArray(project.snapshot.files) ||
       Object.values(project.snapshot.files).some(value => typeof value !== 'string') ||
-      !['owner', 'editor', 'viewer'].includes(project.role) || typeof project.contentHash !== 'string') {
+      !['owner', 'admin', 'editor', 'viewer'].includes(project.role) || typeof project.contentHash !== 'string') {
       throw new ControlPlaneError('The server returned an invalid project snapshot. Editing is blocked to protect the saved project.', 502, 'INVALID_SNAPSHOT');
     }
     return project;
