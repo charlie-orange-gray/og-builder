@@ -19,6 +19,14 @@ export type { Transform };
  */
 const ZOOM_END_DEBOUNCE_MS = 180;
 
+// Self-promoted descendants (a component root's perf isolation, a Marquee
+// track) keep their old bitmap after a zoom; the re-raster that fixes them
+// lives in ./reraster and runs INSIDE the canvas iframe (the sandbox's camera
+// settle) — the viewports are there, not in this document. The call below
+// covers any viewport rendered in the editor document itself.
+import { rerasterPromotedDescendants } from './reraster';
+export { rerasterPromotedDescendants };
+
 class TransformManager {
   private transform: Transform = { x: 200, y: 100, scale: 0.5 };
   private listeners: Set<() => void> = new Set();
@@ -159,6 +167,7 @@ class TransformManager {
         '[data-viewport]:not([data-overlay-portal])',
       );
       for (const el of settled) el.style.willChange = '';
+      rerasterPromotedDescendants(settled);
     }, ZOOM_END_DEBOUNCE_MS);
   }
 

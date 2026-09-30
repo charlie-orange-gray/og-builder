@@ -14,13 +14,15 @@ import { SELECTION_COLOR, COMPONENT_COLOR, isTextTag, isFitSize } from '@/shared
 import { interactingViewportIdAtom, viewportWidthsAtom, syncViewportWidths, viewportsConfigAtom, viewportPositionsAtom } from '@/code/stores/viewport-store';
 import { isDefaultLocaleAtom } from '@/code/stores/locale-store';
 import { applyViewportWidthChange } from '@/code/generation/viewport-width-rewrite';
+import { activeLadderIsStartModel, commitBreakpointStart } from '@/canvas/helpers/breakpoint-commit';
+import { startOf } from '@/code/project/breakpoint-ladder';
 import { findNodeRect, findGhostsForTemplate, getContentRoot, updateNodeStyles, findNodeComputedStyles, patchNodeStyles, getViewportPrefix, forceCanvasRender } from '@/canvas/node-ops';
 import { mirrorPrimaryViewportHeightToRoot } from '@/canvas/viewport-size-ops';
 import { makeGhostId } from '@/shared/ghost-id';
 import { updateVariantPosition } from '@/code/variants/variant-ops';
 import { projectFS } from '@/code/project/project-fs';
 import { syncQueueCode } from '@/code/mutation/mutation-queue';
-import { getScreenCornersById, getElementRotationById, cornersEqual, getHandlesFromDirection, cornersFromRect, getOppositeCorner, processZeroCrossing, updateDirectionAfterCrossing, nodeOrAncestorHasRotationOrSkewById, type ScreenCorners, type Direction } from '@/canvas/resize/geometry-utils';
+import { getScreenCornersById, getElementRotationById, cornersEqual, isDegenerateQuad, getHandlesFromDirection, cornersFromRect, getOppositeCorner, processZeroCrossing, updateDirectionAfterCrossing, nodeOrAncestorHasRotationOrSkewById, type ScreenCorners, type Direction } from '@/canvas/resize/geometry-utils';
 import { getTransformedPoint } from '@/canvas/canvas-math';
 import { startResize, applyAspectRatioLock } from '@/canvas/resize/ResizeManager';
 import { startRotate, parseRotationFromMatrix, mergeRotation } from '@/canvas/resize/RotateManager';
@@ -503,6 +505,23 @@ export default function SelectionOverlay({ onGripDragStart, onSnapGuidesChange }
         const oldVp = allViewportConfigs.find(v => v.id === resizedVpId);
         const oldWidth = oldVp?.width ?? newWidth;
 
+        // START MODEL: the dragged width is the breakpoint's new START (its tile width); one
+        // commit moves the next narrower breakpoint's end with it (breakpoint-ladder.ts) and
+        // writes the ladder. The drag dirtied the widths atom with live widths — the commit
+        // re-adopts the config's; an unchanged start just restores them.
+        const startModel = activeLadderIsStartModel();
+        if (startModel) {
+          const cfgVp = getDefaultStore().get(viewportsConfigAtom).find(v => v.id === resizedVpId);
+          if (cfgVp && startOf(cfgVp) !== newWidth) {
+            commitBreakpointStart(activeFilePath, resizedVpId, newWidth);
+          } else if (cfgVp) {
+            setViewportWidths(prev => {
+              const restored = { ...prev, [resizedVpId]: cfgVp.width };
+              syncViewportWidths(restored);
+              return restored;
+            });
+          }
+        } else
         // 2. Update viewport width atom + imperative sync for the generator
         setViewportWidths(prev => {
           // Band rules in the FILE are keyed by the CONFIG width — always
@@ -549,6 +568,10 @@ export default function SelectionOverlay({ onGripDragStart, onSnapGuidesChange }
         const primaryForCommit = allVpsForCommit.find(v => v.isPrimary) ?? allVpsForCommit[0];
         const isPrimaryResize = !!primaryForCommit && primaryForCommit.id === resizedVpId;
         setViewportsConfig(prev => prev.map(v => {
+          if (v.id === resizedVpId && startModel) {
+            // Start model: the ladder (widths + starts) was committed above — height only.
+            return newHeight > 0 ? { ...v, height: newHeight } : v;
+          }
           if (v.id === resizedVpId) {
             // Dragging the tile's edge DEFINES it, so the import's
             // `designWidth` hint goes: the tile renders at what was just
@@ -1146,6 +1169,9 @@ function GroupBoundingBox({ pairs, color }: { pairs: Array<{ id: string; vpId: s
     const { xHandle: initXH, yHandle: initYH } = getHandlesFromDirection(direction);
 
     for (const { id, vpId } of pairs) {
+      // Hidden nodes aren't in the group box, so the group resize doesn't move them either.
+      const quad = getScreenCornersById(id, vpId);
+      if (quad && isDegenerateQuad(quad)) continue;
       const computed = findNodeComputedStyles(id, vpId, ['width', 'height', 'left', 'top', 'transform']);
       const w = parseFloat(computed.width);
       const h = parseFloat(computed.height);
@@ -1381,10 +1407,15 @@ function GroupBoundingBox({ pairs, color }: { pairs: Array<{ id: string; vpId: s
       // corners ARE the rect corners, so this is an exact equivalent.
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       let found = false;
+      let measured = false;
 
       for (const { id, vpId } of pairs) {
         const corners = getScreenCornersById(id, vpId);
         if (!corners) continue;
+        measured = true;
+        // A HIDDEN node (display:none, or inside a hidden parent) measures as a zero box at the
+        // viewport origin — it takes no part in the group box.
+        if (isDegenerateQuad(corners)) continue;
         for (const pt of [corners.TL, corners.TR, corners.BR, corners.BL]) {
           minX = Math.min(minX, pt.x);
           minY = Math.min(minY, pt.y);
@@ -1402,6 +1433,10 @@ function GroupBoundingBox({ pairs, color }: { pairs: Array<{ id: string; vpId: s
           BL: { x: minX, y: maxY },
         };
         setGroupCorners(prev => cornersEqual(prev, newCorners) ? prev : newCorners);
+      } else if (measured) {
+        // Every selected node is hidden → nothing painted to enclose. (Unmeasured nodes keep the
+        // previous box instead — a cache miss mid-render must not flicker it away.)
+        setGroupCorners(null);
       }
 
       rafId = requestAnimationFrame(poll);
@@ -1423,6 +1458,9 @@ function GroupBoundingBox({ pairs, color }: { pairs: Array<{ id: string; vpId: s
     const storeNodes = getDefaultStore().get(nodesAtom);
     const elements: { id: string; vpPrefix: string; baseTransform: string; startRotation: number; liveTransform: string }[] = [];
     for (const { id, vpId } of pairs) {
+      // Hidden nodes aren't in the group box — the group rotate leaves them alone.
+      const quad = getScreenCornersById(id, vpId);
+      if (quad && isDegenerateQuad(quad)) continue;
       const startRotation = parseRotationFromMatrix(findNodeComputedStyles(id, vpId, ['transform']).transform);
       const baseTransform = storeNodes.get(id)?.styles?.transform || '';
       elements.push({ id, vpPrefix: getViewportPrefix(vpId), baseTransform, startRotation, liveTransform: baseTransform });

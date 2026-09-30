@@ -7,6 +7,7 @@ import { RevymeBackend } from './revyme-backend';
 import { SelfHostedBackend } from './self-hosted-backend';
 import type { ProjectBackend } from './types';
 export type { ProjectBackend, ProjectData, RevymeUser } from './types';
+export type { DomainRole, DomainSession, DomainUser, DomainWorkspace, WebsiteSummary } from './domain';
 
 export const backend: ProjectBackend = backendCapabilities.persistence === 'cloud'
   ? new RevymeBackend()

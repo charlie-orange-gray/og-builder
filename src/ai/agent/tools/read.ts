@@ -34,6 +34,7 @@
 // Both the prompt's "Current page tree" section and the get_node_tree tool
 // project through the SAME `projectNodeTree` — one dialect everywhere.
 
+import { drawnViewportWidths } from './viewport-arg';
 import { describeVariantAxis } from './components-more';
 import { z } from 'zod';
 import { getDefaultStore } from 'jotai';
@@ -42,7 +43,7 @@ import type { CanvasNode } from '@/code/parsing/parser';
 import { getNodesSnapshot, selectedIdsAtom } from '@/code/stores/store';
 import {
   interactingViewportIdAtom,
-  interactingViewportWidthAtom,
+  interactingViewportWidthAtom, interactingViewportRenderWidthAtom,
   viewportWidthsAtom,
   viewportsConfigAtom,
 } from '@/code/stores/viewport-store';
@@ -389,7 +390,7 @@ const store = getDefaultStore();
 
 /** The viewport argument's contract: an id ('desktop' | 'tablet' | 'mobile' |
  *  custom) OR a width in px (reverse-resolved to its viewport). */
-export const VIEWPORT_DESCRIBE = 'a viewport id (desktop/tablet/mobile or custom) OR a width in px (1440, 768, 375)';
+export const VIEWPORT_DESCRIBE = 'a viewport id (desktop/tablet/mobile or custom) OR a width in px — where the breakpoint starts, as list_viewports shows it (e.g. 1200, 810, 390)';
 
 const NODE_ID_DESCRIBE = 'data-id of the target node';
 
@@ -451,11 +452,11 @@ export const getActiveFileTool: AgentTool = {
 
 export const getViewportWidthTool: AgentTool = {
   name: 'get_viewport_width',
-  description: 'Returns the active viewport width in px (desktop/tablet/mobile resolved).',
+  description: 'Returns the active viewport width in px — where its breakpoint starts, the width its tile is drawn at (desktop/tablet/mobile resolved).',
   inputSchema: {},
   category: 'read',
   async execute() {
-    return ok({ width: store.get(interactingViewportWidthAtom) });
+    return ok({ width: store.get(interactingViewportRenderWidthAtom) });
   },
 };
 
@@ -562,7 +563,13 @@ export function resolveViewportQuery(
 
 /** Store-backed resolver for every layout observation tool. */
 export function resolveViewportArgs(raw: unknown): ResolvedViewport {
-  return resolveViewportQuery(raw, store.get(interactingViewportIdAtom), store.get(viewportWidthsAtom));
+  // Named and measured at the DRAWN width (a start-model breakpoint's start); its stored end
+  // names the same viewport.
+  const drawn = drawnViewportWidths();
+  const hit = resolveViewportQuery(raw, store.get(interactingViewportIdAtom), drawn);
+  if (hit.width !== null || !(typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw.trim())))) return hit;
+  const byEnd = viewportIdForWidth(Number(String(raw).trim()), store.get(viewportWidthsAtom));
+  return byEnd ? { id: byEnd.id, width: drawn[byEnd.id] ?? byEnd.width } : hit;
 }
 
 // Canonical definition lives in observation-epoch.ts (P6 T4); re-exported
@@ -617,7 +624,7 @@ function formatStylesLine(computed: Record<string, string>): string {
 export const getLayoutTool: AgentTool = {
   name: 'get_layout',
   description:
-    'Returns the measured bounding rects of every rendered node in a viewport — where elements ACTUALLY landed after CSS is applied (flex, container rules, …). One line per node: <id>  x:.. y:.. w:.. h:..  visible|hidden(display:none)|norect. Use it to verify spacing, alignment and stacking. Optional viewport: a viewport id (\'desktop\' (default), \'tablet\', \'mobile\', a custom id) OR a width in px (1440, 768, 375) — a width resolves to the viewport with that width. The output carries status ("ready" | "pending" | "unavailable") with a reason, plus epoch/coverage/unmeasured: status is "ready" only at 100 % coverage on a fresh epoch — a turn is not finished while status is not "ready".',
+    'Returns the measured bounding rects of every rendered node in a viewport — where elements ACTUALLY landed after CSS is applied (flex, container rules, …). One line per node: <id>  x:.. y:.. w:.. h:..  visible|hidden(display:none)|norect. Use it to verify spacing, alignment and stacking. Optional viewport: a viewport id (\'desktop\' (default), \'tablet\', \'mobile\', a custom id) OR a width in px — where the breakpoint starts, as list_viewports shows it (e.g. 1200, 810, 390) — a width resolves to the viewport with that width. The output carries status ("ready" | "pending" | "unavailable") with a reason, plus epoch/coverage/unmeasured: status is "ready" only at 100 % coverage on a fresh epoch — a turn is not finished while status is not "ready".',
   inputSchema: { viewport: z.union([z.string(), z.number()]).optional().describe(VIEWPORT_DESCRIBE) },
   category: 'read',
   async execute(args, ctx?: ToolContext) {

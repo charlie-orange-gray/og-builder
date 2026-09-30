@@ -8,6 +8,7 @@
 // rules, the Input tool's localized attrs, the Form State tool, the Fill
 // panel's video, the oracle the publish path runs.
 
+import { viewportKeyWidth, viewportForArg } from './viewport-arg';
 import { z } from 'zod';
 import { getDefaultStore } from 'jotai';
 import type { AgentTool, AgentToolResult, ToolContext } from '@/ai/agent';
@@ -48,10 +49,10 @@ export const setTextOnBreakpointTool: AgentTool = {
   name: 'set_text_on_breakpoint',
   description:
     'Different TEXT on one breakpoint — "on mobile the headline says just Plan & ship". The Content control\'s per-viewport text: the desktop copy stays the base, the breakpoint gets an override the text tool shows and edits. ' +
-    'viewport is the breakpoint width in px (375 for mobile); pass text "" to remove the override.',
+    'viewport is the breakpoint width in px (390 for mobile); pass text "" to remove the override.',
   inputSchema: {
     node_id: z.string(),
-    viewport: z.number().describe('breakpoint width in px, e.g. 375'),
+    viewport: z.number().describe('breakpoint width in px, e.g. 390'),
     text: z.string().describe('the text on that breakpoint; "" removes the override'),
   },
   category: 'semantic',
@@ -62,7 +63,7 @@ export const setTextOnBreakpointTool: AgentTool = {
     if (!TEXT_TAGS.has(node.type.replace(/^motion\./, '')) || !node.textContent) return fail(`"${nodeId}" is not a text element.`);
     const viewports = store.get(viewportsConfigAtom) as ViewportConfig[];
     const primary = viewports.find((v) => v.isPrimary) ?? viewports[0];
-    const vp = viewports.find((v) => v.width === Number(args.viewport));
+    const vp = viewportForArg(args.viewport, viewports);
     if (!vp) return fail(`No breakpoint of ${args.viewport}px. Breakpoints: ${viewports.map((v) => `${v.id} ${v.width}px`).join(', ')}.`);
     if (vp.id === primary.id) return fail(`${vp.width}px is the primary breakpoint — its text is the base: set_text.`);
     ctx.ensureCheckpoint();

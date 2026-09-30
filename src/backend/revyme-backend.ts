@@ -11,6 +11,7 @@
 
 import type { ProjectBackend, ProjectData, RevymeUser, WorkspaceFont } from './types';
 import { isKnownProjectFormat } from './types';
+import { normalizeDomainUser } from './domain';
 import { trace } from '@/shared/debug-trace';
 
 const API_URL = ((import.meta as ImportMeta & { env: Record<string, string> }).env?.VITE_API_URL ?? '').replace(/\/$/, '');
@@ -32,7 +33,7 @@ export class RevymeBackend implements ProjectBackend {
       if (!session?.user) return null;
       const { id, name, email, image, isAdmin } = session.user;
       trace.action('backend:get-user', { id, email, isAdmin: !!isAdmin });
-      return { id, name, email, image, isAdmin: !!isAdmin };
+      return normalizeDomainUser({ id, name, email, image, isAdmin: !!isAdmin });
     } catch (err) {
       trace.error('revyme-backend:get-user-error', { error: String(err) });
       return null;

@@ -217,6 +217,33 @@ npm run build:all
 git diff --check
 ```
 
+## Dashboard parity pass — 2026-09-30
+
+The isolated sync branch `chore/sync-upstream-dashboard-parity-2026-09-30`
+merged `upstream/main` at `22ebb3e` into the fork baseline with merge commit
+`d5087d4`; the work continues on
+`feature/revyme-self-hosted-dashboard-parity`. The sync resolved only the
+upstream mutation-queue and control-provider overlaps, preserving upstream
+behavior and the fork's capability seams. No Debian or control-plane files
+were changed.
+
+The dashboard parity feature is published in PR #24 at commit `6a72c83`.
+It adds a responsive Revyme-style workspace/website shell, real workspace
+switching and search, account/security/workspace settings, and a shared
+normalized user/session/workspace/website domain layer. Hosted-only billing,
+credits, fonts, invitations, API-token management, archive/folders, and
+realtime collaboration remain omitted or explicitly deferred until their
+self-hosted contracts exist. The existing immutable revision, If-Match,
+idempotency, snapshot, Git, Docker, staging, production, and rollback paths
+are unchanged.
+
+Focused dashboard/domain/client validation passes: 18 tests, TypeScript,
+scoped ESLint, `build:all`, and `git diff --check`. The complete upstream
+suite currently reports 12,572 passed, 36 skipped, 5 todo, and 17 existing
+failures across autosave/MCP/mutation/capability fixtures after the upstream
+sync; no feature-file failure was observed. Full-repository lint remains a
+pre-existing baseline failure (98 errors, 2,905 warnings).
+
 Phase 1 validation on 2026-09-09:
 
 - Editor: fresh `npm ci`, TypeScript, all three builds, and diff checks passed. Full `npm run test:run -- --maxWorkers=4`: 658 files, 10,342 passed, 1 skipped, 3 todo. Scoped ESLint: zero errors, 42 existing warnings in touched upstream files; new modules/tests clean.

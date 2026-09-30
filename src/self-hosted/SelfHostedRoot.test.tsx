@@ -24,7 +24,7 @@ describe('self-hosted project entry', () => {
     render(<SelfHostedRoot />);
     const link = await screen.findByRole('link', { name: 'Open Photography' });
     expect(link.getAttribute('href')).toBe(`/builder/${id}`);
-    expect(screen.getByRole('textbox', { name: 'Project name' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Website name' })).toBeTruthy();
     expect(selfHostedClient.listProjects).toHaveBeenCalledWith('workspace');
     expect(screen.queryByText('Loaded editor boundary')).toBeNull();
   });
@@ -76,12 +76,12 @@ describe('self-hosted project entry', () => {
   it('reports failed creation and retains the entered project name', async () => {
     vi.mocked(selfHostedClient.createProject).mockRejectedValue(new Error('Project limit reached'));
     render(<SelfHostedRoot />);
-    await screen.findByRole('textbox', { name: 'Project name' });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Project name' }), { target: { value: 'Music site' } });
-    fireEvent.click(screen.getByRole('button', { name: 'New project' }));
+    await screen.findByRole('textbox', { name: 'Website name' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Website name' }), { target: { value: 'Music site' } });
+    fireEvent.click(screen.getByRole('button', { name: '+ New Website' }));
     await waitFor(() => expect(selfHostedClient.createProject).toHaveBeenCalledWith('Music site', 'workspace'));
     expect((await screen.findByRole('alert')).textContent).toContain('Project limit reached');
-    expect((screen.getByRole('textbox', { name: 'Project name' }) as HTMLInputElement).value).toBe('Music site');
+    expect((screen.getByRole('textbox', { name: 'Website name' }) as HTMLInputElement).value).toBe('Music site');
   });
 
   it('switches between server-provided workspaces', async () => {
@@ -90,7 +90,8 @@ describe('self-hosted project entry', () => {
     vi.mocked(selfHostedClient.selectWorkspace).mockResolvedValue({ ...multiWorkspaceSession, workspace: { id: 'client', name: 'Client', role: 'editor' } });
     render(<SelfHostedRoot />);
     await screen.findByRole('link', { name: 'Open Photography' });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Current workspace' }), { target: { value: 'client' } });
+    fireEvent.click(screen.getByRole('button', { name: /Agency/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Client/ }));
     await waitFor(() => expect(selfHostedClient.selectWorkspace).toHaveBeenCalledWith('client'));
     expect(await screen.findByRole('heading', { name: 'Client' })).toBeTruthy();
   });
@@ -104,5 +105,22 @@ describe('self-hosted project entry', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Workspace name' }), { target: { value: 'Personal' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
     await waitFor(() => expect(selfHostedClient.createWorkspace).toHaveBeenCalledWith('Personal'));
+  });
+
+  it('filters websites in the selected workspace and exposes real settings sections', async () => {
+    vi.mocked(selfHostedClient.listProjects).mockResolvedValue([
+      { projectId: id, name: 'Photography', workspaceId: 'workspace', revision: 3, updatedAt: '2026-09-09T00:00:00Z' },
+      { projectId: `${id.slice(0, -1)}2`, name: 'Music', workspaceId: 'workspace', revision: 1, updatedAt: '2026-09-09T00:00:00Z' },
+    ]);
+    render(<SelfHostedRoot />);
+    await screen.findByRole('link', { name: 'Open Photography' });
+    fireEvent.change(screen.getByPlaceholderText('Search websites'), { target: { value: 'music' } });
+    expect(screen.queryByRole('link', { name: 'Open Photography' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Open Music' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Agency/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(await screen.findByRole('heading', { name: 'Account' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Security' }));
+    expect(await screen.findByRole('heading', { name: 'Security' })).toBeTruthy();
   });
 });
